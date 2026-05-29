@@ -1,2 +1,2 @@
-# Lavalyisto
+# LavayListo
 Sistema de ventas
