@@ -197,14 +197,119 @@ function AbonoModal({ venta, onSave, onClose }) {
   );
 }
 
+// ─── USUARIOS ──────────────────────────────────────────────────────
+const USUARIOS_DEFAULT = [
+  { id: 1, usuario: "admin", clave: "admin123", rol: "Administrador", nombre: "Administrador" },
+  { id: 2, usuario: "ana", clave: "1234", rol: "Empleada", nombre: "Ana García" },
+  { id: 3, usuario: "maria", clave: "1234", rol: "Empleada", nombre: "María López" },
+];
+
+// ─── LOGIN ─────────────────────────────────────────────────────────
+function LoginScreen({ onLogin }) {
+  const [usuario, setUsuario] = useState("");
+  const [clave, setClave] = useState("");
+  const [error, setError] = useState("");
+  const [showClave, setShowClave] = useState(false);
+  const usuarios = load("ll_usuarios", USUARIOS_DEFAULT);
+
+  const ingresar = () => {
+    const u = usuarios.find(u => u.usuario.toLowerCase() === usuario.toLowerCase().trim() && u.clave === clave);
+    if (!u) { setError("Usuario o clave incorrectos"); return; }
+    setError("");
+    onLogin(u);
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", background: "linear-gradient(135deg,#1a3c5e 0%,#2563a8 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, fontFamily: "'DM Sans',sans-serif" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=DM+Sans:wght@400;500;600;700&display=swap');* {box-sizing:border-box;margin:0;padding:0;}`}</style>
+      <div style={{ background: "#fff", borderRadius: 20, padding: "40px 32px", width: "100%", maxWidth: 380, boxShadow: "0 20px 60px rgba(0,0,0,.3)" }}>
+        <div style={{ textAlign: "center", marginBottom: 32 }}>
+          <div style={{ fontSize: 48, marginBottom: 8 }}>🫧</div>
+          <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 28, fontWeight: 700, color: "#1a3c5e" }}>
+            Lava<span style={{ color: "#4db6e4" }}>&</span>Listo
+          </div>
+          <div style={{ fontSize: 13, color: "#888", marginTop: 4 }}>Sistema de ventas</div>
+        </div>
+
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ display: "block", fontSize: 13, color: "#555", marginBottom: 6, fontWeight: 600 }}>👤 Usuario</label>
+          <input
+            style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1.5px solid #d0dce8", fontSize: 15, fontFamily: "'DM Sans',sans-serif", outline: "none", color: "#1a3c5e", background: "#f8fbfd" }}
+            placeholder="Ingresa tu usuario"
+            value={usuario}
+            onChange={e => { setUsuario(e.target.value); setError(""); }}
+            onKeyDown={e => e.key === "Enter" && ingresar()}
+            autoCapitalize="none"
+          />
+        </div>
+
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ display: "block", fontSize: 13, color: "#555", marginBottom: 6, fontWeight: 600 }}>🔒 Clave</label>
+          <div style={{ position: "relative" }}>
+            <input
+              type={showClave ? "text" : "password"}
+              style={{ width: "100%", padding: "12px 44px 12px 14px", borderRadius: 10, border: "1.5px solid #d0dce8", fontSize: 15, fontFamily: "'DM Sans',sans-serif", outline: "none", color: "#1a3c5e", background: "#f8fbfd" }}
+              placeholder="Ingresa tu clave"
+              value={clave}
+              onChange={e => { setClave(e.target.value); setError(""); }}
+              onKeyDown={e => e.key === "Enter" && ingresar()}
+            />
+            <button onClick={() => setShowClave(!showClave)}
+              style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", fontSize: 16, color: "#888" }}>
+              {showClave ? "🙈" : "👁️"}
+            </button>
+          </div>
+        </div>
+
+        {error && (
+          <div style={{ background: "#ffebee", color: "#c62828", padding: "10px 14px", borderRadius: 8, fontSize: 13, marginBottom: 14, fontWeight: 500, textAlign: "center" }}>
+            ❌ {error}
+          </div>
+        )}
+
+        <button
+          style={{ width: "100%", padding: "14px", background: "linear-gradient(135deg,#1a3c5e,#2563a8)", color: "#fff", border: "none", borderRadius: 12, fontSize: 16, fontWeight: 700, fontFamily: "'DM Sans',sans-serif", cursor: "pointer" }}
+          onClick={ingresar}>
+          Ingresar →
+        </button>
+
+        <div style={{ textAlign: "center", marginTop: 20, fontSize: 11, color: "#bbb" }}>
+          ¿Olvidaste tu clave? Contacta al administrador
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── MAIN APP ──────────────────────────────────────────────────────
 export default function LavaListo() {
+  const [sesion, setSesion] = useState(() => {
+    try { const s = sessionStorage.getItem("ll_sesion"); return s ? JSON.parse(s) : null; } catch { return null; }
+  });
+
+  const handleLogin = (usuario) => {
+    try { sessionStorage.setItem("ll_sesion", JSON.stringify(usuario)); } catch {}
+    setSesion(usuario);
+  };
+
+  const handleLogout = () => {
+    try { sessionStorage.removeItem("ll_sesion"); } catch {}
+    setSesion(null);
+  };
+
+  if (!sesion) return <LoginScreen onLogin={handleLogin} />;
+
+  return <AppContent sesion={sesion} onLogout={handleLogout} />;
+}
+
+function AppContent({ sesion, onLogout }) {
   const [tab,setTab]=useState("ventas");
   const [ventas,setVentas]=useState(()=>load(KEYS.ventas,[]));
   const [clientes,setClientes]=useState(()=>load(KEYS.clientes,[]));
   const [empleadas,setEmpleadas]=useState(()=>load(KEYS.empleadas,EMPLEADAS_DEFAULT));
   const [inventario,setInventario]=useState(()=>load(KEYS.inventario,INSUMOS_DEFAULT));
   const [servicios,setServicios]=useState(()=>load(KEYS.servicios,SERVICIOS_DEFAULT));
+  const [gastos,setGastos]=useState(()=>load("ll_gastos",[]));
   const [ticketVenta,setTicketVenta]=useState(null);
 
   useEffect(()=>save(KEYS.ventas,ventas),[ventas]);
@@ -212,8 +317,9 @@ export default function LavaListo() {
   useEffect(()=>save(KEYS.empleadas,empleadas),[empleadas]);
   useEffect(()=>save(KEYS.inventario,inventario),[inventario]);
   useEffect(()=>save(KEYS.servicios,servicios),[servicios]);
+  useEffect(()=>save("ll_gastos",gastos),[gastos]);
 
-  const pendientesCount=ventas.filter(v=>!estaPagada(v)).length;
+  const pendientesCount = ventas.filter(v => (!estaPagada(v) && !v.anulada) || (estaPagada(v) && !v.anulada && !v.checkMsgEntrega)).length;
 
   const addAbono=(f,abono)=>{
     setVentas(prev=>prev.map(v=>{
@@ -248,14 +354,18 @@ export default function LavaListo() {
     reader.readAsText(file);
   };
 
+  const esAdmin = sesion.rol === "Administrador";
   const tabs=[
     {id:"ventas",icon:"🧾",label:"Nueva Venta"},
     {id:"historial",icon:"📋",label:"Historial"},
     {id:"pendientes",icon:"⏳",label:"Pendientes",badge:pendientesCount},
-    {id:"reportes",icon:"📊",label:"Reportes"},
-    {id:"inventario",icon:"📦",label:"Inventario"},
+    ...(esAdmin?[{id:"reportes",icon:"📊",label:"Reportes"}]:[{id:"misventas",icon:"📊",label:"Mis Ventas"}]),
+    ...(esAdmin?[{id:"gastos",icon:"🛒",label:"Gastos"}]:[]),
+    ...(esAdmin?[{id:"inventario",icon:"📦",label:"Inventario"}]:[]),
     {id:"equipo",icon:"👩",label:"Equipo"},
-    {id:"config",icon:"⚙️",label:"Config"},
+    {id:"caja",icon:"💰",label:"Caja"},
+    ...(esAdmin?[{id:"config",icon:"⚙️",label:"Config"}]:[]),
+    ...(esAdmin?[{id:"usuarios",icon:"🔑",label:"Usuarios"}]:[]),
   ];
 
   return (
@@ -269,9 +379,14 @@ export default function LavaListo() {
       <div style={S.header}>
         <div style={S.headerInner}>
           <span style={S.logo}>🫧 Lava<span style={{color:"#4db6e4"}}>&</span>Listo</span>
-          <span style={{fontSize:12,color:"#a0c4da",fontFamily:"'DM Sans',sans-serif"}}>
-            {new Date().toLocaleDateString("es-MX",{weekday:"long",day:"numeric",month:"long"})}
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 12, color: "#a0c4da", fontFamily: "'DM Sans',sans-serif" }}>
+              👤 {sesion.nombre}
+            </span>
+            <button onClick={onLogout} style={{ background: "rgba(255,255,255,.15)", border: "none", borderRadius: 6, color: "#fff", fontSize: 11, padding: "4px 10px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
+              Salir
+            </button>
+          </div>
         </div>
       </div>
       <div style={S.tabBar}>
@@ -286,13 +401,17 @@ export default function LavaListo() {
         ))}
       </div>
       <div style={S.content}>
-        {tab==="ventas"&&<NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={setTicketVenta} servicios={servicios}/>}
-        {tab==="historial"&&<Historial ventas={ventas} setVentas={setVentas} empleadas={empleadas} setTicket={setTicketVenta} addAbono={addAbono}/>}
-        {tab==="pendientes"&&<Pendientes ventas={ventas} empleadas={empleadas} setTicket={setTicketVenta} addAbono={addAbono}/>}
-        {tab==="reportes"&&<Reportes ventas={ventas} empleadas={empleadas}/>}
-        {tab==="inventario"&&<Inventario inventario={inventario} setInventario={setInventario}/>}
-        {tab==="equipo"&&<Equipo empleadas={empleadas} setEmpleadas={setEmpleadas} ventas={ventas}/>}
-        {tab==="config"&&<Configuracion servicios={servicios} setServicios={setServicios} exportarDatos={exportarDatos} importarDatos={importarDatos} ventas={ventas} empleadas={empleadas}/>}
+        {tab==="ventas"&&<NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={setTicketVenta} servicios={servicios} sesion={sesion}/>}
+        {tab==="historial"&&<Historial ventas={esAdmin?ventas:ventas.filter(v=>String(v.empleadaId)===String(sesion.id))} setVentas={setVentas} empleadas={empleadas} setTicket={setTicketVenta} addAbono={addAbono} esAdmin={esAdmin} sesion={sesion}/>}
+        {tab==="pendientes"&&<Pendientes ventas={ventas} empleadas={empleadas} setTicket={setTicketVenta} addAbono={addAbono} esAdmin={esAdmin} setVentas={setVentas}/>}
+        {tab==="reportes"&&esAdmin&&<Reportes ventas={ventas} empleadas={empleadas}/>}
+        {tab==="misventas"&&!esAdmin&&<MisVentas ventas={ventas} sesion={sesion} empleadas={empleadas} setTicket={setTicketVenta}/>}
+        {tab==="inventario"&&esAdmin&&<Inventario inventario={inventario} setInventario={setInventario}/>}
+        {tab==="equipo"&&<Equipo empleadas={empleadas} setEmpleadas={setEmpleadas} ventas={ventas} esAdmin={esAdmin}/>}
+        {tab==="config"&&esAdmin&&<Configuracion servicios={servicios} setServicios={setServicios} exportarDatos={exportarDatos} importarDatos={importarDatos} ventas={ventas} empleadas={empleadas}/>}
+        {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} sesion={sesion}/>}
+        {tab==="gastos"&&esAdmin&&<Gastos gastos={gastos} setGastos={setGastos} sesion={sesion}/>}
+        {tab==="usuarios"&&esAdmin&&<GestionUsuarios/>}
       </div>
       {ticketVenta&&<TicketModal venta={ticketVenta} empleadas={empleadas} onClose={()=>setTicketVenta(null)}/>}
     </div>
@@ -464,7 +583,7 @@ function NuevaVenta({ ventas, setVentas, clientes, setClientes, empleadas, setTi
 }
 
 // ─── VENTA CARD ────────────────────────────────────────────────────
-function VentaCardItem({ v, empleadas, setTicket, addAbono, setVentas }) {
+function VentaCardItem({ v, empleadas, setTicket, addAbono, setVentas, esAdmin }) {
   const [showAbono,setShowAbono]=useState(false);
   const emp=empleadas.find(e=>e.id===v.empleadaId);
   const pendiente=saldoPendiente(v);
@@ -474,10 +593,13 @@ function VentaCardItem({ v, empleadas, setTicket, addAbono, setVentas }) {
   const toggleField=(field)=>setVentas&&setVentas(prev=>prev.map(vv=>vv.folio===v.folio?{...vv,[field]:!vv[field]}:vv));
   return (
     <>
-      <div style={{...S.ventaCard,borderLeft:`4px solid ${pagada?"#4caf50":"#ff9800"}`}}>
+      <div style={{...S.ventaCard,borderLeft:`4px solid ${v.anulada?"#9e9e9e":pagada?"#4caf50":"#ff9800"}`,opacity:v.anulada?0.7:1}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div>
-            <div style={{fontWeight:700,color:"#1a3c5e"}}>{v.clienteNombre}</div>
+            {esAdmin
+              ? <div style={{fontWeight:700,color:"#1a3c5e"}}>{v.clienteNombre}</div>
+              : <div style={{fontWeight:700,color:"#1a3c5e"}}>{v.folio}</div>
+            }
             <div style={{fontSize:11,color:"#888"}}>{v.folio} · {fmt(v.fecha)}</div>
             {emp&&<div style={{fontSize:11,color:"#4db6e4"}}>👩 {emp.nombre}</div>}
           </div>
@@ -493,6 +615,7 @@ function VentaCardItem({ v, empleadas, setTicket, addAbono, setVentas }) {
           {v.items.map((it,i)=><span key={i}>{it.label}{it.piezas>1?` ×${it.piezas}`:""}{i<v.items.length-1?" · ":""}</span>)}
         </div>
         <div style={{fontSize:12,color:"#555",marginTop:2}}>📅 Entrega: {fmtDate(v.entrega)}</div>
+        {v.anulada&&<div style={{background:"#ffebee",borderRadius:6,padding:"6px 10px",marginTop:6,fontSize:12,color:"#c62828"}}>❌ <strong>ANULADA</strong> — {v.motivoAnulacion} · {v.fechaAnulacion?fmtDate(v.fechaAnulacion):""}</div>}
         {abonos.length>0&&(
           <div style={{marginTop:8,background:"#f0faf4",borderRadius:8,padding:"8px 10px"}}>
             {abonos.map((ab,i)=>(
@@ -517,9 +640,15 @@ function VentaCardItem({ v, empleadas, setTicket, addAbono, setVentas }) {
             </label>
           </div>
         )}
-        <div style={{display:"flex",gap:6,marginTop:8}}>
+        <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
           <button style={S.btnTicket} onClick={()=>setTicket(v)}>🧾 Ticket</button>
           {!pagada&&<button style={{...S.btnTicket,background:"#fff3e0",color:"#e65100"}} onClick={()=>setShowAbono(true)}>💰 Registrar pago</button>}
+          {!v.anulada&&setVentas&&esAdmin&&<button style={{...S.btnTicket,background:"#ffebee",color:"#c62828"}} onClick={()=>{
+            const motivo=window.prompt("Motivo de anulación / nota de crédito:");
+            if(motivo===null) return;
+            setVentas(prev=>prev.map(vv=>vv.folio===v.folio?{...vv,anulada:true,motivoAnulacion:motivo,fechaAnulacion:new Date().toISOString()}:vv));
+          }}>❌ Anular</button>}
+          {v.anulada&&<div style={{...S.badge,background:"#ffebee",color:"#c62828",padding:"4px 10px"}}>❌ ANULADA</div>}
         </div>
       </div>
       {showAbono&&<AbonoModal venta={v} onSave={(abono)=>{addAbono(v.folio,abono);setShowAbono(false);}} onClose={()=>setShowAbono(false)}/>}
@@ -528,7 +657,7 @@ function VentaCardItem({ v, empleadas, setTicket, addAbono, setVentas }) {
 }
 
 // ─── HISTORIAL ─────────────────────────────────────────────────────
-function Historial({ ventas, setVentas, empleadas, setTicket, addAbono }) {
+function Historial({ ventas, setVentas, empleadas, setTicket, addAbono, esAdmin, sesion }) {
   const [filtPago,setFiltPago]=useState("Todos");
   const [filtEst,setFiltEst]=useState("Todos");
   const [filtSRI,setFiltSRI]=useState("Todos");
@@ -551,49 +680,168 @@ function Historial({ ventas, setVentas, empleadas, setTicket, addAbono }) {
       <h2 style={S.panelTitle}>Historial de Ventas</h2>
       <Card title="🔍 Filtros">
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-          <input style={S.input} placeholder="Buscar cliente o folio..." value={busq} onChange={e=>setBusq(e.target.value)}/>
-          <input type="month" style={S.input} value={filtFecha} onChange={e=>setFiltFecha(e.target.value)}/>
+          {esAdmin && <input style={S.input} placeholder="Buscar cliente o folio..." value={busq} onChange={e=>setBusq(e.target.value)}/>}
+          <input type="month" style={{...S.input,...(!esAdmin?{gridColumn:"1/-1"}:{})}} value={filtFecha} onChange={e=>setFiltFecha(e.target.value)}/>
           <select style={S.input} value={filtPago} onChange={e=>setFiltPago(e.target.value)}>
             <option>Todos</option>{PAGOS.map(p=><option key={p}>{p}</option>)}
           </select>
           <select style={S.input} value={filtEst} onChange={e=>setFiltEst(e.target.value)}>
             <option>Todos</option><option>Pagadas</option><option>Pendientes</option>
           </select>
-          <select style={S.input} value={filtSRI} onChange={e=>setFiltSRI(e.target.value)}>
+          {esAdmin && <select style={S.input} value={filtSRI} onChange={e=>setFiltSRI(e.target.value)}>
             <option>Todos</option><option>Facturadas</option><option>Sin factura</option>
-          </select>
-          <select style={S.input} value={filtEmp} onChange={e=>setFiltEmp(e.target.value)}>
+          </select>}
+          {esAdmin && <select style={S.input} value={filtEmp} onChange={e=>setFiltEmp(e.target.value)}>
             <option value="Todos">Todas las empleadas</option>
             {empleadas.map(e=><option key={e.id} value={String(e.id)}>{e.nombre}</option>)}
-          </select>
+          </select>}
         </div>
       </Card>
       <div style={{fontSize:12,color:"#888",marginBottom:8}}>
         {filtered.length} venta{filtered.length!==1?"s":""} — Total: ${filtered.reduce((a,v)=>a+v.total,0).toFixed(2)}
       </div>
       {filtered.length===0?<div style={S.empty}>No hay ventas con esos filtros</div>
-        :filtered.map(v=><VentaCardItem key={v.folio} v={v} empleadas={empleadas} setTicket={setTicket} addAbono={addAbono} setVentas={setVentas}/>)}
+        :filtered.map(v=><VentaCardItem key={v.folio} v={v} empleadas={empleadas} setTicket={setTicket} addAbono={addAbono} setVentas={setVentas} esAdmin={esAdmin}/>)}
     </div>
   );
 }
 
 // ─── PENDIENTES ────────────────────────────────────────────────────
-function Pendientes({ ventas, empleadas, setTicket, addAbono }) {
-  const pendientes=ventas.filter(v=>!estaPagada(v));
-  const totalPend=pendientes.reduce((a,v)=>a+saldoPendiente(v),0);
+function Pendientes({ ventas, empleadas, setTicket, addAbono, esAdmin, setVentas }) {
+  const [filtro, setFiltro] = useState("todos"); // todos | pago | retiro
+  const [busq, setBusq] = useState("");
+
+  const pendientes = ventas.filter(v => !estaPagada(v) && !v.anulada);
+
+  // Pendientes de PAGO (deben dinero)
+  const pendientePago = pendientes.filter(v => saldoPendiente(v) > 0);
+  // Pendientes de RETIRO (pagado pero no entregado aún — msg entrega no enviado)
+  const pendienteRetiro = ventas.filter(v => estaPagada(v) && !v.anulada && !v.checkMsgEntrega);
+
+  const mostrar = filtro === "pago" ? pendientePago
+    : filtro === "retiro" ? pendienteRetiro
+    : [...pendientes, ...pendienteRetiro.filter(v => estaPagada(v))];
+
+  const filtrados = mostrar.filter(v =>
+    !busq || v.clienteNombre?.toLowerCase().includes(busq.toLowerCase()) || v.folio.toLowerCase().includes(busq.toLowerCase())
+  );
+
+  const totalPorCobrar = pendientePago.reduce((a, v) => a + saldoPendiente(v), 0);
+
   return (
     <div style={S.panel}>
-      <h2 style={S.panelTitle}>⏳ Cuentas Pendientes</h2>
-      {pendientes.length===0?(
-        <div style={{...S.empty,paddingTop:40}}><div style={{fontSize:36,marginBottom:8}}>🎉</div><div>¡Todo al corriente!</div></div>
-      ):(
-        <>
-          <div style={{...S.kpiGrid,marginBottom:14}}>
-            <div style={{...S.kpi,borderLeft:"4px solid #ff9800"}}><div style={{fontSize:22}}>⏳</div><div><div style={{fontWeight:800,fontSize:18,color:"#ff9800"}}>{pendientes.length}</div><div style={{fontSize:12,color:"#1a3c5e",fontWeight:600}}>Órdenes pendientes</div></div></div>
-            <div style={{...S.kpi,borderLeft:"4px solid #e53935"}}><div style={{fontSize:22}}>💸</div><div><div style={{fontWeight:800,fontSize:18,color:"#e53935"}}>${totalPend.toFixed(2)}</div><div style={{fontSize:12,color:"#1a3c5e",fontWeight:600}}>Total por cobrar</div></div></div>
+      <h2 style={S.panelTitle}>⏳ Pendientes</h2>
+
+      {/* KPIs */}
+      <div style={S.kpiGrid}>
+        <div style={{ ...S.kpi, borderLeft: "4px solid #e53935", cursor: "pointer" }} onClick={() => setFiltro("pago")}>
+          <div style={{ fontSize: 22 }}>💸</div>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 18, color: "#e53935" }}>${totalPorCobrar.toFixed(2)}</div>
+            <div style={{ fontSize: 12, color: "#1a3c5e", fontWeight: 600 }}>Pendiente cobro</div>
+            <div style={{ fontSize: 11, color: "#888" }}>{pendientePago.length} órdenes</div>
           </div>
-          {pendientes.map(v=><VentaCardItem key={v.folio} v={v} empleadas={empleadas} setTicket={setTicket} addAbono={addAbono}/>)}
-        </>
+        </div>
+        <div style={{ ...S.kpi, borderLeft: "4px solid #ff9800", cursor: "pointer" }} onClick={() => setFiltro("retiro")}>
+          <div style={{ fontSize: 22 }}>📦</div>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 18, color: "#ff9800" }}>{pendienteRetiro.length}</div>
+            <div style={{ fontSize: 12, color: "#1a3c5e", fontWeight: 600 }}>Pendiente retiro</div>
+            <div style={{ fontSize: 11, color: "#888" }}>Listas para entregar</div>
+          </div>
+        </div>
+      </div>
+
+      {/* FILTROS */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        {[
+          { id: "todos", label: "📋 Todos" },
+          { id: "pago", label: "💸 Pendiente cobro" },
+          { id: "retiro", label: "📦 Pendiente retiro" },
+        ].map(f => (
+          <button key={f.id} style={{ ...S.pill, ...(filtro === f.id ? S.pillActive : {}), fontSize: 12 }}
+            onClick={() => setFiltro(f.id)}>{f.label}</button>
+        ))}
+      </div>
+
+      <input style={{ ...S.input, marginBottom: 12 }} placeholder="🔍 Buscar cliente o folio..."
+        value={busq} onChange={e => setBusq(e.target.value)} />
+
+      {filtrados.length === 0 ? (
+        <div style={{ ...S.empty, paddingTop: 30 }}>
+          <div style={{ fontSize: 36, marginBottom: 8 }}>🎉</div>
+          <div>{filtro === "retiro" ? "¡Todo entregado!" : filtro === "pago" ? "¡Todo cobrado!" : "¡Sin pendientes!"}</div>
+        </div>
+      ) : (
+        filtrados.map(v => {
+          const emp = empleadas.find(e => e.id === v.empleadaId);
+          const pendiente = saldoPendiente(v);
+          const pagada = estaPagada(v);
+          const abonos = v.abonos || [];
+          const totalAbonado = abonos.reduce((a, ab) => a + ab.monto, 0);
+          const [showAbono, setShowAbono] = useState(false);
+
+          const toggleField = (field) => setVentas && setVentas(prev =>
+            prev.map(vv => vv.folio === v.folio ? { ...vv, [field]: !vv[field] } : vv)
+          );
+
+          return (
+            <div key={v.folio}>
+              <div style={{ ...S.ventaCard, borderLeft: `4px solid ${pagada ? "#ff9800" : "#e53935"}` }}>
+                {/* BADGE TIPO */}
+                <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                  {!pagada && <div style={{ ...S.badge, background: "#ffebee", color: "#c62828" }}>💸 Pendiente cobro</div>}
+                  {pagada && !v.checkMsgEntrega && <div style={{ ...S.badge, background: "#fff3e0", color: "#e65100" }}>📦 Pendiente retiro</div>}
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: "#1a3c5e", fontSize: 15 }}>{v.clienteNombre}</div>
+                    <div style={{ fontSize: 11, color: "#888" }}>{v.folio} · {fmt(v.fecha)}</div>
+                    {emp && <div style={{ fontSize: 11, color: "#4db6e4" }}>👩 Registró: {emp.nombre}</div>}
+                    <div style={{ fontSize: 12, color: "#555", marginTop: 4 }}>
+                      {v.items.map((it, i) => <span key={i}>{it.label}{it.piezas > 1 ? ` ×${it.piezas}` : ""}{i < v.items.length - 1 ? " · " : ""}</span>)}
+                    </div>
+                    <div style={{ fontSize: 12, color: "#555", marginTop: 2 }}>📅 Entrega: {fmtDate(v.entrega)}</div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontWeight: 800, fontSize: 18, color: "#1a3c5e" }}>${v.total.toFixed(2)}</div>
+                    {!pagada && <div style={{ fontSize: 13, color: "#e53935", fontWeight: 700 }}>Debe: ${pendiente.toFixed(2)}</div>}
+                    {totalAbonado > 0 && <div style={{ fontSize: 11, color: "#2e7d32" }}>Abonado: ${totalAbonado.toFixed(2)}</div>}
+                  </div>
+                </div>
+
+                {/* CHECKLIST */}
+                <div style={{ display: "flex", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
+                  <label style={S.checkLabel}>
+                    <input type="checkbox" checked={v.checkMsgRetiro || false} onChange={() => toggleField("checkMsgRetiro")} />
+                    <span>📲 Msg retiro enviado</span>
+                  </label>
+                  <label style={S.checkLabel}>
+                    <input type="checkbox" checked={v.checkMsgEntrega || false} onChange={() => toggleField("checkMsgEntrega")} />
+                    <span>✅ Entregado al cliente</span>
+                  </label>
+                </div>
+
+                {/* BOTONES */}
+                <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                  <button style={S.btnTicket} onClick={() => setTicket(v)}>🧾 Ticket</button>
+                  {!pagada && (
+                    <button style={{ ...S.btnTicket, background: "#e8f5e9", color: "#2e7d32", fontWeight: 700 }}
+                      onClick={() => setShowAbono(true)}>
+                      💰 Cobrar
+                    </button>
+                  )}
+                </div>
+              </div>
+              {showAbono && (
+                <AbonoModal venta={v}
+                  onSave={(abono) => { addAbono(v.folio, abono); setShowAbono(false); }}
+                  onClose={() => setShowAbono(false)} />
+              )}
+            </div>
+          );
+        })
       )}
     </div>
   );
@@ -774,7 +1022,7 @@ function Inventario({ inventario, setInventario }) {
 }
 
 // ─── EQUIPO ────────────────────────────────────────────────────────
-function Equipo({ empleadas, setEmpleadas, ventas }) {
+function Equipo({ empleadas, setEmpleadas, ventas, esAdmin }) {
   const [nuevo,setNuevo]=useState({nombre:"",metaVentas:20,montoBonus:20});
   const [editId,setEditId]=useState(null);
   const [editData,setEditData]=useState({nombre:"",metaVentas:20,montoBonus:20});
@@ -827,13 +1075,13 @@ function Equipo({ empleadas, setEmpleadas, ventas }) {
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                     <div>
                       <div style={{fontWeight:700,fontSize:15}}>{e.nombre}</div>
-                      <div style={{fontSize:12,color:"#888"}}>{e.ventasMes} ventas · ${e.totalMes.toFixed(2)}</div>
-                      <div style={{fontSize:11,color:"#4db6e4"}}>Meta: {meta} ventas · Bono: ${bono}</div>
+                      <div style={{fontSize:12,color:"#888"}}>{e.ventasMes} ventas este mes</div>
+                      {esAdmin && <div style={{fontSize:11,color:"#4db6e4"}}>Meta: {meta} ventas · Bono: ${bono}</div>}
                     </div>
                     <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
-                      {ganoBono&&<div style={{...S.badge,background:"#fff8e1",color:"#f59e0b"}}>🌟 ${bono}</div>}
-                      <button style={S.btnSmall} onClick={()=>iniciarEdicion(e)}>✏️</button>
-                      <button style={{...S.btnSmall,background:e.activa?"#ffebee":"#e8f5e9",color:e.activa?"#c62828":"#2e7d32"}} onClick={()=>toggle(e.id)}>{e.activa?"Desactivar":"Activar"}</button>
+                      {ganoBono&&<div style={{...S.badge,background:"#fff8e1",color:"#f59e0b"}}>🌟 {esAdmin?`$${bono}`:"¡Bono!"}</div>}
+                      {esAdmin && <button style={S.btnSmall} onClick={()=>iniciarEdicion(e)}>✏️</button>}
+                      {esAdmin && <button style={{...S.btnSmall,background:e.activa?"#ffebee":"#e8f5e9",color:e.activa?"#c62828":"#2e7d32"}} onClick={()=>toggle(e.id)}>{e.activa?"Desactivar":"Activar"}</button>}
                     </div>
                   </div>
                   <div style={{marginTop:8}}>
@@ -846,14 +1094,14 @@ function Equipo({ empleadas, setEmpleadas, ventas }) {
           );
         })}
       </Card>
-      <Card title="➕ Agregar empleada">
+      {esAdmin && <Card title="➕ Agregar empleada">
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
           <input style={{...S.input,gridColumn:"1/-1"}} placeholder="Nombre completo" value={nuevo.nombre} onChange={e=>setNuevo({...nuevo,nombre:e.target.value})}/>
           <div><label style={S.label}>Meta ventas/mes</label><input type="number" style={S.input} value={nuevo.metaVentas} onChange={e=>setNuevo({...nuevo,metaVentas:e.target.value})}/></div>
           <div><label style={S.label}>Monto bono ($)</label><input type="number" style={S.input} value={nuevo.montoBonus} onChange={e=>setNuevo({...nuevo,montoBonus:e.target.value})}/></div>
         </div>
         <button style={{...S.btnPrimary,marginTop:10}} onClick={agregar}>Agregar empleada</button>
-      </Card>
+      </Card>}
     </div>
   );
 }
@@ -921,6 +1169,617 @@ function Configuracion({ servicios, setServicios, exportarDatos, importarDatos }
             )}
           </div>
         ))}
+      </Card>
+    </div>
+  );
+}
+
+// ─── CIERRE DE CAJA ────────────────────────────────────────────────
+function CierreCaja({ ventas, empleadas }) {
+  const hoy = new Date().toISOString().split("T")[0];
+  const APERTURA_KEY = "ll_apertura_" + hoy;
+
+  const [modo, setModo] = useState(() => {
+    try { return localStorage.getItem(APERTURA_KEY) ? "cierre" : "apertura"; } catch { return "apertura"; }
+  });
+  const [apertura, setApertura] = useState(() => {
+    try { const a = localStorage.getItem(APERTURA_KEY); return a ? JSON.parse(a) : null; } catch { return null; }
+  });
+
+  // APERTURA STATE
+  const [aperturaEmpleada, setAperturaEmpleada] = useState(empleadas[0]?.id || null);
+  const [fondoInicial, setFondoInicial] = useState("15.00");
+
+  // CIERRE STATE
+  const [empleadaId, setEmpleadaId] = useState(empleadas[0]?.id || null);
+  const [montoEfectivo, setMontoEfectivo] = useState("");
+  const [montoTransferencia, setMontoTransferencia] = useState("");
+  const [montoTarjeta, setMontoTarjeta] = useState("");
+  const [resultado, setResultado] = useState(null);
+
+  const registrarApertura = () => {
+    const datos = {
+      empleadaId: aperturaEmpleada,
+      empleadaNombre: empleadas.find(e => String(e.id) === String(aperturaEmpleada))?.nombre || "",
+      fondo: parseFloat(fondoInicial) || 15,
+      fecha: new Date().toISOString(),
+    };
+    try { localStorage.setItem(APERTURA_KEY, JSON.stringify(datos)); } catch {}
+    setApertura(datos);
+    setModo("cierre");
+
+    // Imprimir ticket de apertura
+    const w = window.open("", "_blank", "width=380,height=400");
+    w.document.write(`
+      <html><head><title>Apertura de Caja</title>
+      <style>body{font-family:sans-serif;padding:20px;max-width:320px;margin:0 auto;text-align:center}
+      h2{color:#1a3c5e}.divider{border-top:1px dashed #ccc;margin:12px 0}
+      .row{display:flex;justify-content:space-between;margin:6px 0;font-size:14px;text-align:left}
+      .big{font-size:22px;font-weight:800;color:#1a3c5e}</style></head>
+      <body>
+      <div style="font-size:36px">🫧</div>
+      <h2>Lava&Listo</h2>
+      <p><strong>APERTURA DE CAJA</strong></p>
+      <div class="divider"></div>
+      <div class="row"><span>Fecha</span><span>${new Date(datos.fecha).toLocaleString("es-MX")}</span></div>
+      <div class="row"><span>Abrió</span><span>${datos.empleadaNombre}</span></div>
+      <div class="divider"></div>
+      <p>Fondo inicial en caja:</p>
+      <div class="big">$${datos.fondo.toFixed(2)}</div>
+      <div class="divider"></div>
+      <p style="font-size:11px;color:#aaa">Lava&Listo · Sistema de ventas</p>
+      <script>window.print();window.close();</script>
+      </body></html>
+    `);
+    w.document.close();
+  };
+
+  const ventasHoy = ventas.filter(v => v.fecha.startsWith(hoy) && !v.anulada);
+  const ventasEmp = empleadaId === "todos"
+    ? ventasHoy
+    : ventasHoy.filter(v => String(v.empleadaId) === String(empleadaId));
+
+  const esperadoEfectivo = ventasEmp.flatMap(v => (v.abonos || []).filter(a => a.metodo === "Efectivo")).reduce((a, ab) => a + ab.monto, 0);
+  const esperadoTransferencia = ventasEmp.flatMap(v => (v.abonos || []).filter(a => a.metodo === "Transferencia")).reduce((a, ab) => a + ab.monto, 0);
+  const esperadoTarjeta = ventasEmp.flatMap(v => (v.abonos || []).filter(a => a.metodo === "Tarjeta")).reduce((a, ab) => a + ab.monto, 0);
+  const esperadoTotal = esperadoEfectivo + esperadoTransferencia + esperadoTarjeta;
+
+  const calcularCierre = () => {
+    const ef = parseFloat(montoEfectivo) || 0;
+    const tr = parseFloat(montoTransferencia) || 0;
+    const ta = parseFloat(montoTarjeta) || 0;
+    const fondo = apertura?.fondo || 15;
+    const contadoTotal = ef + tr + ta;
+    // Efectivo neto = lo contado menos el fondo que siempre queda
+    const efNeto = ef - fondo;
+    const esperadoEfConFondo = esperadoEfectivo + fondo;
+    const ventasReales = efNeto + tr + ta;
+    setResultado({
+      ef, tr, ta, contadoTotal, fondo, efNeto,
+      ventasReales,
+      difEf: efNeto - esperadoEfectivo,
+      difTr: tr - esperadoTransferencia,
+      difTa: ta - esperadoTarjeta,
+      difTotal: ventasReales - esperadoTotal,
+      esperadoEfConFondo,
+      fecha: new Date().toISOString(),
+      empleada: empleadas.find(e => String(e.id) === String(empleadaId))?.nombre || "Todas",
+      totalVentas: ventasEmp.length,
+      totalVentasVal: ventasEmp.reduce((a, v) => a + v.total, 0),
+    });
+  };
+
+  const DifBadge = ({ dif }) => (
+    <span style={{ fontWeight: 700, color: dif === 0 ? "#2e7d32" : dif > 0 ? "#1565c0" : "#c62828" }}>
+      {dif === 0 ? "✅ Cuadra" : dif > 0 ? `📈 Sobra $${dif.toFixed(2)}` : `⚠️ Falta $${Math.abs(dif).toFixed(2)}`}
+    </span>
+  );
+
+  return (
+    <div style={S.panel}>
+      <h2 style={S.panelTitle}>💰 Caja</h2>
+
+      {/* TABS APERTURA / CIERRE */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        <button style={{ ...S.pill, ...(modo === "apertura" ? S.pillActive : {}) }} onClick={() => setModo("apertura")}>🔓 Apertura</button>
+        <button style={{ ...S.pill, ...(modo === "cierre" ? S.pillActive : {}) }} onClick={() => setModo("cierre")}>🔒 Cierre</button>
+      </div>
+
+      {/* APERTURA */}
+      {modo === "apertura" && (
+        <div>
+          {apertura && (
+            <div style={{ ...S.alerta, background: "#e8f5e9", color: "#2e7d32" }}>
+              ✅ Caja ya abierta hoy por <strong>{apertura.empleadaNombre}</strong> con fondo de <strong>${apertura.fondo.toFixed(2)}</strong>
+            </div>
+          )}
+          <Card title="🔓 Apertura de caja">
+            <p style={{ fontSize: 13, color: "#555", marginBottom: 12 }}>Registra la apertura del día con el fondo inicial en caja.</p>
+            <label style={S.label}>Empleada que abre caja</label>
+            <select style={{ ...S.input, marginBottom: 10 }} value={aperturaEmpleada} onChange={e => setAperturaEmpleada(e.target.value)}>
+              {empleadas.filter(e => e.activa).map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
+            </select>
+            <label style={S.label}>💵 Fondo inicial en caja</label>
+            <input type="number" style={{ ...S.input, marginBottom: 14, fontSize: 18, fontWeight: 700 }}
+              value={fondoInicial} onChange={e => setFondoInicial(e.target.value)} />
+            <div style={{ background: "#e8f5fd", borderRadius: 8, padding: "10px 14px", marginBottom: 14, textAlign: "center" }}>
+              <div style={{ fontSize: 11, color: "#888" }}>Fondo que queda en caja</div>
+              <div style={{ fontSize: 24, fontWeight: 800, color: "#1a3c5e" }}>${parseFloat(fondoInicial || 0).toFixed(2)}</div>
+            </div>
+            <button style={S.btnPrimary} onClick={registrarApertura}>🔓 Registrar apertura e imprimir ticket</button>
+          </Card>
+        </div>
+      )}
+
+      {/* CIERRE */}
+      {modo === "cierre" && (
+        <div>
+          {apertura && (
+            <div style={{ background: "#e8f5fd", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 13 }}>
+              🔓 Abierta por <strong>{apertura.empleadaNombre}</strong> · Fondo: <strong>${apertura.fondo.toFixed(2)}</strong>
+            </div>
+          )}
+
+      <Card title="📋 Resumen del día">
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+          <div style={{ ...S.kpi, borderLeft: "4px solid #1a3c5e" }}>
+            <div style={{ fontSize: 20 }}>🧾</div>
+            <div><div style={{ fontWeight: 800, fontSize: 16, color: "#1a3c5e" }}>{ventasEmp.length}</div><div style={{ fontSize: 11, color: "#888" }}>Ventas hoy</div></div>
+          </div>
+          <div style={{ ...S.kpi, borderLeft: "4px solid #4caf50" }}> 
+            <div style={{ fontSize: 20 }}>💵</div>
+            <div><div style={{ fontWeight: 800, fontSize: 16, color: "#4caf50" }}>${(esperadoTotal + (apertura?.fondo || 0)).toFixed(2)}</div><div style={{ fontSize: 11, color: "#888" }}>Esperado en caja</div></div>
+          </div>
+        </div>
+        <div style={{ fontSize: 12, color: "#555", marginBottom: 4 }}>💵 Efectivo esperado: <strong>${esperadoEfectivo.toFixed(2)}</strong></div>
+        <div style={{ fontSize: 12, color: "#555", marginBottom: 4 }}>🏦 Transferencia esperada: <strong>${esperadoTransferencia.toFixed(2)}</strong></div>
+        <div style={{ fontSize: 12, color: "#555" }}>💳 Tarjeta esperada: <strong>${esperadoTarjeta.toFixed(2)}</strong></div>
+      </Card>
+
+      <Card title="👩 Seleccionar empleada">
+        <select style={S.input} value={empleadaId} onChange={e => { setEmpleadaId(e.target.value); setResultado(null); }}>
+          <option value="todos">Todas las empleadas</option>
+          {empleadas.filter(e => e.activa).map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
+        </select>
+      </Card>
+
+      <Card title="🔢 Ingresa el dinero contado">
+        <div style={{ marginBottom: 10 }}>
+          <label style={S.label}>💵 Efectivo en caja</label>
+          <input type="number" style={S.input} placeholder="$0.00" value={montoEfectivo} onChange={e => { setMontoEfectivo(e.target.value); setResultado(null); }} />
+        </div>
+        <div style={{ marginBottom: 10 }}>
+          <label style={S.label}>🏦 Transferencias recibidas</label>
+          <input type="number" style={S.input} placeholder="$0.00" value={montoTransferencia} onChange={e => { setMontoTransferencia(e.target.value); setResultado(null); }} />
+        </div>
+        <div style={{ marginBottom: 14 }}>
+          <label style={S.label}>💳 Pagos con tarjeta</label>
+          <input type="number" style={S.input} placeholder="$0.00" value={montoTarjeta} onChange={e => { setMontoTarjeta(e.target.value); setResultado(null); }} />
+        </div>
+        <button style={S.btnPrimary} onClick={calcularCierre}>🧮 Calcular cierre de caja</button>
+      </Card>
+
+      {resultado && (
+        <div>
+          <div style={{ ...S.kpi, borderLeft: `4px solid ${resultado.difTotal === 0 ? "#4caf50" : resultado.difTotal > 0 ? "#1565c0" : "#e53935"}`, marginBottom: 14 }}>
+            <div style={{ fontSize: 28 }}>{resultado.difTotal === 0 ? "✅" : resultado.difTotal > 0 ? "📈" : "⚠️"}</div>
+            <div>
+              <div style={{ fontWeight: 800, fontSize: 16, color: resultado.difTotal === 0 ? "#2e7d32" : resultado.difTotal > 0 ? "#1565c0" : "#e53935" }}>
+                {resultado.difTotal === 0 ? "¡Caja cuadrada!" : resultado.difTotal > 0 ? `Sobran $${resultado.difTotal.toFixed(2)}` : `Faltan $${Math.abs(resultado.difTotal).toFixed(2)}`}
+              </div>
+              <div style={{ fontSize: 12, color: "#888" }}>Ventas reales: ${resultado.ventasReales.toFixed(2)} · Esperado: ${esperadoTotal.toFixed(2)}</div>
+              <div style={{ fontSize: 12, color: "#e65100", fontWeight: 600 }}>💵 Fondo restado: ${resultado.fondo.toFixed(2)} queda en caja</div>
+            </div>
+          </div>
+
+          <Card title="📊 Detalle por método">
+            <div style={{ background: "#fff3e0", borderRadius: 6, padding: "8px 12px", marginBottom: 10, fontSize: 12, color: "#e65100", fontWeight: 600 }}>
+              💵 Efectivo contado: ${resultado.ef.toFixed(2)} — Fondo ${resultado.fondo.toFixed(2)} = <strong>Neto ${resultado.efNeto.toFixed(2)}</strong>
+            </div>
+            {[
+              { label: "💵 Efectivo (neto)", contado: resultado.efNeto, esperado: esperadoEfectivo, dif: resultado.difEf },
+              { label: "🏦 Transferencia", contado: resultado.tr, esperado: esperadoTransferencia, dif: resultado.difTr },
+              { label: "💳 Tarjeta", contado: resultado.ta, esperado: esperadoTarjeta, dif: resultado.difTa },
+            ].map(row => (
+              <div key={row.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #f0f4f8" }}>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>{row.label}</span>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: 12, color: "#888" }}>Contado: ${row.contado.toFixed(2)} / Esperado: ${row.esperado.toFixed(2)}</div>
+                  <DifBadge dif={row.dif} />
+                </div>
+              </div>
+            ))}
+          </Card>
+
+          <button style={{ ...S.btnPrimary, background: "linear-gradient(135deg,#2e7d32,#388e3c)", marginTop: 4 }} onClick={() => {
+            const w = window.open("", "_blank", "width=400,height=600");
+            w.document.write(`
+              <html><head><title>Cierre de Caja</title>
+              <style>body{font-family:sans-serif;padding:20px;max-width:340px;margin:0 auto}
+              h2{text-align:center;color:#1a3c5e}.row{display:flex;justify-content:space-between;margin:6px 0;font-size:14px}
+              .divider{border-top:1px dashed #ccc;margin:10px 0}.total{font-size:18px;font-weight:800}
+              .ok{color:#2e7d32}.bad{color:#c62828}.info{color:#1565c0}
+              .header{text-align:center;margin-bottom:16px}.logo{font-size:32px}</style>
+              </head><body>
+              <div class="header"><div class="logo">🫧</div><h2>Lava&amp;Listo</h2><p>CIERRE DE CAJA</p></div>
+              <div class="divider"></div>
+              <div class="row"><span>Fecha</span><span>${new Date(resultado.fecha).toLocaleString("es-MX")}</span></div>
+              <div class="row"><span>Empleada</span><span>${resultado.empleada}</span></div>
+              <div class="row"><span>Ventas del día</span><span>${resultado.totalVentas} · $${resultado.totalVentasVal.toFixed(2)}</span></div>
+              <div class="divider"></div>
+              <div class="row"><span>💵 Efectivo contado</span><span>$${resultado.ef.toFixed(2)}</span></div>
+              <div class="row"><span>— Fondo que queda</span><span>-$${resultado.fondo.toFixed(2)}</span></div>
+              <div class="row"><span>💵 Efectivo neto</span><span>$${resultado.efNeto.toFixed(2)}</span></div>
+              <div class="divider"></div>
+              <div class="row"><span>💵 Efectivo contado</span><span>$${resultado.ef.toFixed(2)}</span></div>
+              <div class="row"><span>💵 Efectivo esperado</span><span>$${esperadoEfectivo.toFixed(2)}</span></div>
+              <div class="row"><span>Diferencia</span><span class="${resultado.difEf===0?"ok":resultado.difEf>0?"info":"bad"}">${resultado.difEf===0?"✅ Cuadra":resultado.difEf>0?`+$${resultado.difEf.toFixed(2)}`:`-$${Math.abs(resultado.difEf).toFixed(2)}`}</span></div>
+              <div class="divider"></div>
+              <div class="row"><span>🏦 Transfer contada</span><span>$${resultado.tr.toFixed(2)}</span></div>
+              <div class="row"><span>🏦 Transfer esperada</span><span>$${esperadoTransferencia.toFixed(2)}</span></div>
+              <div class="row"><span>Diferencia</span><span class="${resultado.difTr===0?"ok":resultado.difTr>0?"info":"bad"}">${resultado.difTr===0?"✅ Cuadra":resultado.difTr>0?`+$${resultado.difTr.toFixed(2)}`:`-$${Math.abs(resultado.difTr).toFixed(2)}`}</span></div>
+              <div class="divider"></div>
+              <div class="row total"><span>TOTAL CONTADO</span><span>$${resultado.contadoTotal.toFixed(2)}</span></div>
+              <div class="row total"><span>TOTAL ESPERADO</span><span>$${esperadoTotal.toFixed(2)}</span></div>
+              <div class="divider"></div>
+              <div class="row total"><span>RESULTADO</span><span class="${resultado.difTotal===0?"ok":resultado.difTotal>0?"info":"bad"}">${resultado.difTotal===0?"✅ CUADRA":resultado.difTotal>0?`📈 SOBRA $${resultado.difTotal.toFixed(2)}`:`⚠️ FALTA $${Math.abs(resultado.difTotal).toFixed(2)}`}</span></div>
+              <div class="divider"></div>
+              <p style="text-align:center;font-size:11px;color:#aaa">Lava&amp;Listo · Sistema de ventas</p>
+              <script>window.print();window.close();</script>
+              </body></html>
+            `);
+            w.document.close();
+          }}>🖨️ Imprimir ticket de cierre</button>
+        </div>
+      )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── MIS VENTAS (EMPLEADA) ─────────────────────────────────────────
+function MisVentas({ ventas, sesion, empleadas, setTicket }) {
+  const hoy = new Date().toISOString().split("T")[0];
+  const semana = semanaISO(new Date());
+  const mes = mesKey(new Date());
+
+  // Solo sus ventas, sin datos de otros clientes
+  const misVentas = ventas.filter(v => String(v.empleadaId) === String(sesion.id) && !v.anulada);
+  const hoyV = misVentas.filter(v => v.fecha.startsWith(hoy));
+  const semV = misVentas.filter(v => semanaISO(v.fecha) === semana);
+  const mesV = misVentas.filter(v => mesKey(v.fecha) === mes);
+
+  const sum = arr => arr.reduce((a, v) => a + v.total, 0);
+  const emp = empleadas.find(e => String(e.id) === String(sesion.id));
+  const meta = emp?.metaVentas || 20;
+  const bono = emp?.montoBonus || 0;
+  const pct = Math.min(100, (mesV.length / meta) * 100);
+  const ganoBono = mesV.length >= meta;
+
+  const KPI = ({ icon, label, val, sub, color }) => (
+    <div style={{ ...S.kpi, borderLeft: `4px solid ${color}` }}>
+      <div style={{ fontSize: 22 }}>{icon}</div>
+      <div>
+        <div style={{ fontWeight: 800, fontSize: 18, color }}>{val}</div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: "#1a3c5e" }}>{label}</div>
+        {sub && <div style={{ fontSize: 11, color: "#888" }}>{sub}</div>}
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={S.panel}>
+      <h2 style={S.panelTitle}>📊 Mis Ventas</h2>
+      <div style={{ background: "linear-gradient(135deg,#1a3c5e,#2563a8)", borderRadius: 12, padding: "14px 16px", marginBottom: 14, color: "#fff" }}>
+        <div style={{ fontSize: 13, opacity: 0.8 }}>Bienvenida,</div>
+        <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 20, fontWeight: 700 }}>{sesion.nombre} 👋</div>
+      </div>
+
+      <div style={S.kpiGrid}>
+        <KPI icon="☀️" label="Hoy" val={`$${sum(hoyV).toFixed(2)}`} sub={`${hoyV.length} ventas`} color="#f59e0b"/>
+        <KPI icon="📅" label="Esta semana" val={`$${sum(semV).toFixed(2)}`} sub={`${semV.length} ventas`} color="#4db6e4"/>
+        <KPI icon="📆" label="Este mes" val={`$${sum(mesV).toFixed(2)}`} sub={`${mesV.length} ventas`} color="#1a3c5e"/>
+        <KPI icon={ganoBono?"🌟":"🎯"} label={ganoBono?"¡Bono ganado!":"Meta del mes"} val={ganoBono?`$${bono}`:`${mesV.length}/${meta}`} sub={ganoBono?"¡Felicidades!":"ventas"} color={ganoBono?"#f59e0b":"#7c3aed"}/>
+      </div>
+
+      {/* PROGRESO BONO */}
+      <Card title="🌟 Progreso hacia tu bono">
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 6 }}>
+          <span>{mesV.length} ventas realizadas</span>
+          <span style={{ fontWeight: 700 }}>Meta: {meta} ventas = ${bono} de bono</span>
+        </div>
+        <div style={{ background: "#e8f0f7", borderRadius: 8, height: 14, marginBottom: 8 }}>
+          <div style={{ background: ganoBono ? "#f59e0b" : "linear-gradient(90deg,#4db6e4,#1a3c5e)", width: `${pct}%`, height: "100%", borderRadius: 8, transition: "width .5s" }}/>
+        </div>
+        {ganoBono
+          ? <div style={{ textAlign: "center", color: "#f59e0b", fontWeight: 700, fontSize: 15 }}>🌟 ¡Felicidades! Ganaste tu bono de ${bono}</div>
+          : <div style={{ textAlign: "center", color: "#888", fontSize: 13 }}>Te faltan {meta - mesV.length} ventas para tu bono</div>
+        }
+      </Card>
+
+      {/* MIS ÓRDENES DE HOY — sin mostrar clientes, solo servicios y totales */}
+      <Card title={`🧾 Mis órdenes de hoy (${hoyV.length})`}>
+        {hoyV.length === 0
+          ? <div style={S.empty}>Sin ventas hoy todavía</div>
+          : hoyV.map(v => (
+            <div key={v.folio} style={{ ...S.ventaCard, borderLeft: `4px solid ${estaPagada(v)?"#4caf50":"#ff9800"}` }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontWeight: 700, color: "#1a3c5e" }}>{v.folio}</div>
+                  <div style={{ fontSize: 11, color: "#888" }}>{fmt(v.fecha)}</div>
+                  <div style={{ fontSize: 12, color: "#555", marginTop: 4 }}>
+                    {v.items.map((it, i) => <span key={i}>{it.label}{it.piezas > 1 ? ` ×${it.piezas}` : ""}{i < v.items.length - 1 ? " · " : ""}</span>)}
+                  </div>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontWeight: 800, fontSize: 16, color: "#1a3c5e" }}>${v.total.toFixed(2)}</div>
+                  <div style={{ ...S.badge, background: estaPagada(v) ? "#e8f5e9" : "#fff3e0", color: estaPagada(v) ? "#2e7d32" : "#e65100" }}>
+                    {estaPagada(v) ? "✅ Pagado" : `⏳ Pendiente`}
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                <label style={S.checkLabel}><input type="checkbox" checked={v.checkMsgRetiro||false} readOnly/><span>📲 Retiro</span></label>
+                <label style={S.checkLabel}><input type="checkbox" checked={v.checkMsgEntrega||false} readOnly/><span>✅ Entrega</span></label>
+              </div>
+            </div>
+          ))
+        }
+      </Card>
+    </div>
+  );
+}
+
+// ─── GASTOS ────────────────────────────────────────────────────────
+const CATEGORIAS_GASTO = ["Insumos/Suministros","Servicios (agua,luz,internet)","Arriendo","Sueldos","Mantenimiento","Publicidad","Equipos","Otros"];
+
+function Gastos({ gastos, setGastos, sesion }) {
+  const [nuevo, setNuevo] = useState({
+    descripcion: "", categoria: "Insumos/Suministros", proveedor: "",
+    numeroFactura: "", monto: "", fecha: new Date().toISOString().split("T")[0],
+    metodoPago: "Efectivo", notas: ""
+  });
+  const [filtroMes, setFiltroMes] = useState(mesKey(new Date()));
+  const [filtroCategoria, setFiltroCategoria] = useState("Todas");
+  const [error, setError] = useState("");
+
+  const agregar = () => {
+    if (!nuevo.descripcion.trim() || !nuevo.monto) { setError("Completa descripción y monto"); return; }
+    const gasto = { ...nuevo, id: Date.now(), monto: parseFloat(nuevo.monto), registradoPor: sesion.nombre, creadoEn: new Date().toISOString() };
+    setGastos(prev => [gasto, ...prev]);
+    setNuevo({ descripcion: "", categoria: "Insumos/Suministros", proveedor: "", numeroFactura: "", monto: "", fecha: new Date().toISOString().split("T")[0], metodoPago: "Efectivo", notas: "" });
+    setError("");
+  };
+
+  const eliminar = (id) => {
+    if (!window.confirm("¿Eliminar este gasto?")) return;
+    setGastos(prev => prev.filter(g => g.id !== id));
+  };
+
+  const filtrados = gastos.filter(g => {
+    if (filtroMes && !g.fecha.startsWith(filtroMes)) return false;
+    if (filtroCategoria !== "Todas" && g.categoria !== filtroCategoria) return false;
+    return true;
+  });
+
+  const totalFiltrado = filtrados.reduce((a, g) => a + g.monto, 0);
+
+  const porCategoria = CATEGORIAS_GASTO.map(cat => ({
+    cat, total: filtrados.filter(g => g.categoria === cat).reduce((a, g) => a + g.monto, 0)
+  })).filter(x => x.total > 0).sort((a, b) => b.total - a.total);
+
+  const exportarGastos = () => {
+    const enc = ["Fecha","Descripción","Categoría","Proveedor","N° Factura","Monto","Método pago","Registrado por","Notas"];
+    const filas = filtrados.map(g => [g.fecha, g.descripcion, g.categoria, g.proveedor||"", g.numeroFactura||"", `$${g.monto.toFixed(2)}`, g.metodoPago, g.registradoPor||"", g.notas||""]);
+    const csv = [enc, ...filas].map(f => f.map(c => `"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n");
+    const blob = new Blob(["\uFEFF"+csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = `gastos-${filtroMes||"todos"}.csv`; a.click();
+  };
+
+  return (
+    <div style={S.panel}>
+      <h2 style={S.panelTitle}>🛒 Gastos & Facturas de Compra</h2>
+
+      {/* RESUMEN */}
+      <div style={S.kpiGrid}>
+        <div style={{ ...S.kpi, borderLeft: "4px solid #e53935" }}>
+          <div style={{ fontSize: 22 }}>💸</div>
+          <div><div style={{ fontWeight: 800, fontSize: 18, color: "#e53935" }}>${totalFiltrado.toFixed(2)}</div><div style={{ fontSize: 11, color: "#888" }}>Total gastos</div></div>
+        </div>
+        <div style={{ ...S.kpi, borderLeft: "4px solid #ff9800" }}>
+          <div style={{ fontSize: 22 }}>🧾</div>
+          <div><div style={{ fontWeight: 800, fontSize: 18, color: "#ff9800" }}>{filtrados.length}</div><div style={{ fontSize: 11, color: "#888" }}>Facturas</div></div>
+        </div>
+      </div>
+
+      {/* FILTROS */}
+      <Card title="🔍 Filtros">
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <div><label style={S.label}>Mes</label><input type="month" style={S.input} value={filtroMes} onChange={e => setFiltroMes(e.target.value)}/></div>
+          <div><label style={S.label}>Categoría</label>
+            <select style={S.input} value={filtroCategoria} onChange={e => setFiltroCategoria(e.target.value)}>
+              <option>Todas</option>{CATEGORIAS_GASTO.map(c => <option key={c}>{c}</option>)}
+            </select>
+          </div>
+        </div>
+        <button style={{ ...S.btnSmall, marginTop: 8, background: "#e8f5e9", color: "#2e7d32" }} onClick={exportarGastos}>📥 Exportar a Excel</button>
+      </Card>
+
+      {/* POR CATEGORÍA */}
+      {porCategoria.length > 0 && (
+        <Card title="📊 Por categoría">
+          {porCategoria.map(x => (
+            <div key={x.cat} style={{ marginBottom: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 2 }}>
+                <span>{x.cat}</span><strong>${x.total.toFixed(2)}</strong>
+              </div>
+              <div style={{ background: "#e8f0f7", borderRadius: 4, height: 8 }}>
+                <div style={{ background: "#e53935", width: `${totalFiltrado ? (x.total/totalFiltrado)*100 : 0}%`, height: "100%", borderRadius: 4 }}/>
+              </div>
+            </div>
+          ))}
+        </Card>
+      )}
+
+      {/* NUEVO GASTO */}
+      <Card title="➕ Registrar factura / gasto">
+        {error && <div style={S.error}>{error}</div>}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <div style={{ gridColumn: "1/-1" }}>
+            <label style={S.label}>Descripción *</label>
+            <input style={S.input} placeholder="Ej: Detergente industrial, pago luz..." value={nuevo.descripcion} onChange={e => setNuevo({ ...nuevo, descripcion: e.target.value })}/>
+          </div>
+          <div>
+            <label style={S.label}>Categoría</label>
+            <select style={S.input} value={nuevo.categoria} onChange={e => setNuevo({ ...nuevo, categoria: e.target.value })}>
+              {CATEGORIAS_GASTO.map(c => <option key={c}>{c}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={S.label}>Monto *</label>
+            <input type="number" style={S.input} placeholder="$0.00" value={nuevo.monto} onChange={e => setNuevo({ ...nuevo, monto: e.target.value })}/>
+          </div>
+          <div>
+            <label style={S.label}>Proveedor</label>
+            <input style={S.input} placeholder="Nombre del proveedor" value={nuevo.proveedor} onChange={e => setNuevo({ ...nuevo, proveedor: e.target.value })}/>
+          </div>
+          <div>
+            <label style={S.label}>N° Factura / Comprobante</label>
+            <input style={S.input} placeholder="001-001-000123" value={nuevo.numeroFactura} onChange={e => setNuevo({ ...nuevo, numeroFactura: e.target.value })}/>
+          </div>
+          <div>
+            <label style={S.label}>Fecha</label>
+            <input type="date" style={S.input} value={nuevo.fecha} onChange={e => setNuevo({ ...nuevo, fecha: e.target.value })}/>
+          </div>
+          <div>
+            <label style={S.label}>Método de pago</label>
+            <select style={S.input} value={nuevo.metodoPago} onChange={e => setNuevo({ ...nuevo, metodoPago: e.target.value })}>
+              {PAGOS.map(p => <option key={p}>{p}</option>)}
+            </select>
+          </div>
+          <div style={{ gridColumn: "1/-1" }}>
+            <label style={S.label}>Notas</label>
+            <textarea style={{ ...S.input, minHeight: 50, resize: "vertical" }} placeholder="Observaciones adicionales..." value={nuevo.notas} onChange={e => setNuevo({ ...nuevo, notas: e.target.value })}/>
+          </div>
+        </div>
+        <button style={{ ...S.btnPrimary, marginTop: 10 }} onClick={agregar}>💾 Registrar gasto</button>
+      </Card>
+
+      {/* LISTA */}
+      <Card title={`🧾 Facturas registradas (${filtrados.length})`}>
+        {filtrados.length === 0 ? <div style={S.empty}>No hay gastos en este período</div>
+          : filtrados.map(g => (
+            <div key={g.id} style={{ ...S.ventaCard, borderLeft: "4px solid #e53935" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div>
+                  <div style={{ fontWeight: 700, color: "#1a3c5e" }}>{g.descripcion}</div>
+                  <div style={{ fontSize: 11, color: "#888" }}>{g.categoria} · {fmtDate(g.fecha)}</div>
+                  {g.proveedor && <div style={{ fontSize: 11, color: "#555" }}>🏪 {g.proveedor}</div>}
+                  {g.numeroFactura && <div style={{ fontSize: 11, color: "#4db6e4" }}>🧾 {g.numeroFactura}</div>}
+                  {g.registradoPor && <div style={{ fontSize: 11, color: "#888" }}>👤 {g.registradoPor}</div>}
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontWeight: 800, fontSize: 16, color: "#e53935" }}>${g.monto.toFixed(2)}</div>
+                  <div style={{ ...S.badge, background: "#f3e8fd", color: "#7c3aed", marginBottom: 4 }}>{g.metodoPago}</div>
+                  {sesion.rol === "Administrador" && (
+                    <button style={S.btnRemove} onClick={() => eliminar(g.id)}>✕</button>
+                  )}
+                </div>
+              </div>
+              {g.notas && <div style={{ fontSize: 11, color: "#888", marginTop: 6 }}>📝 {g.notas}</div>}
+            </div>
+          ))}
+      </Card>
+    </div>
+  );
+}
+
+// ─── GESTIÓN DE USUARIOS ───────────────────────────────────────────
+function GestionUsuarios() {
+  const [usuarios, setUsuarios] = useState(() => load("ll_usuarios", USUARIOS_DEFAULT));
+  const [nuevo, setNuevo] = useState({ usuario: "", clave: "", nombre: "", rol: "Empleada" });
+  const [editId, setEditId] = useState(null);
+  const [editData, setEditData] = useState({});
+  const [error, setError] = useState("");
+
+  useEffect(() => save("ll_usuarios", usuarios), [usuarios]);
+
+  const agregar = () => {
+    if (!nuevo.usuario.trim() || !nuevo.clave.trim() || !nuevo.nombre.trim()) { setError("Completa todos los campos"); return; }
+    if (usuarios.find(u => u.usuario.toLowerCase() === nuevo.usuario.toLowerCase())) { setError("Ese usuario ya existe"); return; }
+    setUsuarios(prev => [...prev, { ...nuevo, id: Date.now() }]);
+    setNuevo({ usuario: "", clave: "", nombre: "", rol: "Empleada" });
+    setError("");
+  };
+
+  const eliminar = (id) => {
+    if (usuarios.filter(u => u.rol === "Administrador").length <= 1 && usuarios.find(u => u.id === id)?.rol === "Administrador") {
+      alert("Debe haber al menos un administrador"); return;
+    }
+    setUsuarios(prev => prev.filter(u => u.id !== id));
+  };
+
+  const guardarEdicion = () => {
+    setUsuarios(prev => prev.map(u => u.id === editId ? { ...u, ...editData } : u));
+    setEditId(null);
+  };
+
+  return (
+    <div style={S.panel}>
+      <h2 style={S.panelTitle}>🔑 Gestión de Usuarios</h2>
+
+      <Card title="👥 Usuarios del sistema">
+        {usuarios.map(u => (
+          <div key={u.id} style={S.ventaCard}>
+            {editId === u.id ? (
+              <div style={{ display: "grid", gap: 8 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <div><label style={S.label}>Nombre</label><input style={S.input} value={editData.nombre||""} onChange={e => setEditData({ ...editData, nombre: e.target.value })}/></div>
+                  <div><label style={S.label}>Usuario</label><input style={S.input} value={editData.usuario||""} onChange={e => setEditData({ ...editData, usuario: e.target.value })}/></div>
+                  <div><label style={S.label}>Nueva clave</label><input type="password" style={S.input} value={editData.clave||""} onChange={e => setEditData({ ...editData, clave: e.target.value })}/></div>
+                  <div><label style={S.label}>Rol</label>
+                    <select style={S.input} value={editData.rol||"Empleada"} onChange={e => setEditData({ ...editData, rol: e.target.value })}>
+                      <option>Administrador</option><option>Empleada</option>
+                    </select>
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button style={{ ...S.btnPrimary, flex: 1 }} onClick={guardarEdicion}>✓ Guardar</button>
+                  <button style={S.btnClose} onClick={() => setEditId(null)}>Cancelar</button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontWeight: 700 }}>{u.nombre}</div>
+                  <div style={{ fontSize: 12, color: "#888" }}>@{u.usuario} · {u.rol}</div>
+                </div>
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <div style={{ ...S.badge, background: u.rol === "Administrador" ? "#e8f5fd" : "#f3e8fd", color: u.rol === "Administrador" ? "#1565c0" : "#7c3aed" }}>{u.rol === "Administrador" ? "👑" : "👩"} {u.rol}</div>
+                  <button style={S.btnSmall} onClick={() => { setEditId(u.id); setEditData({ ...u }); }}>✏️</button>
+                  <button style={S.btnRemove} onClick={() => eliminar(u.id)}>✕</button>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </Card>
+
+      <Card title="➕ Agregar usuario">
+        {error && <div style={S.error}>{error}</div>}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <div><label style={S.label}>Nombre completo</label><input style={S.input} placeholder="Nombre" value={nuevo.nombre} onChange={e => setNuevo({ ...nuevo, nombre: e.target.value })}/></div>
+          <div><label style={S.label}>Usuario</label><input style={S.input} placeholder="usuario123" value={nuevo.usuario} onChange={e => setNuevo({ ...nuevo, usuario: e.target.value })} autoCapitalize="none"/></div>
+          <div><label style={S.label}>Clave</label><input type="password" style={S.input} placeholder="Clave secreta" value={nuevo.clave} onChange={e => setNuevo({ ...nuevo, clave: e.target.value })}/></div>
+          <div><label style={S.label}>Rol</label>
+            <select style={S.input} value={nuevo.rol} onChange={e => setNuevo({ ...nuevo, rol: e.target.value })}>
+              <option>Administrador</option><option>Empleada</option>
+            </select>
+          </div>
+        </div>
+        <button style={{ ...S.btnPrimary, marginTop: 10 }} onClick={agregar}>Agregar usuario</button>
       </Card>
     </div>
   );
