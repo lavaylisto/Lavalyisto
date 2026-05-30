@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 const KEYS = {
   ventas: "ll_ventas", clientes: "ll_clientes",
   empleadas: "ll_empleadas", inventario: "ll_inventario",
-  bonos: "ll_bonos_config", servicios: "ll_servicios",
+  servicios: "ll_servicios",
 };
 const load = (key, def) => { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : def; } catch { return def; } };
 const save = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} };
@@ -49,14 +49,12 @@ const SERVICIOS_DEFAULT = [
 ];
 
 const PAGOS = ["Efectivo", "Transferencia", "Tarjeta"];
-
 const INSUMOS_DEFAULT = [
   { id: 1, nombre: "Detergente (kg)", stock: 10, min: 3, unidad: "kg" },
   { id: 2, nombre: "Suavizante (L)", stock: 5, min: 2, unidad: "L" },
   { id: 3, nombre: "Bolsas de empaque", stock: 100, min: 20, unidad: "pzas" },
   { id: 4, nombre: "Ganchos", stock: 50, min: 10, unidad: "pzas" },
 ];
-
 const EMPLEADAS_DEFAULT = [
   { id: 1, nombre: "Ana García", activa: true, metaVentas: 20, montoBonus: 20 },
   { id: 2, nombre: "María López", activa: true, metaVentas: 20, montoBonus: 20 },
@@ -70,6 +68,24 @@ const mesKey = (d) => { const dt=new Date(d); return `${dt.getFullYear()}-${Stri
 const saldoPendiente = (v) => v.total - (v.abonos || []).reduce((a, ab) => a + ab.monto, 0);
 const estaPagada = (v) => saldoPendiente(v) <= 0;
 
+// ─── EXPORTAR CSV ──────────────────────────────────────────────────
+const exportarCSV = (ventas, titulo, empleadas) => {
+  const enc = ["Folio","Fecha","Entrega","Cliente","Teléfono","Empleada","Servicios","Total","Pagado","Pendiente","Método pago","Msg Retiro","Msg Entrega","Facturado SRI","Notas"];
+  const filas = ventas.map(v => {
+    const emp = empleadas.find(e => e.id === v.empleadaId);
+    const pagado = (v.abonos || []).reduce((a, ab) => a + ab.monto, 0);
+    const pendiente = v.total - pagado;
+    const servicios = v.items.map(it => `${it.label}${it.piezas > 1 ? ` x${it.piezas}` : ""}`).join(" | ");
+    const metodos = [...new Set((v.abonos || []).map(ab => ab.metodo))].join("/");
+    return [v.folio, fmt(v.fecha), fmtDate(v.entrega), v.clienteNombre||"", v.clienteTel||"", emp?.nombre||"", servicios, `$${v.total.toFixed(2)}`, `$${pagado.toFixed(2)}`, `$${pendiente.toFixed(2)}`, metodos||v.pago||"", v.checkMsgRetiro?"SI":"NO", v.checkMsgEntrega?"SI":"NO", v.facturadoSRI?"SI":"NO", v.notas||""];
+  });
+  const csv = [enc, ...filas].map(f => f.map(c => `"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n");
+  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `${titulo}-${new Date().toISOString().split("T")[0]}.csv`; a.click();
+};
+
 // ─── TICKET MODAL ──────────────────────────────────────────────────
 function TicketModal({ venta, empleadas, onClose }) {
   if (!venta) return null;
@@ -82,8 +98,8 @@ function TicketModal({ venta, empleadas, onClose }) {
       <div style={S.ticketBox} id="ticket-print">
         <div style={S.ticketHeader}>
           <div style={S.ticketLogo}>🫧</div>
-          <div style={{ fontFamily:"'Playfair Display',serif", fontSize:22, fontWeight:700, color:"#1a3c5e" }}>Lava<span style={{color:"#4db6e4"}}>&</span>Listo</div>
-          <div style={{ fontSize:11, color:"#888", marginTop:2 }}>Servicio de Lavandería Profesional</div>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,color:"#1a3c5e"}}>Lava<span style={{color:"#4db6e4"}}>&</span>Listo</div>
+          <div style={{fontSize:11,color:"#888",marginTop:2}}>Servicio de Lavandería Profesional</div>
         </div>
         <div style={S.ticketDivider}/>
         <div style={S.ticketRow}><span>Folio</span><strong>{venta.folio}</strong></div>
@@ -91,29 +107,23 @@ function TicketModal({ venta, empleadas, onClose }) {
         <div style={S.ticketRow}><span>Entrega</span><span>{fmtDate(venta.entrega)}</span></div>
         <div style={S.ticketRow}><span>Cliente</span><span>{venta.clienteNombre}</span></div>
         {venta.clienteTel && <div style={S.ticketRow}><span>Tel</span><span>{venta.clienteTel}</span></div>}
+        {venta.clienteDireccion && <div style={S.ticketRow}><span>📍 Dir</span><span style={{fontSize:11,maxWidth:160,textAlign:"right"}}>{venta.clienteDireccion}</span></div>}
         {emp && <div style={S.ticketRow}><span>Atendió</span><span>{emp.nombre}</span></div>}
-        {venta.facturadoSRI && <div style={{...S.ticketRow, color:"#2e7d32", fontWeight:700}}><span>🧾 Facturado SRI</span><span>✅</span></div>}
+        {venta.facturadoSRI && <div style={{...S.ticketRow,color:"#2e7d32",fontWeight:700}}><span>🧾 Facturado SRI</span><span>✅</span></div>}
         <div style={S.ticketDivider}/>
-        <div style={{fontSize:11, fontWeight:700, color:"#555", marginBottom:6}}>SERVICIOS</div>
-        {venta.items.map((it,i)=>(
+        <div style={{fontSize:11,fontWeight:700,color:"#555",marginBottom:6}}>SERVICIOS</div>
+        {venta.items.map((it,i) => (
           <div key={i} style={S.ticketRow}>
             <span>{it.label}{it.piezas>1?` x${it.piezas}`:""}</span>
             <span>${(it.precio*it.piezas).toFixed(2)}</span>
           </div>
         ))}
         <div style={S.ticketDivider}/>
-        <div style={{...S.ticketRow, fontSize:16, fontWeight:800}}>
-          <span>TOTAL</span><span style={{color:"#1a3c5e"}}>${venta.total.toFixed(2)}</span>
-        </div>
+        <div style={{...S.ticketRow,fontSize:16,fontWeight:800}}><span>TOTAL</span><span style={{color:"#1a3c5e"}}>${venta.total.toFixed(2)}</span></div>
         {abonos.length>0&&(<>
           <div style={S.ticketDivider}/>
-          <div style={{fontSize:11, fontWeight:700, color:"#555", marginBottom:6}}>PAGOS REGISTRADOS</div>
-          {abonos.map((ab,i)=>(
-            <div key={i} style={S.ticketRow}>
-              <span>{ab.metodo} · {fmtDate(ab.fecha)}</span>
-              <span style={{color:"#2e7d32"}}>-${ab.monto.toFixed(2)}</span>
-            </div>
-          ))}
+          <div style={{fontSize:11,fontWeight:700,color:"#555",marginBottom:6}}>PAGOS REGISTRADOS</div>
+          {abonos.map((ab,i)=><div key={i} style={S.ticketRow}><span>{ab.metodo} · {fmtDate(ab.fecha)}</span><span style={{color:"#2e7d32"}}>-${ab.monto.toFixed(2)}</span></div>)}
           <div style={{...S.ticketRow,marginTop:4}}><span>Total pagado</span><strong style={{color:"#2e7d32"}}>${totalAbonado.toFixed(2)}</strong></div>
         </>)}
         {pendiente>0&&<div style={{background:"#fff3e0",borderRadius:8,padding:"8px 10px",marginTop:8,display:"flex",justifyContent:"space-between"}}><span style={{fontSize:13,fontWeight:700,color:"#e65100"}}>⚠️ Saldo pendiente</span><strong style={{color:"#e65100"}}>${pendiente.toFixed(2)}</strong></div>}
@@ -123,19 +133,46 @@ function TicketModal({ venta, empleadas, onClose }) {
         <div style={{textAlign:"center",fontSize:11,color:"#aaa",marginTop:8}}>¡Gracias por tu preferencia! 💙</div>
       </div>
       <div style={{display:"flex",gap:10,marginTop:16}}>
-        <button style={S.btnPrint} onClick={()=>window.print()}>🖨️ Imprimir</button>
+        <button style={S.btnPrint} onClick={()=>{
+          const style=document.createElement("style");
+          style.innerHTML=`
+            @media print {
+              body * { visibility: hidden; }
+              #ticket-print, #ticket-print * { visibility: visible; }
+              #ticket-print { position: fixed; top: 0; left: 0; width: 48%; }
+              #ticket-copy { visibility: visible; position: fixed; top: 0; left: 52%; width: 48%; border-left: 1px dashed #ccc; padding-left: 10px; }
+              #ticket-copy * { visibility: visible; }
+            }
+          `;
+          document.head.appendChild(style);
+          const original=document.getElementById("ticket-print");
+          const copy=original.cloneNode(true);
+          copy.id="ticket-copy";
+          const copyLabel=document.createElement("div");
+          copyLabel.style.cssText="text-align:center;font-size:10px;color:#aaa;margin-bottom:8px;font-weight:bold;";
+          copyLabel.innerText="— COPIA NEGOCIO —";
+          copy.insertBefore(copyLabel,copy.firstChild);
+          const origLabel=document.createElement("div");
+          origLabel.style.cssText="text-align:center;font-size:10px;color:#aaa;margin-bottom:8px;font-weight:bold;";
+          origLabel.innerText="— COPIA CLIENTE —";
+          original.insertBefore(origLabel,original.firstChild);
+          document.body.appendChild(copy);
+          window.print();
+          document.head.removeChild(style);
+          document.body.removeChild(copy);
+          original.removeChild(origLabel);
+        }}>🖨️ Imprimir 2 copias</button>
         <button style={S.btnClose} onClick={onClose}>Cerrar</button>
       </div>
     </div>
   );
 }
 
-// ─── ABONO MODAL ───────────────────────────────────────────────────
 function AbonoModal({ venta, onSave, onClose }) {
-  const [monto, setMonto] = useState("");
-  const [metodo, setMetodo] = useState("Efectivo");
-  const pendiente = saldoPendiente(venta);
-  const guardar = () => { const m=parseFloat(monto); if(!m||m<=0||m>pendiente) return; onSave({monto:m,metodo,fecha:new Date().toISOString()}); };
+  const [monto,setMonto]=useState("");
+  const [metodo,setMetodo]=useState("Efectivo");
+  const pendiente=saldoPendiente(venta);
+  const guardar=()=>{const m=parseFloat(monto);if(!m||m<=0||m>pendiente) return;onSave({monto:m,metodo,fecha:new Date().toISOString()});};
   return (
     <div style={S.overlay}>
       <div style={S.ticketBox}>
@@ -162,13 +199,13 @@ function AbonoModal({ venta, onSave, onClose }) {
 
 // ─── MAIN APP ──────────────────────────────────────────────────────
 export default function LavaListo() {
-  const [tab, setTab] = useState("ventas");
-  const [ventas, setVentas] = useState(()=>load(KEYS.ventas,[]));
-  const [clientes, setClientes] = useState(()=>load(KEYS.clientes,[]));
-  const [empleadas, setEmpleadas] = useState(()=>load(KEYS.empleadas,EMPLEADAS_DEFAULT));
-  const [inventario, setInventario] = useState(()=>load(KEYS.inventario,INSUMOS_DEFAULT));
-  const [servicios, setServicios] = useState(()=>load(KEYS.servicios,SERVICIOS_DEFAULT));
-  const [ticketVenta, setTicketVenta] = useState(null);
+  const [tab,setTab]=useState("ventas");
+  const [ventas,setVentas]=useState(()=>load(KEYS.ventas,[]));
+  const [clientes,setClientes]=useState(()=>load(KEYS.clientes,[]));
+  const [empleadas,setEmpleadas]=useState(()=>load(KEYS.empleadas,EMPLEADAS_DEFAULT));
+  const [inventario,setInventario]=useState(()=>load(KEYS.inventario,INSUMOS_DEFAULT));
+  const [servicios,setServicios]=useState(()=>load(KEYS.servicios,SERVICIOS_DEFAULT));
+  const [ticketVenta,setTicketVenta]=useState(null);
 
   useEffect(()=>save(KEYS.ventas,ventas),[ventas]);
   useEffect(()=>save(KEYS.clientes,clientes),[clientes]);
@@ -176,9 +213,9 @@ export default function LavaListo() {
   useEffect(()=>save(KEYS.inventario,inventario),[inventario]);
   useEffect(()=>save(KEYS.servicios,servicios),[servicios]);
 
-  const pendientesCount = ventas.filter(v=>!estaPagada(v)).length;
+  const pendientesCount=ventas.filter(v=>!estaPagada(v)).length;
 
-  const addAbono = (f,abono) => {
+  const addAbono=(f,abono)=>{
     setVentas(prev=>prev.map(v=>{
       if(v.folio!==f) return v;
       const abonos=[...(v.abonos||[]),abono];
@@ -186,19 +223,19 @@ export default function LavaListo() {
     }));
   };
 
-  const exportarDatos = () => {
+  const exportarDatos=()=>{
     const datos={ventas,clientes,empleadas,inventario,servicios,exportado:new Date().toISOString()};
     const blob=new Blob([JSON.stringify(datos,null,2)],{type:"application/json"});
     const url=URL.createObjectURL(blob);
     const a=document.createElement("a");
-    a.href=url; a.download=`lavalisto-respaldo-${new Date().toISOString().split("T")[0]}.json`; a.click();
+    a.href=url;a.download=`lavalisto-respaldo-${new Date().toISOString().split("T")[0]}.json`;a.click();
   };
 
-  const importarDatos = (e) => {
-    const file=e.target.files[0]; if(!file) return;
+  const importarDatos=(e)=>{
+    const file=e.target.files[0];if(!file) return;
     const reader=new FileReader();
     reader.onload=(ev)=>{
-      try {
+      try{
         const datos=JSON.parse(ev.target.result);
         if(datos.ventas) setVentas(datos.ventas);
         if(datos.clientes) setClientes(datos.clientes);
@@ -206,16 +243,16 @@ export default function LavaListo() {
         if(datos.inventario) setInventario(datos.inventario);
         if(datos.servicios) setServicios(datos.servicios);
         alert("✅ Datos importados correctamente");
-      } catch { alert("❌ Error al importar el archivo"); }
+      }catch{alert("❌ Error al importar el archivo");}
     };
     reader.readAsText(file);
   };
 
-  const tabs = [
+  const tabs=[
     {id:"ventas",icon:"🧾",label:"Nueva Venta"},
     {id:"historial",icon:"📋",label:"Historial"},
     {id:"pendientes",icon:"⏳",label:"Pendientes",badge:pendientesCount},
-    {id:"dashboard",icon:"📊",label:"Reportes"},
+    {id:"reportes",icon:"📊",label:"Reportes"},
     {id:"inventario",icon:"📦",label:"Inventario"},
     {id:"equipo",icon:"👩",label:"Equipo"},
     {id:"config",icon:"⚙️",label:"Config"},
@@ -252,10 +289,10 @@ export default function LavaListo() {
         {tab==="ventas"&&<NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={setTicketVenta} servicios={servicios}/>}
         {tab==="historial"&&<Historial ventas={ventas} setVentas={setVentas} empleadas={empleadas} setTicket={setTicketVenta} addAbono={addAbono}/>}
         {tab==="pendientes"&&<Pendientes ventas={ventas} empleadas={empleadas} setTicket={setTicketVenta} addAbono={addAbono}/>}
-        {tab==="dashboard"&&<Dashboard ventas={ventas} empleadas={empleadas}/>}
+        {tab==="reportes"&&<Reportes ventas={ventas} empleadas={empleadas}/>}
         {tab==="inventario"&&<Inventario inventario={inventario} setInventario={setInventario}/>}
         {tab==="equipo"&&<Equipo empleadas={empleadas} setEmpleadas={setEmpleadas} ventas={ventas}/>}
-        {tab==="config"&&<Configuracion servicios={servicios} setServicios={setServicios} exportarDatos={exportarDatos} importarDatos={importarDatos}/>}
+        {tab==="config"&&<Configuracion servicios={servicios} setServicios={setServicios} exportarDatos={exportarDatos} importarDatos={importarDatos} ventas={ventas} empleadas={empleadas}/>}
       </div>
       {ticketVenta&&<TicketModal venta={ticketVenta} empleadas={empleadas} onClose={()=>setTicketVenta(null)}/>}
     </div>
@@ -264,10 +301,10 @@ export default function LavaListo() {
 
 // ─── NUEVA VENTA ───────────────────────────────────────────────────
 function NuevaVenta({ ventas, setVentas, clientes, setClientes, empleadas, setTicket, servicios }) {
-  const hoy=new Date(); const manana=new Date(hoy); manana.setDate(hoy.getDate()+1);
+  const hoy=new Date();const manana=new Date(hoy);manana.setDate(hoy.getDate()+1);
   const [clienteQ,setClienteQ]=useState("");
   const [clienteId,setClienteId]=useState(null);
-  const [nuevoCliente,setNuevoCliente]=useState({nombre:"",tel:"",email:"",rfc:""});
+  const [nuevoCliente,setNuevoCliente]=useState({nombre:"",tel:"",email:"",rfc:"",direccion:""});
   const [modoCliente,setModoCliente]=useState("buscar");
   const [empleadaId,setEmpleadaId]=useState(empleadas[0]?.id||null);
   const [items,setItems]=useState([{servId:servicios[0]?.id,piezas:1,personalizado:false,labelCustom:"",precioCustom:""}]);
@@ -296,14 +333,14 @@ function NuevaVenta({ ventas, setVentas, clientes, setClientes, empleadas, setTi
     if(modoCliente==="nuevo"&&!nuevoCliente.nombre.trim()){setError("Escribe el nombre del cliente");return;}
     const total=calcTotal();
     if(tipoPago==="abono"){const m=parseFloat(montoAbono);if(!m||m<=0||m>=total){setError("El abono debe ser mayor a 0 y menor al total");return;}}
-    let cid=clienteId,cNombre=selCliente?.nombre,cTel=selCliente?.tel;
-    if(modoCliente==="nuevo"){const nc={...nuevoCliente,id:Date.now()};setClientes(prev=>[...prev,nc]);cid=nc.id;cNombre=nc.nombre;cTel=nc.tel;}
+    let cid=clienteId,cNombre=selCliente?.nombre,cTel=selCliente?.tel,cDir=selCliente?.direccion||"";
+    if(modoCliente==="nuevo"){const nc={...nuevoCliente,id:Date.now()};setClientes(prev=>[...prev,nc]);cid=nc.id;cNombre=nc.nombre;cTel=nc.tel;cDir=nc.direccion||"";}
     let abonos=[];
     if(tipoPago==="completo") abonos=[{monto:total,metodo:metodoPago,fecha:new Date().toISOString()}];
     else if(tipoPago==="abono") abonos=[{monto:parseFloat(montoAbono),metodo:metodoPago,fecha:new Date().toISOString()}];
     const venta={
       folio:folio(),fecha:new Date().toISOString(),entrega,
-      clienteId:cid,clienteNombre:cNombre,clienteTel:cTel,empleadaId,
+      clienteId:cid,clienteNombre:cNombre,clienteTel:cTel,clienteDireccion:cDir,empleadaId,
       items:items.map(it=>{
         if(it.personalizado) return {...it,label:it.labelCustom||"Servicio personalizado",precio:parseFloat(it.precioCustom)||0};
         const s=servicios.find(s=>s.id===it.servId);
@@ -314,7 +351,7 @@ function NuevaVenta({ ventas, setVentas, clientes, setClientes, empleadas, setTi
     };
     setVentas([venta,...ventas]);
     setTicket(venta);
-    setClienteQ("");setClienteId(null);setNuevoCliente({nombre:"",tel:"",email:"",rfc:""});
+    setClienteQ("");setClienteId(null);setNuevoCliente({nombre:"",tel:"",email:"",rfc:"",direccion:""});
     setItems([{servId:servicios[0]?.id,piezas:1,personalizado:false,labelCustom:"",precioCustom:""}]);
     setNotas("");setError("");setMontoAbono("");setTipoPago("completo");
   };
@@ -354,6 +391,7 @@ function NuevaVenta({ ventas, setVentas, clientes, setClientes, empleadas, setTi
             {[["nombre","Nombre *"],["tel","Teléfono"],["email","Email"],["rfc","RUC/RFC"]].map(([k,label])=>(
               <input key={k} style={S.input} placeholder={label} value={nuevoCliente[k]} onChange={e=>setNuevoCliente({...nuevoCliente,[k]:e.target.value})}/>
             ))}
+            <input style={{...S.input,gridColumn:"1/-1"}} placeholder="📍 Dirección" value={nuevoCliente.direccion} onChange={e=>setNuevoCliente({...nuevoCliente,direccion:e.target.value})}/>
           </div>
         )}
       </Card>
@@ -434,7 +472,6 @@ function VentaCardItem({ v, empleadas, setTicket, addAbono, setVentas }) {
   const abonos=v.abonos||[];
   const totalAbonado=abonos.reduce((a,ab)=>a+ab.monto,0);
   const toggleField=(field)=>setVentas&&setVentas(prev=>prev.map(vv=>vv.folio===v.folio?{...vv,[field]:!vv[field]}:vv));
-
   return (
     <>
       <div style={{...S.ventaCard,borderLeft:`4px solid ${pagada?"#4caf50":"#ff9800"}`}}>
@@ -499,7 +536,7 @@ function Historial({ ventas, setVentas, empleadas, setTicket, addAbono }) {
   const [filtFecha,setFiltFecha]=useState("");
   const [busq,setBusq]=useState("");
   const filtered=ventas.filter(v=>{
-    if(filtPago!=="Todos"){const metodos=(v.abonos||[]).map(a=>a.metodo);if(!metodos.includes(filtPago)&&v.pago!==filtPago) return false;}
+    if(filtPago!=="Todos"){const m=(v.abonos||[]).map(a=>a.metodo);if(!m.includes(filtPago)&&v.pago!==filtPago) return false;}
     if(filtEst==="Pagadas"&&!estaPagada(v)) return false;
     if(filtEst==="Pendientes"&&estaPagada(v)) return false;
     if(filtSRI==="Facturadas"&&!v.facturadoSRI) return false;
@@ -548,21 +585,12 @@ function Pendientes({ ventas, empleadas, setTicket, addAbono }) {
     <div style={S.panel}>
       <h2 style={S.panelTitle}>⏳ Cuentas Pendientes</h2>
       {pendientes.length===0?(
-        <div style={{...S.empty,paddingTop:40}}>
-          <div style={{fontSize:36,marginBottom:8}}>🎉</div>
-          <div>¡Todo al corriente! No hay saldos pendientes</div>
-        </div>
+        <div style={{...S.empty,paddingTop:40}}><div style={{fontSize:36,marginBottom:8}}>🎉</div><div>¡Todo al corriente!</div></div>
       ):(
         <>
           <div style={{...S.kpiGrid,marginBottom:14}}>
-            <div style={{...S.kpi,borderLeft:"4px solid #ff9800"}}>
-              <div style={{fontSize:22}}>⏳</div>
-              <div><div style={{fontWeight:800,fontSize:18,color:"#ff9800"}}>{pendientes.length}</div><div style={{fontSize:12,color:"#1a3c5e",fontWeight:600}}>Órdenes pendientes</div></div>
-            </div>
-            <div style={{...S.kpi,borderLeft:"4px solid #e53935"}}>
-              <div style={{fontSize:22}}>💸</div>
-              <div><div style={{fontWeight:800,fontSize:18,color:"#e53935"}}>${totalPend.toFixed(2)}</div><div style={{fontSize:12,color:"#1a3c5e",fontWeight:600}}>Total por cobrar</div></div>
-            </div>
+            <div style={{...S.kpi,borderLeft:"4px solid #ff9800"}}><div style={{fontSize:22}}>⏳</div><div><div style={{fontWeight:800,fontSize:18,color:"#ff9800"}}>{pendientes.length}</div><div style={{fontSize:12,color:"#1a3c5e",fontWeight:600}}>Órdenes pendientes</div></div></div>
+            <div style={{...S.kpi,borderLeft:"4px solid #e53935"}}><div style={{fontSize:22}}>💸</div><div><div style={{fontWeight:800,fontSize:18,color:"#e53935"}}>${totalPend.toFixed(2)}</div><div style={{fontSize:12,color:"#1a3c5e",fontWeight:600}}>Total por cobrar</div></div></div>
           </div>
           {pendientes.map(v=><VentaCardItem key={v.folio} v={v} empleadas={empleadas} setTicket={setTicket} addAbono={addAbono}/>)}
         </>
@@ -571,39 +599,89 @@ function Pendientes({ ventas, empleadas, setTicket, addAbono }) {
   );
 }
 
-// ─── DASHBOARD ─────────────────────────────────────────────────────
-function Dashboard({ ventas, empleadas }) {
+// ─── REPORTES CON EXPORTACIÓN EXCEL ───────────────────────────────
+function Reportes({ ventas, empleadas }) {
   const hoy=new Date().toISOString().split("T")[0];
   const semana=semanaISO(new Date());
   const mes=mesKey(new Date());
+  const [mesSelec,setMesSelec]=useState(mes);
+  const [empSelec,setEmpSelec]=useState("Todos");
+
   const ventasHoy=ventas.filter(v=>v.fecha.startsWith(hoy));
   const ventasSem=ventas.filter(v=>semanaISO(v.fecha)===semana);
-  const ventasMes=ventas.filter(v=>mesKey(v.fecha)===mes);
+  const ventasMes=ventas.filter(v=>mesKey(v.fecha)===mesSelec);
+  const ventasMesEmp=empSelec==="Todos"?ventasMes:ventasMes.filter(v=>String(v.empleadaId)===empSelec);
+
   const sum=arr=>arr.reduce((a,v)=>a+v.total,0);
   const cobrado=arr=>arr.reduce((a,v)=>a+(v.abonos||[]).reduce((x,ab)=>x+ab.monto,0),0);
   const porCobrar=arr=>arr.reduce((a,v)=>a+saldoPendiente(v),0);
+
   const byPago=PAGOS.map(p=>({label:p,val:ventasMes.flatMap(v=>(v.abonos||[]).filter(a=>a.metodo===p)).reduce((a,ab)=>a+ab.monto,0)}));
   const totalCobradoMes=byPago.reduce((a,p)=>a+p.val,0);
+
   const ventasPorMes=(()=>{const map={};ventas.forEach(v=>{const k=mesKey(v.fecha);map[k]=(map[k]||0)+v.total;});return Object.entries(map).sort().slice(-6).map(([k,v])=>({label:k.slice(5)+"/"+k.slice(0,4),val:v}));})();
+
   const empStats=empleadas.map(e=>{
-    const mv=ventas.filter(v=>v.empleadaId===e.id&&mesKey(v.fecha)===mes);
+    const mv=ventas.filter(v=>v.empleadaId===e.id&&mesKey(v.fecha)===mesSelec);
     return {...e,count:mv.length,total:mv.reduce((a,v)=>a+v.total,0)};
   }).sort((a,b)=>b.count-a.count);
+
+  const BtnExport=({label,arr,titulo})=>(
+    <button style={{...S.btnSmall,background:"#e8f5e9",color:"#2e7d32",display:"flex",alignItems:"center",gap:4}}
+      onClick={()=>exportarCSV(arr,titulo,empleadas)}>
+      📥 {label}
+    </button>
+  );
+
   const KPI=({icon,label,val,sub,color})=>(
     <div style={{...S.kpi,borderLeft:`4px solid ${color}`}}>
       <div style={{fontSize:22}}>{icon}</div>
       <div><div style={{fontWeight:800,fontSize:18,color}}>{val}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>{label}</div>{sub&&<div style={{fontSize:11,color:"#888"}}>{sub}</div>}</div>
     </div>
   );
+
   return (
     <div style={S.panel}>
-      <h2 style={S.panelTitle}>Reportes & Dashboard</h2>
+      <h2 style={S.panelTitle}>📊 Reportes</h2>
+
+      {/* EXPORTAR */}
+      <Card title="📥 Exportar a Excel">
+        <p style={{fontSize:13,color:"#555",marginBottom:12}}>Descarga reportes en formato CSV que se abren directamente en Excel.</p>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <BtnExport label="Reporte hoy" arr={ventasHoy} titulo="reporte-hoy"/>
+          <BtnExport label="Reporte semanal" arr={ventasSem} titulo="reporte-semana"/>
+          <BtnExport label="Reporte mensual" arr={ventasMes} titulo={`reporte-${mesSelec}`}/>
+          <BtnExport label="Todas las ventas" arr={ventas} titulo="reporte-completo"/>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:8}}>
+          <div>
+            <label style={S.label}>Mes para reporte</label>
+            <input type="month" style={S.input} value={mesSelec} onChange={e=>setMesSelec(e.target.value)}/>
+          </div>
+          <div>
+            <label style={S.label}>Filtrar por empleada</label>
+            <select style={S.input} value={empSelec} onChange={e=>setEmpSelec(e.target.value)}>
+              <option value="Todos">Todas</option>
+              {empleadas.map(e=><option key={e.id} value={String(e.id)}>{e.nombre}</option>)}
+            </select>
+          </div>
+        </div>
+        {empSelec!=="Todos"&&(
+          <button style={{...S.btnSmall,marginTop:8,background:"#e8f5e9",color:"#2e7d32"}}
+            onClick={()=>exportarCSV(ventasMesEmp,`reporte-${empleadas.find(e=>String(e.id)===empSelec)?.nombre}-${mesSelec}`,empleadas)}>
+            📥 Exportar reporte por empleada
+          </button>
+        )}
+      </Card>
+
+      {/* KPIs */}
       <div style={S.kpiGrid}>
         <KPI icon="☀️" label="Ventas hoy" val={`$${sum(ventasHoy).toFixed(2)}`} sub={`${ventasHoy.length} órdenes`} color="#f59e0b"/>
         <KPI icon="📅" label="Esta semana" val={`$${sum(ventasSem).toFixed(2)}`} sub={`${ventasSem.length} órdenes`} color="#4db6e4"/>
         <KPI icon="💚" label="Cobrado este mes" val={`$${cobrado(ventasMes).toFixed(2)}`} sub="Pagos recibidos" color="#4caf50"/>
         <KPI icon="⏳" label="Por cobrar" val={`$${porCobrar(ventasMes).toFixed(2)}`} sub="Saldo pendiente" color="#e53935"/>
       </div>
+
       <Card title="💳 Cobros del mes por método">
         {byPago.map(p=>(
           <div key={p.label} style={{marginBottom:10}}>
@@ -614,7 +692,8 @@ function Dashboard({ ventas, empleadas }) {
           </div>
         ))}
       </Card>
-      <Card title="📈 Ventas por mes">
+
+      <Card title="📈 Ventas por mes (últimos 6)">
         {ventasPorMes.length===0?<div style={S.empty}>Sin datos</div>:ventasPorMes.map(m=>{
           const max=Math.max(...ventasPorMes.map(x=>x.val),1);
           return(
@@ -625,17 +704,19 @@ function Dashboard({ ventas, empleadas }) {
           );
         })}
       </Card>
-      <Card title="🏆 Ranking empleadas (mes actual)">
+
+      <Card title="🏆 Ranking empleadas">
         {empStats.map((e,i)=>{
-          const pct=Math.min(100,(e.count/(e.metaVentas||20))*100);
-          const ganoBono=e.count>=(e.metaVentas||20);
+          const meta=e.metaVentas||20;
+          const pct=Math.min(100,(e.count/meta)*100);
+          const ganoBono=e.count>=meta;
           return(
             <div key={e.id} style={{padding:"10px 0",borderBottom:"1px solid #f0f4f8"}}>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
                 <div style={{fontSize:18}}>{i===0?"🥇":i===1?"🥈":i===2?"🥉":"👤"}</div>
                 <div style={{flex:1}}>
                   <div style={{fontWeight:600,fontSize:14}}>{e.nombre}</div>
-                  <div style={{fontSize:12,color:"#888"}}>{e.count} ventas · ${e.total.toFixed(2)} · Meta: {e.metaVentas||20}</div>
+                  <div style={{fontSize:12,color:"#888"}}>{e.count} ventas · ${e.total.toFixed(2)} · Meta: {meta}</div>
                 </div>
                 {ganoBono&&<div style={{...S.badge,background:"#fff8e1",color:"#f59e0b"}}>🌟 ${e.montoBonus||0}</div>}
               </div>
@@ -704,16 +785,12 @@ function Equipo({ empleadas, setEmpleadas, ventas }) {
     setEmpleadas(prev=>[...prev,{id:Date.now(),nombre:nuevo.nombre,activa:true,metaVentas:parseInt(nuevo.metaVentas)||20,montoBonus:parseFloat(nuevo.montoBonus)||0}]);
     setNuevo({nombre:"",metaVentas:20,montoBonus:20});
   };
-
   const toggle=(id)=>setEmpleadas(prev=>prev.map(e=>e.id===id?{...e,activa:!e.activa}:e));
-
   const iniciarEdicion=(e)=>{setEditId(e.id);setEditData({nombre:e.nombre,metaVentas:e.metaVentas||20,montoBonus:e.montoBonus||0});};
-
   const guardarEdicion=()=>{
     setEmpleadas(prev=>prev.map(e=>e.id===editId?{...e,...editData,metaVentas:parseInt(editData.metaVentas)||20,montoBonus:parseFloat(editData.montoBonus)||0}:e));
     setEditId(null);
   };
-
   const empStats=empleadas.map(e=>{
     const mv=ventas.filter(v=>v.empleadaId===e.id&&mesKey(v.fecha)===mes);
     return {...e,ventasMes:mv.length,totalMes:mv.reduce((a,v)=>a+v.total,0)};
@@ -732,24 +809,17 @@ function Equipo({ empleadas, setEmpleadas, ventas }) {
             <div key={e.id} style={{...S.ventaCard,opacity:e.activa?1:0.6}}>
               {editId===e.id?(
                 <div>
-                  <div style={{fontWeight:700,color:"#1a3c5e",marginBottom:8}}>✏️ Editando: {e.nombre}</div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:8}}>
-                    <div style={{gridColumn:"1/-1"}}>
-                      <label style={S.label}>Nombre</label>
-                      <input style={S.input} value={editData.nombre} onChange={ev=>setEditData({...editData,nombre:ev.target.value})}/>
-                    </div>
-                    <div>
-                      <label style={S.label}>Meta (ventas/mes)</label>
-                      <input type="number" style={S.input} value={editData.metaVentas} onChange={ev=>setEditData({...editData,metaVentas:ev.target.value})}/>
-                    </div>
-                    <div>
-                      <label style={S.label}>Monto bono ($)</label>
-                      <input type="number" style={S.input} value={editData.montoBonus} onChange={ev=>setEditData({...editData,montoBonus:ev.target.value})}/>
+                  <div style={{fontWeight:700,color:"#1a3c5e",marginBottom:8}}>✏️ Editando</div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr",gap:8,marginBottom:8}}>
+                    <div><label style={S.label}>Nombre</label><input style={S.input} value={editData.nombre} onChange={ev=>setEditData({...editData,nombre:ev.target.value})}/></div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                      <div><label style={S.label}>Meta ventas/mes</label><input type="number" style={S.input} value={editData.metaVentas} onChange={ev=>setEditData({...editData,metaVentas:ev.target.value})}/></div>
+                      <div><label style={S.label}>Monto bono ($)</label><input type="number" style={S.input} value={editData.montoBonus} onChange={ev=>setEditData({...editData,montoBonus:ev.target.value})}/></div>
                     </div>
                   </div>
                   <div style={{display:"flex",gap:8}}>
                     <button style={{...S.btnPrimary,flex:1}} onClick={guardarEdicion}>✓ Guardar</button>
-                    <button style={{...S.btnClose}} onClick={()=>setEditId(null)}>Cancelar</button>
+                    <button style={S.btnClose} onClick={()=>setEditId(null)}>Cancelar</button>
                   </div>
                 </div>
               ):(
@@ -757,17 +827,17 @@ function Equipo({ empleadas, setEmpleadas, ventas }) {
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                     <div>
                       <div style={{fontWeight:700,fontSize:15}}>{e.nombre}</div>
-                      <div style={{fontSize:12,color:"#888"}}>{e.ventasMes} ventas este mes · ${e.totalMes.toFixed(2)}</div>
+                      <div style={{fontSize:12,color:"#888"}}>{e.ventasMes} ventas · ${e.totalMes.toFixed(2)}</div>
                       <div style={{fontSize:11,color:"#4db6e4"}}>Meta: {meta} ventas · Bono: ${bono}</div>
                     </div>
-                    <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",justifyContent:"flex-end"}}>
-                      {ganoBono&&<div style={{...S.badge,background:"#fff8e1",color:"#f59e0b"}}>🌟 Bono ${bono}</div>}
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
+                      {ganoBono&&<div style={{...S.badge,background:"#fff8e1",color:"#f59e0b"}}>🌟 ${bono}</div>}
                       <button style={S.btnSmall} onClick={()=>iniciarEdicion(e)}>✏️</button>
                       <button style={{...S.btnSmall,background:e.activa?"#ffebee":"#e8f5e9",color:e.activa?"#c62828":"#2e7d32"}} onClick={()=>toggle(e.id)}>{e.activa?"Desactivar":"Activar"}</button>
                     </div>
                   </div>
                   <div style={{marginTop:8}}>
-                    <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#888",marginBottom:3}}><span>Progreso hacia bono</span><span>{e.ventasMes}/{meta}</span></div>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#888",marginBottom:3}}><span>Progreso bono</span><span>{e.ventasMes}/{meta}</span></div>
                     <div style={{background:"#e8f0f7",borderRadius:6,height:8}}><div style={{background:ganoBono?"#f59e0b":"#4db6e4",width:`${pct}%`,height:"100%",borderRadius:6}}/></div>
                   </div>
                 </>
@@ -797,27 +867,22 @@ function Configuracion({ servicios, setServicios, exportarDatos, importarDatos }
 
   const agregar=()=>{
     if(!nuevo.label.trim()||!nuevo.precio) return;
-    const id="custom-"+Date.now();
-    setServicios(prev=>[...prev,{id,label:nuevo.label.toUpperCase(),precio:parseFloat(nuevo.precio)}]);
+    setServicios(prev=>[...prev,{id:"custom-"+Date.now(),label:nuevo.label.toUpperCase(),precio:parseFloat(nuevo.precio)}]);
     setNuevo({label:"",precio:""});
   };
-
   const eliminar=(id)=>setServicios(prev=>prev.filter(s=>s.id!==id));
-
   const iniciarEdicion=(s)=>{setEditId(s.id);setEditData({label:s.label,precio:s.precio});};
-
   const guardarEdicion=()=>{
     setServicios(prev=>prev.map(s=>s.id===editId?{...s,label:editData.label.toUpperCase(),precio:parseFloat(editData.precio)}:s));
     setEditId(null);
   };
-
   const filtrados=servicios.filter(s=>s.label.toLowerCase().includes(busq.toLowerCase()));
 
   return (
     <div style={S.panel}>
       <h2 style={S.panelTitle}>⚙️ Configuración</h2>
       <Card title="💾 Respaldo de datos">
-        <p style={{fontSize:13,color:"#555",marginBottom:12}}>Exporta todos tus datos a un archivo para guardar o restaurar en otro dispositivo.</p>
+        <p style={{fontSize:13,color:"#555",marginBottom:12}}>Exporta todos tus datos para guardar o restaurar en otro dispositivo.</p>
         <button style={{...S.btnPrimary,marginBottom:10}} onClick={exportarDatos}>📥 Exportar datos (Respaldo)</button>
         <label style={{...S.btnPrimary,display:"block",textAlign:"center",cursor:"pointer",background:"#e8f5fd",color:"#1a3c5e",padding:"13px",borderRadius:10,fontSize:15,fontWeight:700}}>
           📤 Importar datos (Restaurar)
@@ -825,7 +890,6 @@ function Configuracion({ servicios, setServicios, exportarDatos, importarDatos }
         </label>
         <p style={{fontSize:11,color:"#aaa",marginTop:8}}>⚠️ Importar reemplazará todos los datos actuales.</p>
       </Card>
-
       <Card title="➕ Agregar nuevo servicio">
         <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8}}>
           <input style={S.input} placeholder="Nombre del servicio" value={nuevo.label} onChange={e=>setNuevo({...nuevo,label:e.target.value})}/>
@@ -833,7 +897,6 @@ function Configuracion({ servicios, setServicios, exportarDatos, importarDatos }
         </div>
         <button style={{...S.btnPrimary,marginTop:8}} onClick={agregar}>Agregar servicio</button>
       </Card>
-
       <Card title={`📋 Servicios (${servicios.length})`}>
         <input style={{...S.input,marginBottom:10}} placeholder="Buscar servicio..." value={busq} onChange={e=>setBusq(e.target.value)}/>
         {filtrados.map(s=>(
@@ -867,7 +930,7 @@ function Card({ title, children }) {
   return <div style={S.card}><div style={S.cardTitle}>{title}</div>{children}</div>;
 }
 
-const S = {
+const S={
   app:{fontFamily:"'DM Sans',sans-serif",minHeight:"100vh",background:"#f0f4f8",paddingBottom:40},
   header:{background:"linear-gradient(135deg,#1a3c5e 0%,#2563a8 100%)",padding:"16px 20px",boxShadow:"0 2px 12px rgba(26,60,94,.25)"},
   headerInner:{maxWidth:700,margin:"0 auto",display:"flex",justifyContent:"space-between",alignItems:"center"},
