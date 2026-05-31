@@ -48,7 +48,8 @@ const SERVICIOS_DEFAULT = [
   { id: "037", label: "SACO 3/4", precio: 9.00 },
 ];
 
-const PAGOS = ["Efectivo", "Transferencia", "Tarjeta"];
+const PAGOS = ["Efectivo", "Transferencia Pichincha", "Transferencia JEP", "Tarjeta"];
+const esTranferencia = (m) => m && m.startsWith("Transferencia");
 const INSUMOS_DEFAULT = [
   { id: 1, nombre: "Detergente (kg)", stock: 10, min: 3, unidad: "kg" },
   { id: 2, nombre: "Suavizante (L)", stock: 5, min: 2, unidad: "L" },
@@ -766,7 +767,7 @@ function Historial({ ventas, setVentas, empleadas, setTicket, addAbono, esAdmin,
   const [filtFecha,setFiltFecha]=useState("");
   const [busq,setBusq]=useState("");
   const filtered=ventas.filter(v=>{
-    if(filtPago!=="Todos"){const m=(v.abonos||[]).map(a=>a.metodo);if(!m.includes(filtPago)&&v.pago!==filtPago) return false;}
+    if(filtPago!=="Todos"){const m=(v.abonos||[]).map(a=>a.metodo);const match=filtPago==="Transferencia"?m.some(x=>esTranferencia(x)):m.includes(filtPago)||v.pago===filtPago;if(!match) return false;}
     if(filtEst==="Pagadas"&&!estaPagada(v)) return false;
     if(filtEst==="Pendientes"&&estaPagada(v)) return false;
     if(filtSRI==="Facturadas"&&!v.facturadoSRI) return false;
@@ -1034,7 +1035,7 @@ function Reportes({ ventas, empleadas }) {
           <div key={p.label} style={{marginBottom:10}}>
             <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:3}}><span>{p.label}</span><strong>${p.val.toFixed(2)}</strong></div>
             <div style={{background:"#e8f0f7",borderRadius:4,height:8}}>
-              <div style={{background:p.label==="Efectivo"?"#4caf50":p.label==="Transferencia"?"#4db6e4":"#ff9800",width:`${totalCobradoMes?(p.val/totalCobradoMes)*100:0}%`,height:"100%",borderRadius:4}}/>
+              <div style={{background:p.label==="Efectivo"?"#4caf50":esTranferencia(p.label)?"#4db6e4":"#ff9800",width:`${totalCobradoMes?(p.val/totalCobradoMes)*100:0}%`,height:"100%",borderRadius:4}}/>
             </div>
           </div>
         ))}
@@ -1339,7 +1340,7 @@ function CierreCaja({ ventas, empleadas }) {
     : ventasHoy.filter(v => String(v.empleadaId) === String(empleadaId));
 
   const esperadoEfectivo = ventasEmp.flatMap(v => (v.abonos || []).filter(a => a.metodo === "Efectivo")).reduce((a, ab) => a + ab.monto, 0);
-  const esperadoTransferencia = ventasEmp.flatMap(v => (v.abonos || []).filter(a => a.metodo === "Transferencia")).reduce((a, ab) => a + ab.monto, 0);
+  const esperadoTransferencia = ventasEmp.flatMap(v => (v.abonos || []).filter(a => esTranferencia(a.metodo))).reduce((a, ab) => a + ab.monto, 0);
   const esperadoTarjeta = ventasEmp.flatMap(v => (v.abonos || []).filter(a => a.metodo === "Tarjeta")).reduce((a, ab) => a + ab.monto, 0);
   const esperadoTotal = esperadoEfectivo + esperadoTransferencia + esperadoTarjeta;
 
