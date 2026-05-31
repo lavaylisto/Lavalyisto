@@ -281,6 +281,97 @@ function LoginScreen({ onLogin }) {
   );
 }
 
+// ─── APERTURA OBLIGATORIA ──────────────────────────────────────────
+function AperturaObligatoria({ sesion, onLogout, onAbierta, empleadas }) {
+  const hoy = new Date().toISOString().split("T")[0];
+  const APERTURA_KEY = "ll_apertura_" + hoy;
+  const [fondo, setFondo] = useState("15.00");
+  const [abriendo, setAbriendo] = useState(false);
+
+  const abrir = () => {
+    setAbriendo(true);
+    const datos = {
+      empleadaId: sesion.id,
+      empleadaNombre: sesion.nombre,
+      fondo: parseFloat(fondo) || 15,
+      fecha: new Date().toISOString(),
+    };
+    try { localStorage.setItem(APERTURA_KEY, JSON.stringify(datos)); } catch {}
+
+    // Imprimir ticket apertura
+    const w = window.open("", "_blank", "width=380,height=400");
+    if (w) {
+      w.document.write(`
+        <html><head><title>Apertura de Caja</title>
+        <style>body{font-family:sans-serif;padding:20px;max-width:320px;margin:0 auto;text-align:center}
+        h2{color:#1a3c5e}.divider{border-top:1px dashed #ccc;margin:12px 0}
+        .row{display:flex;justify-content:space-between;margin:6px 0;font-size:14px;text-align:left}
+        .big{font-size:26px;font-weight:800;color:#1a3c5e}</style></head>
+        <body>
+        <div style="font-size:36px">🫧</div>
+        <h2>Lava&amp;Listo</h2>
+        <p><strong>APERTURA DE CAJA</strong></p>
+        <div class="divider"></div>
+        <div class="row"><span>Fecha</span><span>${new Date(datos.fecha).toLocaleString("es-MX")}</span></div>
+        <div class="row"><span>Abrió</span><span>${datos.empleadaNombre}</span></div>
+        <div class="divider"></div>
+        <p style="font-size:13px;color:#888">Fondo inicial en caja:</p>
+        <div class="big">$${datos.fondo.toFixed(2)}</div>
+        <div class="divider"></div>
+        <p style="font-size:11px;color:#aaa">Lava&amp;Listo · Sistema de ventas</p>
+        <script>window.print();window.close();</script>
+        </body></html>
+      `);
+      w.document.close();
+    }
+
+    setTimeout(() => onAbierta(), 500);
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", background: "linear-gradient(135deg,#1a3c5e 0%,#2563a8 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, fontFamily: "'DM Sans',sans-serif" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=DM+Sans:wght@400;500;600;700&display=swap');*{box-sizing:border-box;margin:0;padding:0;}`}</style>
+      <div style={{ background: "#fff", borderRadius: 20, padding: "36px 28px", width: "100%", maxWidth: 380, boxShadow: "0 20px 60px rgba(0,0,0,.3)" }}>
+        <div style={{ textAlign: "center", marginBottom: 24 }}>
+          <div style={{ fontSize: 48, marginBottom: 8 }}>🔓</div>
+          <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 24, fontWeight: 700, color: "#1a3c5e" }}>Apertura de Caja</div>
+          <div style={{ fontSize: 13, color: "#888", marginTop: 6 }}>
+            Hola <strong>{sesion.nombre}</strong>, antes de iniciar debes abrir la caja del día.
+          </div>
+        </div>
+
+        <div style={{ background: "#f0f4f8", borderRadius: 12, padding: "16px", marginBottom: 20, textAlign: "center" }}>
+          <div style={{ fontSize: 12, color: "#888", marginBottom: 6 }}>📅 {new Date().toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</div>
+          <div style={{ fontSize: 13, color: "#555" }}>Fondo que debe haber en caja al iniciar:</div>
+          <div style={{ position: "relative", margin: "12px auto", maxWidth: 160 }}>
+            <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", fontSize: 18, fontWeight: 700, color: "#1a3c5e" }}>$</span>
+            <input
+              type="number"
+              style={{ ...{width:"100%",padding:"12px 12px 12px 30px",borderRadius:10,border:"2px solid #4db6e4",fontSize:22,fontWeight:800,color:"#1a3c5e",textAlign:"center",background:"#fff",outline:"none"} }}
+              value={fondo}
+              onChange={e => setFondo(e.target.value)}
+            />
+          </div>
+          <div style={{ fontSize: 11, color: "#4db6e4" }}>💡 El fondo estándar es $15.00</div>
+        </div>
+
+        <button
+          style={{ width: "100%", padding: "14px", background: "linear-gradient(135deg,#1a3c5e,#2563a8)", color: "#fff", border: "none", borderRadius: 12, fontSize: 16, fontWeight: 700, fontFamily: "'DM Sans',sans-serif", cursor: "pointer", marginBottom: 10 }}
+          onClick={abrir}
+          disabled={abriendo}>
+          {abriendo ? "Abriendo..." : "🔓 Abrir caja e iniciar día"}
+        </button>
+
+        <button
+          style={{ width: "100%", padding: "10px", background: "transparent", color: "#888", border: "1px solid #d0dce8", borderRadius: 10, fontSize: 13, cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}
+          onClick={onLogout}>
+          Cerrar sesión
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── MAIN APP ──────────────────────────────────────────────────────
 export default function LavaListo() {
   const [sesion, setSesion] = useState(() => {
@@ -303,6 +394,10 @@ export default function LavaListo() {
 }
 
 function AppContent({ sesion, onLogout }) {
+  const hoy = new Date().toISOString().split("T")[0];
+  const APERTURA_KEY = "ll_apertura_" + hoy;
+  const cajaAbierta = !!load(APERTURA_KEY, null);
+
   const [tab,setTab]=useState("ventas");
   const [ventas,setVentas]=useState(()=>load(KEYS.ventas,[]));
   const [clientes,setClientes]=useState(()=>load(KEYS.clientes,[]));
@@ -311,6 +406,7 @@ function AppContent({ sesion, onLogout }) {
   const [servicios,setServicios]=useState(()=>load(KEYS.servicios,SERVICIOS_DEFAULT));
   const [gastos,setGastos]=useState(()=>load("ll_gastos",[]));
   const [ticketVenta,setTicketVenta]=useState(null);
+  const [cajaListaState, setCajaListaState] = useState(cajaAbierta);
 
   useEffect(()=>save(KEYS.ventas,ventas),[ventas]);
   useEffect(()=>save(KEYS.clientes,clientes),[clientes]);
@@ -367,6 +463,11 @@ function AppContent({ sesion, onLogout }) {
     ...(esAdmin?[{id:"config",icon:"⚙️",label:"Config"}]:[]),
     ...(esAdmin?[{id:"usuarios",icon:"🔑",label:"Usuarios"}]:[]),
   ];
+
+  // Si la caja no está abierta, mostrar pantalla de apertura obligatoria
+  if (!cajaListaState) {
+    return <AperturaObligatoria sesion={sesion} onLogout={onLogout} onAbierta={() => setCajaListaState(true)} empleadas={empleadas}/>;
+  }
 
   return (
     <div style={S.app}>
@@ -773,75 +874,73 @@ function Pendientes({ ventas, empleadas, setTicket, addAbono, esAdmin, setVentas
           <div>{filtro === "retiro" ? "¡Todo entregado!" : filtro === "pago" ? "¡Todo cobrado!" : "¡Sin pendientes!"}</div>
         </div>
       ) : (
-        filtrados.map(v => {
-          const emp = empleadas.find(e => e.id === v.empleadaId);
-          const pendiente = saldoPendiente(v);
-          const pagada = estaPagada(v);
-          const abonos = v.abonos || [];
-          const totalAbonado = abonos.reduce((a, ab) => a + ab.monto, 0);
-          const [showAbono, setShowAbono] = useState(false);
+        filtrados.map(v => (
+          <PendienteItem key={v.folio} v={v} empleadas={empleadas} setTicket={setTicket} addAbono={addAbono} setVentas={setVentas}/>
+        ))
+      )}
+    </div>
+  );
+}
 
-          const toggleField = (field) => setVentas && setVentas(prev =>
-            prev.map(vv => vv.folio === v.folio ? { ...vv, [field]: !vv[field] } : vv)
-          );
+function PendienteItem({ v, empleadas, setTicket, addAbono, setVentas }) {
+  const [showAbono, setShowAbono] = useState(false);
+  const emp = empleadas.find(e => e.id === v.empleadaId);
+  const pendiente = saldoPendiente(v);
+  const pagada = estaPagada(v);
+  const abonos = v.abonos || [];
+  const totalAbonado = abonos.reduce((a, ab) => a + ab.monto, 0);
 
-          return (
-            <div key={v.folio}>
-              <div style={{ ...S.ventaCard, borderLeft: `4px solid ${pagada ? "#ff9800" : "#e53935"}` }}>
-                {/* BADGE TIPO */}
-                <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                  {!pagada && <div style={{ ...S.badge, background: "#ffebee", color: "#c62828" }}>💸 Pendiente cobro</div>}
-                  {pagada && !v.checkMsgEntrega && <div style={{ ...S.badge, background: "#fff3e0", color: "#e65100" }}>📦 Pendiente retiro</div>}
-                </div>
+  const toggleField = (field) => setVentas && setVentas(prev =>
+    prev.map(vv => vv.folio === v.folio ? { ...vv, [field]: !vv[field] } : vv)
+  );
 
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                  <div>
-                    <div style={{ fontWeight: 700, color: "#1a3c5e", fontSize: 15 }}>{v.clienteNombre}</div>
-                    <div style={{ fontSize: 11, color: "#888" }}>{v.folio} · {fmt(v.fecha)}</div>
-                    {emp && <div style={{ fontSize: 11, color: "#4db6e4" }}>👩 Registró: {emp.nombre}</div>}
-                    <div style={{ fontSize: 12, color: "#555", marginTop: 4 }}>
-                      {v.items.map((it, i) => <span key={i}>{it.label}{it.piezas > 1 ? ` ×${it.piezas}` : ""}{i < v.items.length - 1 ? " · " : ""}</span>)}
-                    </div>
-                    <div style={{ fontSize: 12, color: "#555", marginTop: 2 }}>📅 Entrega: {fmtDate(v.entrega)}</div>
-                  </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontWeight: 800, fontSize: 18, color: "#1a3c5e" }}>${v.total.toFixed(2)}</div>
-                    {!pagada && <div style={{ fontSize: 13, color: "#e53935", fontWeight: 700 }}>Debe: ${pendiente.toFixed(2)}</div>}
-                    {totalAbonado > 0 && <div style={{ fontSize: 11, color: "#2e7d32" }}>Abonado: ${totalAbonado.toFixed(2)}</div>}
-                  </div>
-                </div>
-
-                {/* CHECKLIST */}
-                <div style={{ display: "flex", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
-                  <label style={S.checkLabel}>
-                    <input type="checkbox" checked={v.checkMsgRetiro || false} onChange={() => toggleField("checkMsgRetiro")} />
-                    <span>📲 Msg retiro enviado</span>
-                  </label>
-                  <label style={S.checkLabel}>
-                    <input type="checkbox" checked={v.checkMsgEntrega || false} onChange={() => toggleField("checkMsgEntrega")} />
-                    <span>✅ Entregado al cliente</span>
-                  </label>
-                </div>
-
-                {/* BOTONES */}
-                <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-                  <button style={S.btnTicket} onClick={() => setTicket(v)}>🧾 Ticket</button>
-                  {!pagada && (
-                    <button style={{ ...S.btnTicket, background: "#e8f5e9", color: "#2e7d32", fontWeight: 700 }}
-                      onClick={() => setShowAbono(true)}>
-                      💰 Cobrar
-                    </button>
-                  )}
-                </div>
-              </div>
-              {showAbono && (
-                <AbonoModal venta={v}
-                  onSave={(abono) => { addAbono(v.folio, abono); setShowAbono(false); }}
-                  onClose={() => setShowAbono(false)} />
-              )}
+  return (
+    <div>
+      <div style={{ ...S.ventaCard, borderLeft: `4px solid ${pagada ? "#ff9800" : "#e53935"}` }}>
+        <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+          {!pagada && <div style={{ ...S.badge, background: "#ffebee", color: "#c62828" }}>💸 Pendiente cobro</div>}
+          {pagada && !v.checkMsgEntrega && <div style={{ ...S.badge, background: "#fff3e0", color: "#e65100" }}>📦 Pendiente retiro</div>}
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontWeight: 700, color: "#1a3c5e", fontSize: 15 }}>{v.clienteNombre}</div>
+            <div style={{ fontSize: 11, color: "#888" }}>{v.folio} · {fmt(v.fecha)}</div>
+            {emp && <div style={{ fontSize: 11, color: "#4db6e4" }}>👩 Registró: {emp.nombre}</div>}
+            <div style={{ fontSize: 12, color: "#555", marginTop: 4 }}>
+              {v.items.map((it, i) => <span key={i}>{it.label}{it.piezas > 1 ? ` ×${it.piezas}` : ""}{i < v.items.length - 1 ? " · " : ""}</span>)}
             </div>
-          );
-        })
+            <div style={{ fontSize: 12, color: "#555", marginTop: 2 }}>📅 Entrega: {fmtDate(v.entrega)}</div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontWeight: 800, fontSize: 18, color: "#1a3c5e" }}>${v.total.toFixed(2)}</div>
+            {!pagada && <div style={{ fontSize: 13, color: "#e53935", fontWeight: 700 }}>Debe: ${pendiente.toFixed(2)}</div>}
+            {totalAbonado > 0 && <div style={{ fontSize: 11, color: "#2e7d32" }}>Abonado: ${totalAbonado.toFixed(2)}</div>}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
+          <label style={S.checkLabel}>
+            <input type="checkbox" checked={v.checkMsgRetiro||false} onChange={() => toggleField("checkMsgRetiro")}/>
+            <span>📲 Msg retiro enviado</span>
+          </label>
+          <label style={S.checkLabel}>
+            <input type="checkbox" checked={v.checkMsgEntrega||false} onChange={() => toggleField("checkMsgEntrega")}/>
+            <span>✅ Entregado al cliente</span>
+          </label>
+        </div>
+        <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+          <button style={S.btnTicket} onClick={() => setTicket(v)}>🧾 Ticket</button>
+          {!pagada && (
+            <button style={{ ...S.btnTicket, background: "#e8f5e9", color: "#2e7d32", fontWeight: 700 }}
+              onClick={() => setShowAbono(true)}>
+              💰 Cobrar
+            </button>
+          )}
+        </div>
+      </div>
+      {showAbono && (
+        <AbonoModal venta={v}
+          onSave={(abono) => { addAbono(v.folio, abono); setShowAbono(false); }}
+          onClose={() => setShowAbono(false)}/>
       )}
     </div>
   );
@@ -1703,6 +1802,9 @@ function GestionUsuarios() {
   const [editId, setEditId] = useState(null);
   const [editData, setEditData] = useState({});
   const [error, setError] = useState("");
+  const [showClaves, setShowClaves] = useState({});
+  const [showNuevaClave, setShowNuevaClave] = useState(false);
+  const [msg, setMsg] = useState("");
 
   useEffect(() => save("ll_usuarios", usuarios), [usuarios]);
 
@@ -1712,53 +1814,103 @@ function GestionUsuarios() {
     setUsuarios(prev => [...prev, { ...nuevo, id: Date.now() }]);
     setNuevo({ usuario: "", clave: "", nombre: "", rol: "Empleada" });
     setError("");
+    setMsg("✅ Usuario creado correctamente");
+    setTimeout(() => setMsg(""), 3000);
   };
 
   const eliminar = (id) => {
     if (usuarios.filter(u => u.rol === "Administrador").length <= 1 && usuarios.find(u => u.id === id)?.rol === "Administrador") {
       alert("Debe haber al menos un administrador"); return;
     }
+    if (!window.confirm("¿Eliminar este usuario?")) return;
     setUsuarios(prev => prev.filter(u => u.id !== id));
   };
 
+  const iniciarEdicion = (u) => {
+    setEditId(u.id);
+    setEditData({ nombre: u.nombre, usuario: u.usuario, clave: u.clave, rol: u.rol, nuevaClave: "" });
+  };
+
   const guardarEdicion = () => {
-    setUsuarios(prev => prev.map(u => u.id === editId ? { ...u, ...editData } : u));
+    if (!editData.nombre.trim() || !editData.usuario.trim()) { setError("Nombre y usuario son obligatorios"); return; }
+    const claveActual = editData.nuevaClave.trim() ? editData.nuevaClave : editData.clave;
+    setUsuarios(prev => prev.map(u => u.id === editId ? { ...u, nombre: editData.nombre, usuario: editData.usuario, clave: claveActual, rol: editData.rol } : u));
     setEditId(null);
+    setError("");
+    setMsg("✅ Usuario actualizado correctamente");
+    setTimeout(() => setMsg(""), 3000);
   };
 
   return (
     <div style={S.panel}>
       <h2 style={S.panelTitle}>🔑 Gestión de Usuarios</h2>
 
+      {msg && <div style={{ background: "#e8f5e9", color: "#2e7d32", padding: "10px 14px", borderRadius: 8, fontSize: 13, marginBottom: 12, fontWeight: 600 }}>{msg}</div>}
+
       <Card title="👥 Usuarios del sistema">
         {usuarios.map(u => (
           <div key={u.id} style={S.ventaCard}>
             {editId === u.id ? (
-              <div style={{ display: "grid", gap: 8 }}>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                  <div><label style={S.label}>Nombre</label><input style={S.input} value={editData.nombre||""} onChange={e => setEditData({ ...editData, nombre: e.target.value })}/></div>
-                  <div><label style={S.label}>Usuario</label><input style={S.input} value={editData.usuario||""} onChange={e => setEditData({ ...editData, usuario: e.target.value })}/></div>
-                  <div><label style={S.label}>Nueva clave</label><input type="password" style={S.input} value={editData.clave||""} onChange={e => setEditData({ ...editData, clave: e.target.value })}/></div>
-                  <div><label style={S.label}>Rol</label>
+              <div>
+                <div style={{ fontWeight: 700, color: "#1a3c5e", marginBottom: 10 }}>✏️ Editando: {u.nombre}</div>
+                {error && <div style={S.error}>{error}</div>}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+                  <div style={{ gridColumn: "1/-1" }}>
+                    <label style={S.label}>Nombre completo</label>
+                    <input style={S.input} value={editData.nombre||""} onChange={e => setEditData({ ...editData, nombre: e.target.value })}/>
+                  </div>
+                  <div>
+                    <label style={S.label}>Usuario (login)</label>
+                    <input style={S.input} value={editData.usuario||""} onChange={e => setEditData({ ...editData, usuario: e.target.value })} autoCapitalize="none"/>
+                  </div>
+                  <div>
+                    <label style={S.label}>Rol</label>
                     <select style={S.input} value={editData.rol||"Empleada"} onChange={e => setEditData({ ...editData, rol: e.target.value })}>
                       <option>Administrador</option><option>Empleada</option>
                     </select>
                   </div>
+                  <div style={{ gridColumn: "1/-1" }}>
+                    <label style={S.label}>Nueva contraseña <span style={{ color: "#aaa", fontWeight: 400 }}>(dejar vacío para no cambiar)</span></label>
+                    <div style={{ position: "relative" }}>
+                      <input
+                        type={showNuevaClave ? "text" : "password"}
+                        style={{ ...S.input, paddingRight: 44 }}
+                        placeholder="Nueva contraseña..."
+                        value={editData.nuevaClave||""}
+                        onChange={e => setEditData({ ...editData, nuevaClave: e.target.value })}
+                      />
+                      <button onClick={() => setShowNuevaClave(!showNuevaClave)}
+                        style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", fontSize: 16 }}>
+                        {showNuevaClave ? "🙈" : "👁️"}
+                      </button>
+                    </div>
+                    {editData.nuevaClave && <div style={{ fontSize: 11, color: "#2e7d32", marginTop: 4 }}>✅ Se cambiará la contraseña al guardar</div>}
+                  </div>
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button style={{ ...S.btnPrimary, flex: 1 }} onClick={guardarEdicion}>✓ Guardar</button>
-                  <button style={S.btnClose} onClick={() => setEditId(null)}>Cancelar</button>
+                  <button style={{ ...S.btnPrimary, flex: 1 }} onClick={guardarEdicion}>✓ Guardar cambios</button>
+                  <button style={S.btnClose} onClick={() => { setEditId(null); setError(""); }}>Cancelar</button>
                 </div>
               </div>
             ) : (
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
-                  <div style={{ fontWeight: 700 }}>{u.nombre}</div>
-                  <div style={{ fontSize: 12, color: "#888" }}>@{u.usuario} · {u.rol}</div>
+                  <div style={{ fontWeight: 700, fontSize: 15 }}>{u.nombre}</div>
+                  <div style={{ fontSize: 12, color: "#888" }}>
+                    👤 usuario: <strong>{u.usuario}</strong>
+                    {" · "}
+                    🔒 clave: <span style={{ letterSpacing: 2 }}>{showClaves[u.id] ? u.clave : "••••••"}</span>
+                    <button onClick={() => setShowClaves(prev => ({ ...prev, [u.id]: !prev[u.id] }))}
+                      style={{ background: "none", border: "none", cursor: "pointer", fontSize: 13, marginLeft: 4 }}>
+                      {showClaves[u.id] ? "🙈" : "👁️"}
+                    </button>
+                  </div>
                 </div>
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                  <div style={{ ...S.badge, background: u.rol === "Administrador" ? "#e8f5fd" : "#f3e8fd", color: u.rol === "Administrador" ? "#1565c0" : "#7c3aed" }}>{u.rol === "Administrador" ? "👑" : "👩"} {u.rol}</div>
-                  <button style={S.btnSmall} onClick={() => { setEditId(u.id); setEditData({ ...u }); }}>✏️</button>
+                  <div style={{ ...S.badge, background: u.rol === "Administrador" ? "#e8f5fd" : "#f3e8fd", color: u.rol === "Administrador" ? "#1565c0" : "#7c3aed" }}>
+                    {u.rol === "Administrador" ? "👑" : "👩"} {u.rol}
+                  </div>
+                  <button style={S.btnSmall} onClick={() => iniciarEdicion(u)}>✏️ Editar</button>
                   <button style={S.btnRemove} onClick={() => eliminar(u.id)}>✕</button>
                 </div>
               </div>
@@ -1767,19 +1919,29 @@ function GestionUsuarios() {
         ))}
       </Card>
 
-      <Card title="➕ Agregar usuario">
-        {error && <div style={S.error}>{error}</div>}
+      <Card title="➕ Agregar usuario nuevo">
+        {error && !editId && <div style={S.error}>{error}</div>}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          <div><label style={S.label}>Nombre completo</label><input style={S.input} placeholder="Nombre" value={nuevo.nombre} onChange={e => setNuevo({ ...nuevo, nombre: e.target.value })}/></div>
-          <div><label style={S.label}>Usuario</label><input style={S.input} placeholder="usuario123" value={nuevo.usuario} onChange={e => setNuevo({ ...nuevo, usuario: e.target.value })} autoCapitalize="none"/></div>
-          <div><label style={S.label}>Clave</label><input type="password" style={S.input} placeholder="Clave secreta" value={nuevo.clave} onChange={e => setNuevo({ ...nuevo, clave: e.target.value })}/></div>
-          <div><label style={S.label}>Rol</label>
+          <div style={{ gridColumn: "1/-1" }}>
+            <label style={S.label}>Nombre completo</label>
+            <input style={S.input} placeholder="Ej: María González" value={nuevo.nombre} onChange={e => setNuevo({ ...nuevo, nombre: e.target.value })}/>
+          </div>
+          <div>
+            <label style={S.label}>Usuario (para login)</label>
+            <input style={S.input} placeholder="Ej: maria" value={nuevo.usuario} onChange={e => setNuevo({ ...nuevo, usuario: e.target.value })} autoCapitalize="none"/>
+          </div>
+          <div>
+            <label style={S.label}>Contraseña</label>
+            <input type="password" style={S.input} placeholder="Contraseña segura" value={nuevo.clave} onChange={e => setNuevo({ ...nuevo, clave: e.target.value })}/>
+          </div>
+          <div style={{ gridColumn: "1/-1" }}>
+            <label style={S.label}>Rol</label>
             <select style={S.input} value={nuevo.rol} onChange={e => setNuevo({ ...nuevo, rol: e.target.value })}>
               <option>Administrador</option><option>Empleada</option>
             </select>
           </div>
         </div>
-        <button style={{ ...S.btnPrimary, marginTop: 10 }} onClick={agregar}>Agregar usuario</button>
+        <button style={{ ...S.btnPrimary, marginTop: 10 }} onClick={agregar}>➕ Crear usuario</button>
       </Card>
     </div>
   );
