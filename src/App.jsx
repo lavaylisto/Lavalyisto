@@ -1275,6 +1275,790 @@ function Configuracion({ servicios, setServicios, exportarDatos, importarDatos }
 }
 
 // ─── CIERRE DE CAJA ────────────────────────────────────────────────
+const BILLETES = [100, 50, 20, 10, 5, 1];
+const MONEDAS = [0.50, 0.25, 0.10, 0.05, 0.01];
+
+function CierreCaja({ ventas, empleadas }) {
+  const hoy = new Date().toISOString().split("T")[0];
+  const APERTURA_KEY = "ll_apertura_" + hoy;
+  const CIERRE_KEY = "ll_cierre_" + hoy;
+
+  const [modo, setModo] = useState(() => {
+    try { return localStorage.getItem(APERTURA_KEY) ? "cierre" : "apertura"; } catch { return "apertura"; }
+  });
+  const [apertura, setApertura] = useState(() => {
+    try { const a = localStorage.getItem(APERTURA_KEY); return a ? JSON.parse(a) : null; } catch { return null; }
+  });
+  const [cierreGuardado, setCierreGuardado] = useState(() => {
+    try { const c = localStorage.getItem(CIERRE_KEY); return c ? JSON.parse(c) : null; } catch { return null; }
+  });
+
+  // APERTURA STATE
+  const [aperturaEmpleada, setAperturaEmpleada] = useState(empleadas[0]?.id || null);
+  const [fondoInicial, setFondoInicial] = useState("15.00");
+
+  // CIERRE STATE - conteo por denominación
+  const [empleadaId, setEmpleadaId] = useState(empleadas[0]?.id || null);
+  const [billetes, setBilletes] = useState(() => Object.fromEntries(BILLETES.map(b => [b, ""])));
+  const [monedas, setMonedas] = useState(() => Object.fromEntries(MONEDAS.map(m => [m, ""])));
+  const [transferPichincha, setTransferPichincha] = useState("");
+  const [transferJEP, setTransferJEP] = useState("");
+  const [tarjeta, setTarjeta] = useState("");
+  const [paso, setPaso] = useState(1); // 1=billetes, 2=monedas, 3=transferencias, 4=resultado
+  const [confirmado, setConfirmado] = useState(false);
+
+  const ventasHoy = ventas.filter(v => v.fecha.startsWith(hoy) && !v.anulada);
+  const ventasEmp = empleadaId === "todos" ? ventasHoy : ventasHoy.filter(v => String(v.empleadaId) === String(empleadaId));
+
+  const esperadoEfectivo = ventasEmp.flatMap(v => (v.abonos || []).filter(a => a.metodo === "Efectivo")).reduce((a, ab) => a + ab.monto, 0);
+  const esperadoTransferencia = ventasEmp.flatMap(v => (v.abonos || []).filter(a => esTranferencia(a.metodo))).reduce((a, ab) => a + ab.monto, 0);
+  const esperadoTarjeta = ventasEmp.flatMap(v => (v.abonos || []).filter(a => a.metodo === "Tarjeta")).reduce((a, ab) => a + ab.monto, 0);
+  const esperadoTotal = esperadoEfectivo + esperadoTransferencia + esperadoTarjeta;
+
+  // Calcular totales del conteo
+  const totalBilletes = BILLETES.reduce((a, b) => a + (parseFloat(billetes[b]) || 0) * b, 0);
+  const totalMonedas = MONEDAS.reduce((a, m) => a + (parseFloat(monedas[m]) || 0) * m, 0);
+  const totalEfectivo = parseFloat((totalBilletes + totalMonedas).toFixed(2));
+  const totalTransfer = (parseFloat(transferPichincha) || 0) + (parseFloat(transferJEP) || 0);
+  const totalTarjeta = parseFloat(tarjeta) || 0;
+  const fondo = apertura?.fondo || 15;
+  const efNeto = parseFloat((totalEfectivo - fondo).toFixed(2));
+  const ventasReales = parseFloat((efNeto + totalTransfer + totalTarjeta).toFixed(2));
+  const difEf = parseFloat((efNeto - esperadoEfectivo).toFixed(2));
+  const difTr = parseFloat((totalTransfer - esperadoTransferencia).toFixed(2));
+  const difTa = parseFloat((totalTarjeta - esperadoTarjeta).toFixed(2));
+  const difTotal = parseFloat((ventasReales - esperadoTotal).toFixed(2));
+
+  const confirmarCierre = () => {
+    const datos = {
+      fecha: new Date().toISOString(),
+      empleada: empleadas.find(e => String(e.id) === String(empleadaId))?.nombre || "Todas",
+      billetes, monedas, totalBilletes, totalMonedas, totalEfectivo,
+      transferPichincha: parseFloat(transferPichincha) || 0,
+      transferJEP: parseFloat(transferJEP) || 0,
+      totalTransfer, totalTarjeta, fondo, efNeto, ventasReales,
+      esperadoEfectivo, esperadoTransferencia, esperadoTarjeta, esperadoTotal,
+      difEf, difTr, difTa, difTotal,
+      totalVentas: ventasEmp.length,
+      totalVentasVal: ventasEmp.reduce((a, v) => a + v.total, 0),
+    };
+    try { localStorage.setItem(CIERRE_KEY, JSON.stringify(datos)); } catch {}
+    setCierreGuardado(datos);
+    setConfirmado(true);
+    imprimirCierre(datos);
+  };
+
+  const imprimirCierre = (d) => {
+    const w = window.open("", "_blank", "width=420,height=700");
+    w.document.write(`
+      <html><head><title>Cierre de Caja</title>
+      <style>
+        body{font-family:sans-serif;padding:16px;max-width:360px;margin:0 auto}
+        h2{text-align:center;color:#1a3c5e;margin:4px 0}.sub{text-align:center;color:#888;font-size:12px;margin-bottom:12px}
+        .row{display:flex;justify-content:space-between;margin:4px 0;font-size:13px}
+        .row-sm{display:flex;justify-content:space-between;margin:2px 0;font-size:12px;color:#555}
+        .divider{border-top:1px dashed #ccc;margin:10px 0}
+        .total{font-size:16px;font-weight:800;margin:4px 0}
+        .ok{color:#2e7d32;font-weight:700}.bad{color:#c62828;font-weight:700}.info{color:#1565c0;font-weight:700}
+        .result{text-align:center;font-size:20px;font-weight:800;padding:12px;border-radius:8px;margin:12px 0}
+        .result.ok{background:#e8f5e9;color:#2e7d32}.result.bad{background:#ffebee;color:#c62828}.result.info{background:#e3f2fd;color:#1565c0}
+        table{width:100%;border-collapse:collapse;font-size:12px}
+        td{padding:3px 4px}td:last-child{text-align:right}
+        .logo{text-align:center;font-size:32px;margin-bottom:4px}
+      </style></head><body>
+      <div class="logo">🫧</div>
+      <h2>Lava&Listo</h2>
+      <div class="sub">CIERRE DE CAJA</div>
+      <div class="divider"></div>
+      <div class="row"><span>Fecha</span><span>${new Date(d.fecha).toLocaleString("es-MX")}</span></div>
+      <div class="row"><span>Empleada</span><span>${d.empleada}</span></div>
+      <div class="row"><span>Ventas del día</span><span>${d.totalVentas} órdenes · $${d.totalVentasVal.toFixed(2)}</span></div>
+      <div class="divider"></div>
+      <strong>💵 CONTEO DE EFECTIVO</strong>
+      <table style="margin-top:6px">
+        ${BILLETES.filter(b => (parseFloat(d.billetes[b]) || 0) > 0).map(b => `<tr><td>$${b} × ${d.billetes[b]}</td><td>$${(b * d.billetes[b]).toFixed(2)}</td></tr>`).join("")}
+        ${MONEDAS.filter(m => (parseFloat(d.monedas[m]) || 0) > 0).map(m => `<tr><td>$${m} × ${d.monedas[m]}</td><td>$${(m * d.monedas[m]).toFixed(2)}</td></tr>`).join("")}
+        <tr style="font-weight:700;border-top:1px solid #ccc"><td>Total efectivo</td><td>$${d.totalEfectivo.toFixed(2)}</td></tr>
+        <tr style="color:#e65100"><td>— Fondo caja</td><td>-$${d.fondo.toFixed(2)}</td></tr>
+        <tr style="font-weight:800"><td>Efectivo neto</td><td>$${d.efNeto.toFixed(2)}</td></tr>
+      </table>
+      <div class="divider"></div>
+      <div class="row"><span>🏦 Transf. Pichincha</span><span>$${d.transferPichincha.toFixed(2)}</span></div>
+      <div class="row"><span>🏦 Transf. JEP</span><span>$${d.transferJEP.toFixed(2)}</span></div>
+      <div class="row"><span>💳 Tarjeta</span><span>$${d.totalTarjeta.toFixed(2)}</span></div>
+      <div class="divider"></div>
+      <div class="row total"><span>TOTAL CONTADO</span><span>$${(d.efNeto + d.totalTransfer + d.totalTarjeta).toFixed(2)}</span></div>
+      <div class="row total"><span>TOTAL ESPERADO</span><span>$${d.esperadoTotal.toFixed(2)}</span></div>
+      <div class="divider"></div>
+      <div class="row"><span>Efectivo</span><span class="${d.difEf===0?"ok":d.difEf>0?"info":"bad"}">${d.difEf===0?"✅ Cuadra":d.difEf>0?`+$${d.difEf.toFixed(2)}`:`-$${Math.abs(d.difEf).toFixed(2)}`}</span></div>
+      <div class="row"><span>Transferencias</span><span class="${d.difTr===0?"ok":d.difTr>0?"info":"bad"}">${d.difTr===0?"✅ Cuadra":d.difTr>0?`+$${d.difTr.toFixed(2)}`:`-$${Math.abs(d.difTr).toFixed(2)}`}</span></div>
+      <div class="row"><span>Tarjeta</span><span class="${d.difTa===0?"ok":d.difTa>0?"info":"bad"}">${d.difTa===0?"✅ Cuadra":d.difTa>0?`+$${d.difTa.toFixed(2)}`:`-$${Math.abs(d.difTa).toFixed(2)}`}</span></div>
+      <div class="${d.difTotal===0?"result ok":d.difTotal>0?"result info":"result bad"}">
+        ${d.difTotal===0?"✅ CAJA CUADRADA":d.difTotal>0?`📈 SOBRA $${d.difTotal.toFixed(2)}`:`⚠️ FALTA $${Math.abs(d.difTotal).toFixed(2)}`}
+      </div>
+      <div class="divider"></div>
+      <p style="text-align:center;font-size:10px;color:#aaa">Lava&Listo · Sistema de ventas<br>Cierre generado: ${new Date().toLocaleString("es-MX")}</p>
+      <script>window.print();window.close();</script>
+      </body></html>
+    `);
+    w.document.close();
+  };
+
+  const registrarApertura = () => {
+    const datos = {
+      empleadaId: aperturaEmpleada,
+      empleadaNombre: empleadas.find(e => String(e.id) === String(aperturaEmpleada))?.nombre || "",
+      fondo: parseFloat(fondoInicial) || 15,
+      fecha: new Date().toISOString(),
+    };
+    try { localStorage.setItem(APERTURA_KEY, JSON.stringify(datos)); } catch {}
+    setApertura(datos);
+    setModo("cierre");
+    const w = window.open("", "_blank", "width=380,height=400");
+    if (w) {
+      w.document.write(`<html><head><title>Apertura</title><style>body{font-family:sans-serif;padding:20px;max-width:320px;margin:0 auto;text-align:center}h2{color:#1a3c5e}.divider{border-top:1px dashed #ccc;margin:12px 0}.row{display:flex;justify-content:space-between;margin:6px 0;font-size:14px;text-align:left}.big{font-size:26px;font-weight:800;color:#1a3c5e}</style></head><body><div style="font-size:36px">🫧</div><h2>Lava&Listo</h2><p><strong>APERTURA DE CAJA</strong></p><div class="divider"></div><div class="row"><span>Fecha</span><span>${new Date(datos.fecha).toLocaleString("es-MX")}</span></div><div class="row"><span>Abrió</span><span>${datos.empleadaNombre}</span></div><div class="divider"></div><p>Fondo inicial:</p><div class="big">$${datos.fondo.toFixed(2)}</div><div class="divider"></div><p style="font-size:11px;color:#aaa">Lava&Listo · Sistema de ventas</p><script>window.print();window.close();</script></body></html>`);
+      w.document.close();
+    }
+  };
+
+  const DifBadge = ({ dif }) => (
+    <span style={{ fontWeight: 700, fontSize: 13, color: dif === 0 ? "#2e7d32" : dif > 0 ? "#1565c0" : "#c62828" }}>
+      {dif === 0 ? "✅ Cuadra" : dif > 0 ? `📈 Sobra $${dif.toFixed(2)}` : `⚠️ Falta $${Math.abs(dif).toFixed(2)}`}
+    </span>
+  );
+
+  const ContadorDenominacion = ({ valor, cantidad, onChange, tipo }) => (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #f0f4f8" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ background: tipo === "billete" ? "#fff8e1" : "#e8f5e9", borderRadius: 6, padding: "4px 10px", fontSize: 14, fontWeight: 700, color: tipo === "billete" ? "#f59e0b" : "#2e7d32", minWidth: 56, textAlign: "center" }}>
+          ${valor}
+        </div>
+        <span style={{ fontSize: 12, color: "#888" }}>× cantidad</span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <button style={{ ...S.btnSmall, width: 32, textAlign: "center" }} onClick={() => onChange(Math.max(0, (parseFloat(cantidad) || 0) - 1))}>−</button>
+        <input type="number" min="0" style={{ ...S.input, width: 60, textAlign: "center", padding: "6px 4px" }}
+          value={cantidad} onChange={e => onChange(e.target.value)} />
+        <button style={{ ...S.btnSmall, width: 32, textAlign: "center" }} onClick={() => onChange((parseFloat(cantidad) || 0) + 1)}>+</button>
+        <div style={{ minWidth: 64, textAlign: "right", fontWeight: 700, color: "#1a3c5e", fontSize: 13 }}>
+          ${((parseFloat(cantidad) || 0) * valor).toFixed(2)}
+        </div>
+      </div>
+    </div>
+  );
+
+  // Si el cierre ya fue confirmado hoy, mostrar solo el resultado
+  if (cierreGuardado) {
+    const d = cierreGuardado;
+    return (
+      <div style={S.panel}>
+        <h2 style={S.panelTitle}>💰 Caja</h2>
+        <div style={{ background: "#e8f5fd", borderRadius: 10, padding: "12px 16px", marginBottom: 14, fontSize: 13 }}>
+          🔓 Apertura: <strong>{apertura?.empleadaNombre}</strong> · Fondo: <strong>${apertura?.fondo?.toFixed(2)}</strong>
+        </div>
+        <div style={{ ...S.kpi, borderLeft: `4px solid ${d.difTotal === 0 ? "#4caf50" : d.difTotal > 0 ? "#1565c0" : "#e53935"}`, marginBottom: 14 }}>
+          <div style={{ fontSize: 32 }}>{d.difTotal === 0 ? "✅" : d.difTotal > 0 ? "📈" : "⚠️"}</div>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 18, color: d.difTotal === 0 ? "#2e7d32" : d.difTotal > 0 ? "#1565c0" : "#e53935" }}>
+              {d.difTotal === 0 ? "¡Caja cuadrada!" : d.difTotal > 0 ? `Sobran $${d.difTotal.toFixed(2)}` : `Faltan $${Math.abs(d.difTotal).toFixed(2)}`}
+            </div>
+            <div style={{ fontSize: 12, color: "#888" }}>Cierre realizado · {new Date(d.fecha).toLocaleString("es-MX")}</div>
+            <div style={{ fontSize: 11, color: "#e65100" }}>El cierre del día ya fue confirmado</div>
+          </div>
+        </div>
+        <Card title="📊 Resumen del cierre">
+          <div style={{ fontSize: 13, marginBottom: 8 }}>💵 Efectivo contado: <strong>${d.totalEfectivo.toFixed(2)}</strong> — Fondo: <strong>${d.fondo.toFixed(2)}</strong> = Neto: <strong>${d.efNeto.toFixed(2)}</strong></div>
+          <div style={{ fontSize: 13, marginBottom: 4 }}>🏦 Pichincha: <strong>${d.transferPichincha.toFixed(2)}</strong> · JEP: <strong>${d.transferJEP.toFixed(2)}</strong></div>
+          <div style={{ fontSize: 13, marginBottom: 8 }}>💳 Tarjeta: <strong>${d.totalTarjeta.toFixed(2)}</strong></div>
+          {[{l:"💵 Efectivo",dif:d.difEf},{l:"🏦 Transferencias",dif:d.difTr},{l:"💳 Tarjeta",dif:d.difTa}].map(r=>(
+            <div key={r.l} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid #f0f4f8"}}>
+              <span style={{fontSize:13}}>{r.l}</span><DifBadge dif={r.dif}/>
+            </div>
+          ))}
+        </Card>
+        <button style={{ ...S.btnPrimary, background: "linear-gradient(135deg,#2e7d32,#388e3c)" }} onClick={() => imprimirCierre(d)}>
+          🖨️ Reimprimir ticket de cierre
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={S.panel}>
+      <h2 style={S.panelTitle}>💰 Caja</h2>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        <button style={{ ...S.pill, ...(modo === "apertura" ? S.pillActive : {}) }} onClick={() => setModo("apertura")}>🔓 Apertura</button>
+        <button style={{ ...S.pill, ...(modo === "cierre" ? S.pillActive : {}) }} onClick={() => setModo("cierre")}>🔒 Cierre</button>
+      </div>
+
+      {/* APERTURA */}
+      {modo === "apertura" && (
+        <div>
+          {apertura && <div style={{ ...S.alerta, background: "#e8f5e9", color: "#2e7d32" }}>✅ Caja ya abierta hoy por <strong>{apertura.empleadaNombre}</strong> con fondo de <strong>${apertura.fondo.toFixed(2)}</strong></div>}
+          <Card title="🔓 Apertura de caja">
+            <label style={S.label}>Empleada que abre caja</label>
+            <select style={{ ...S.input, marginBottom: 10 }} value={aperturaEmpleada} onChange={e => setAperturaEmpleada(e.target.value)}>
+              {empleadas.filter(e => e.activa).map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
+            </select>
+            <label style={S.label}>💵 Fondo inicial en caja</label>
+            <input type="number" style={{ ...S.input, marginBottom: 14, fontSize: 18, fontWeight: 700 }} value={fondoInicial} onChange={e => setFondoInicial(e.target.value)} />
+            <div style={{ background: "#e8f5fd", borderRadius: 8, padding: "10px 14px", marginBottom: 14, textAlign: "center" }}>
+              <div style={{ fontSize: 11, color: "#888" }}>Fondo que queda en caja</div>
+              <div style={{ fontSize: 24, fontWeight: 800, color: "#1a3c5e" }}>${parseFloat(fondoInicial || 0).toFixed(2)}</div>
+            </div>
+            <button style={S.btnPrimary} onClick={registrarApertura}>🔓 Registrar apertura e imprimir ticket</button>
+          </Card>
+        </div>
+      )}
+
+      {/* CIERRE */}
+      {modo === "cierre" && (
+        <div>
+          {apertura && <div style={{ background: "#e8f5fd", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 13 }}>🔓 Abierta por <strong>{apertura.empleadaNombre}</strong> · Fondo: <strong>${apertura.fondo.toFixed(2)}</strong></div>}
+
+          {/* RESUMEN ESPERADO */}
+          <Card title="📋 Lo esperado del día">
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+              <div style={{ ...S.kpi, borderLeft: "4px solid #1a3c5e", padding: 10 }}>
+                <div style={{ fontSize: 18 }}>🧾</div>
+                <div><div style={{ fontWeight: 800, fontSize: 16, color: "#1a3c5e" }}>{ventasEmp.length}</div><div style={{ fontSize: 11, color: "#888" }}>Ventas hoy</div></div>
+              </div>
+              <div style={{ ...S.kpi, borderLeft: "4px solid #4caf50", padding: 10 }}>
+                <div style={{ fontSize: 18 }}>💰</div>
+                <div><div style={{ fontWeight: 800, fontSize: 16, color: "#4caf50" }}>${(esperadoTotal + fondo).toFixed(2)}</div><div style={{ fontSize: 11, color: "#888" }}>Esperado en caja</div></div>
+              </div>
+            </div>
+            <div style={{ fontSize: 12, color: "#555" }}>💵 Efectivo: <strong>${esperadoEfectivo.toFixed(2)}</strong> + fondo <strong>${fondo.toFixed(2)}</strong> = <strong>${(esperadoEfectivo + fondo).toFixed(2)}</strong></div>
+            <div style={{ fontSize: 12, color: "#555", marginTop: 2 }}>🏦 Transferencias: <strong>${esperadoTransferencia.toFixed(2)}</strong></div>
+            <div style={{ fontSize: 12, color: "#555", marginTop: 2 }}>💳 Tarjeta: <strong>${esperadoTarjeta.toFixed(2)}</strong></div>
+          </Card>
+
+          {/* PASOS */}
+          <div style={{ display: "flex", gap: 6, marginBottom: 14, overflowX: "auto" }}>
+            {[{n:1,l:"💵 Billetes"},{n:2,l:"🪙 Monedas"},{n:3,l:"🏦 Digital"},{n:4,l:"✅ Confirmar"}].map(p => (
+              <div key={p.n} style={{ ...S.badge, background: paso >= p.n ? "#1a3c5e" : "#e8f0f7", color: paso >= p.n ? "#fff" : "#888", padding: "6px 10px", fontSize: 11, whiteSpace: "nowrap", cursor: paso > p.n ? "pointer" : "default" }}
+                onClick={() => { if (!confirmado && paso > p.n) setPaso(p.n); }}>
+                {p.n}. {p.l}
+              </div>
+            ))}
+          </div>
+
+          {/* PASO 1: BILLETES */}
+          {paso === 1 && (
+            <Card title="💵 Paso 1 — Cuenta los billetes">
+              {BILLETES.map(b => (
+                <ContadorDenominacion key={b} valor={b} cantidad={billetes[b]} tipo="billete"
+                  onChange={val => setBilletes(prev => ({ ...prev, [b]: val }))} />
+              ))}
+              <div style={{ background: "#fff8e1", borderRadius: 8, padding: "10px 14px", marginTop: 10, display: "flex", justifyContent: "space-between" }}>
+                <span style={{ fontWeight: 700 }}>Total billetes:</span>
+                <span style={{ fontWeight: 800, fontSize: 16, color: "#f59e0b" }}>${totalBilletes.toFixed(2)}</span>
+              </div>
+              <button style={{ ...S.btnPrimary, marginTop: 10 }} onClick={() => setPaso(2)}>Siguiente: Monedas →</button>
+            </Card>
+          )}
+
+          {/* PASO 2: MONEDAS */}
+          {paso === 2 && (
+            <Card title="🪙 Paso 2 — Cuenta las monedas">
+              {MONEDAS.map(m => (
+                <ContadorDenominacion key={m} valor={m} cantidad={monedas[m]} tipo="moneda"
+                  onChange={val => setMonedas(prev => ({ ...prev, [m]: val }))} />
+              ))}
+              <div style={{ background: "#e8f5e9", borderRadius: 8, padding: "10px 14px", marginTop: 10, display: "flex", justifyContent: "space-between" }}>
+                <span style={{ fontWeight: 700 }}>Total monedas:</span>
+                <span style={{ fontWeight: 800, fontSize: 16, color: "#2e7d32" }}>${totalMonedas.toFixed(2)}</span>
+              </div>
+              <div style={{ background: "#e8f5fd", borderRadius: 8, padding: "10px 14px", marginTop: 6, display: "flex", justifyContent: "space-between" }}>
+                <span style={{ fontWeight: 700 }}>💵 Total efectivo:</span>
+                <span style={{ fontWeight: 800, fontSize: 16, color: "#1a3c5e" }}>${totalEfectivo.toFixed(2)}</span>
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <button style={{ ...S.btnClose, flex: 1 }} onClick={() => setPaso(1)}>← Billetes</button>
+                <button style={{ ...S.btnPrimary, flex: 2 }} onClick={() => setPaso(3)}>Siguiente: Digital →</button>
+              </div>
+            </Card>
+          )}
+
+          {/* PASO 3: TRANSFERENCIAS Y TARJETA */}
+          {paso === 3 && (
+            <Card title="🏦 Paso 3 — Pagos digitales">
+              <label style={S.label}>🏦 Transferencias Banco Pichincha</label>
+              <input type="number" style={{ ...S.input, marginBottom: 12 }} placeholder="$0.00" value={transferPichincha} onChange={e => setTransferPichincha(e.target.value)} />
+              <label style={S.label}>🏦 Transferencias JEP</label>
+              <input type="number" style={{ ...S.input, marginBottom: 12 }} placeholder="$0.00" value={transferJEP} onChange={e => setTransferJEP(e.target.value)} />
+              <label style={S.label}>💳 Pagos con tarjeta</label>
+              <input type="number" style={{ ...S.input, marginBottom: 12 }} placeholder="$0.00" value={tarjeta} onChange={e => setTarjeta(e.target.value)} />
+              <div style={{ background: "#e8f5fd", borderRadius: 8, padding: "10px 14px", marginBottom: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}><span>🏦 Total transferencias:</span><strong>${totalTransfer.toFixed(2)}</strong></div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginTop: 4 }}><span>💳 Tarjeta:</span><strong>${totalTarjeta.toFixed(2)}</strong></div>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button style={{ ...S.btnClose, flex: 1 }} onClick={() => setPaso(2)}>← Monedas</button>
+                <button style={{ ...S.btnPrimary, flex: 2 }} onClick={() => setPaso(4)}>Ver resultado →</button>
+              </div>
+            </Card>
+          )}
+
+          {/* PASO 4: RESULTADO Y CONFIRMACIÓN */}
+          {paso === 4 && !confirmado && (
+            <div>
+              <Card title="✅ Paso 4 — Resumen del cierre">
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#1a3c5e", marginBottom: 6 }}>💵 Efectivo</div>
+                  {BILLETES.filter(b => (parseFloat(billetes[b]) || 0) > 0).map(b => (
+                    <div key={b} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#555" }}>
+                      <span>${b} × {billetes[b]}</span><span>${(b * billetes[b]).toFixed(2)}</span>
+                    </div>
+                  ))}
+                  {MONEDAS.filter(m => (parseFloat(monedas[m]) || 0) > 0).map(m => (
+                    <div key={m} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#555" }}>
+                      <span>${m} × {monedas[m]}</span><span>${(m * monedas[m]).toFixed(2)}</span>
+                    </div>
+                  ))}
+                  <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, fontSize: 13, borderTop: "1px solid #e8f0f7", marginTop: 4, paddingTop: 4 }}>
+                    <span>Total efectivo contado</span><span>${totalEfectivo.toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#e65100" }}>
+                    <span>— Fondo que queda en caja</span><span>-${fondo.toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800, fontSize: 14, color: "#1a3c5e" }}>
+                    <span>Efectivo neto</span><span>${efNeto.toFixed(2)}</span>
+                  </div>
+                </div>
+                <div style={{ borderTop: "1px dashed #d0dce8", paddingTop: 8, marginBottom: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}><span>🏦 Pichincha</span><strong>${(parseFloat(transferPichincha)||0).toFixed(2)}</strong></div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}><span>🏦 JEP</span><strong>${(parseFloat(transferJEP)||0).toFixed(2)}</strong></div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}><span>💳 Tarjeta</span><strong>${totalTarjeta.toFixed(2)}</strong></div>
+                </div>
+                <div style={{ borderTop: "2px solid #1a3c5e", paddingTop: 8 }}>
+                  {[{l:"💵 Efectivo (neto)",c:efNeto,e:esperadoEfectivo,d:difEf},{l:"🏦 Transferencias",c:totalTransfer,e:esperadoTransferencia,d:difTr},{l:"💳 Tarjeta",c:totalTarjeta,e:esperadoTarjeta,d:difTa}].map(r => (
+                    <div key={r.l} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 0", borderBottom: "1px solid #f0f4f8" }}>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>{r.l}</div>
+                        <div style={{ fontSize: 11, color: "#888" }}>Contado ${r.c.toFixed(2)} / Esperado ${r.e.toFixed(2)}</div>
+                      </div>
+                      <DifBadge dif={r.d}/>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ background: difTotal === 0 ? "#e8f5e9" : difTotal > 0 ? "#e3f2fd" : "#ffebee", borderRadius: 10, padding: "14px", marginTop: 10, textAlign: "center" }}>
+                  <div style={{ fontSize: 22, fontWeight: 800, color: difTotal === 0 ? "#2e7d32" : difTotal > 0 ? "#1565c0" : "#c62828" }}>
+                    {difTotal === 0 ? "✅ ¡CAJA CUADRADA!" : difTotal > 0 ? `📈 SOBRA $${difTotal.toFixed(2)}` : `⚠️ FALTA $${Math.abs(difTotal).toFixed(2)}`}
+                  </div>
+                </div>
+              </Card>
+              <div style={{ background: "#fff3e0", borderRadius: 8, padding: "10px 14px", marginBottom: 10, fontSize: 13, color: "#e65100" }}>
+                ⚠️ Una vez confirmado el cierre <strong>no podrás modificarlo</strong>. Revisa bien antes de confirmar.
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button style={{ ...S.btnClose, flex: 1 }} onClick={() => setPaso(3)}>← Corregir</button>
+                <button style={{ ...S.btnPrimary, flex: 2, background: "linear-gradient(135deg,#2e7d32,#388e3c)" }} onClick={confirmarCierre}>
+                  ✅ Confirmar e imprimir cierre
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function PendienteItem({ v, empleadas, setTicket, addAbono, setVentas }) {
+  const [showAbono, setShowAbono] = useState(false);
+  const emp = empleadas.find(e => e.id === v.empleadaId);
+  const pendiente = saldoPendiente(v);
+  const pagada = estaPagada(v);
+  const abonos = v.abonos || [];
+  const totalAbonado = abonos.reduce((a, ab) => a + ab.monto, 0);
+
+  const toggleField = (field) => setVentas && setVentas(prev =>
+    prev.map(vv => vv.folio === v.folio ? { ...vv, [field]: !vv[field] } : vv)
+  );
+
+  return (
+    <div>
+      <div style={{ ...S.ventaCard, borderLeft: `4px solid ${pagada ? "#ff9800" : "#e53935"}` }}>
+        <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+          {!pagada && <div style={{ ...S.badge, background: "#ffebee", color: "#c62828" }}>💸 Pendiente cobro</div>}
+          {pagada && !v.checkMsgEntrega && <div style={{ ...S.badge, background: "#fff3e0", color: "#e65100" }}>📦 Pendiente retiro</div>}
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontWeight: 700, color: "#1a3c5e", fontSize: 15 }}>{v.clienteNombre}</div>
+            <div style={{ fontSize: 11, color: "#888" }}>{v.folio} · {fmt(v.fecha)}</div>
+            {emp && <div style={{ fontSize: 11, color: "#4db6e4" }}>👩 Registró: {emp.nombre}</div>}
+            <div style={{ fontSize: 12, color: "#555", marginTop: 4 }}>
+              {v.items.map((it, i) => <span key={i}>{it.label}{it.piezas > 1 ? ` ×${it.piezas}` : ""}{i < v.items.length - 1 ? " · " : ""}</span>)}
+            </div>
+            <div style={{ fontSize: 12, color: "#555", marginTop: 2 }}>📅 Entrega: {fmtDate(v.entrega)}</div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontWeight: 800, fontSize: 18, color: "#1a3c5e" }}>${v.total.toFixed(2)}</div>
+            {!pagada && <div style={{ fontSize: 13, color: "#e53935", fontWeight: 700 }}>Debe: ${pendiente.toFixed(2)}</div>}
+            {totalAbonado > 0 && <div style={{ fontSize: 11, color: "#2e7d32" }}>Abonado: ${totalAbonado.toFixed(2)}</div>}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
+          <label style={S.checkLabel}>
+            <input type="checkbox" checked={v.checkMsgRetiro||false} onChange={() => toggleField("checkMsgRetiro")}/>
+            <span>📲 Msg retiro enviado</span>
+          </label>
+          <label style={S.checkLabel}>
+            <input type="checkbox" checked={v.checkMsgEntrega||false} onChange={() => toggleField("checkMsgEntrega")}/>
+            <span>✅ Entregado al cliente</span>
+          </label>
+        </div>
+        <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+          <button style={S.btnTicket} onClick={() => setTicket(v)}>🧾 Ticket</button>
+          {!pagada && (
+            <button style={{ ...S.btnTicket, background: "#e8f5e9", color: "#2e7d32", fontWeight: 700 }}
+              onClick={() => setShowAbono(true)}>
+              💰 Cobrar
+            </button>
+          )}
+        </div>
+      </div>
+      {showAbono && (
+        <AbonoModal venta={v}
+          onSave={(abono) => { addAbono(v.folio, abono); setShowAbono(false); }}
+          onClose={() => setShowAbono(false)}/>
+      )}
+    </div>
+  );
+}
+
+// ─── REPORTES CON EXPORTACIÓN EXCEL ───────────────────────────────
+function Reportes({ ventas, empleadas }) {
+  const hoy=new Date().toISOString().split("T")[0];
+  const semana=semanaISO(new Date());
+  const mes=mesKey(new Date());
+  const [mesSelec,setMesSelec]=useState(mes);
+  const [empSelec,setEmpSelec]=useState("Todos");
+
+  const ventasHoy=ventas.filter(v=>v.fecha.startsWith(hoy));
+  const ventasSem=ventas.filter(v=>semanaISO(v.fecha)===semana);
+  const ventasMes=ventas.filter(v=>mesKey(v.fecha)===mesSelec);
+  const ventasMesEmp=empSelec==="Todos"?ventasMes:ventasMes.filter(v=>String(v.empleadaId)===empSelec);
+
+  const sum=arr=>arr.reduce((a,v)=>a+v.total,0);
+  const cobrado=arr=>arr.reduce((a,v)=>a+(v.abonos||[]).reduce((x,ab)=>x+ab.monto,0),0);
+  const porCobrar=arr=>arr.reduce((a,v)=>a+saldoPendiente(v),0);
+
+  const byPago=PAGOS.map(p=>({label:p,val:ventasMes.flatMap(v=>(v.abonos||[]).filter(a=>a.metodo===p)).reduce((a,ab)=>a+ab.monto,0)}));
+  const totalCobradoMes=byPago.reduce((a,p)=>a+p.val,0);
+
+  const ventasPorMes=(()=>{const map={};ventas.forEach(v=>{const k=mesKey(v.fecha);map[k]=(map[k]||0)+v.total;});return Object.entries(map).sort().slice(-6).map(([k,v])=>({label:k.slice(5)+"/"+k.slice(0,4),val:v}));})();
+
+  const empStats=empleadas.map(e=>{
+    const mv=ventas.filter(v=>v.empleadaId===e.id&&mesKey(v.fecha)===mesSelec);
+    return {...e,count:mv.length,total:mv.reduce((a,v)=>a+v.total,0)};
+  }).sort((a,b)=>b.count-a.count);
+
+  const BtnExport=({label,arr,titulo})=>(
+    <button style={{...S.btnSmall,background:"#e8f5e9",color:"#2e7d32",display:"flex",alignItems:"center",gap:4}}
+      onClick={()=>exportarCSV(arr,titulo,empleadas)}>
+      📥 {label}
+    </button>
+  );
+
+  const KPI=({icon,label,val,sub,color})=>(
+    <div style={{...S.kpi,borderLeft:`4px solid ${color}`}}>
+      <div style={{fontSize:22}}>{icon}</div>
+      <div><div style={{fontWeight:800,fontSize:18,color}}>{val}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>{label}</div>{sub&&<div style={{fontSize:11,color:"#888"}}>{sub}</div>}</div>
+    </div>
+  );
+
+  return (
+    <div style={S.panel}>
+      <h2 style={S.panelTitle}>📊 Reportes</h2>
+
+      {/* EXPORTAR */}
+      <Card title="📥 Exportar a Excel">
+        <p style={{fontSize:13,color:"#555",marginBottom:12}}>Descarga reportes en formato CSV que se abren directamente en Excel.</p>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <BtnExport label="Reporte hoy" arr={ventasHoy} titulo="reporte-hoy"/>
+          <BtnExport label="Reporte semanal" arr={ventasSem} titulo="reporte-semana"/>
+          <BtnExport label="Reporte mensual" arr={ventasMes} titulo={`reporte-${mesSelec}`}/>
+          <BtnExport label="Todas las ventas" arr={ventas} titulo="reporte-completo"/>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:8}}>
+          <div>
+            <label style={S.label}>Mes para reporte</label>
+            <input type="month" style={S.input} value={mesSelec} onChange={e=>setMesSelec(e.target.value)}/>
+          </div>
+          <div>
+            <label style={S.label}>Filtrar por empleada</label>
+            <select style={S.input} value={empSelec} onChange={e=>setEmpSelec(e.target.value)}>
+              <option value="Todos">Todas</option>
+              {empleadas.map(e=><option key={e.id} value={String(e.id)}>{e.nombre}</option>)}
+            </select>
+          </div>
+        </div>
+        {empSelec!=="Todos"&&(
+          <button style={{...S.btnSmall,marginTop:8,background:"#e8f5e9",color:"#2e7d32"}}
+            onClick={()=>exportarCSV(ventasMesEmp,`reporte-${empleadas.find(e=>String(e.id)===empSelec)?.nombre}-${mesSelec}`,empleadas)}>
+            📥 Exportar reporte por empleada
+          </button>
+        )}
+      </Card>
+
+      {/* KPIs */}
+      <div style={S.kpiGrid}>
+        <KPI icon="☀️" label="Ventas hoy" val={`$${sum(ventasHoy).toFixed(2)}`} sub={`${ventasHoy.length} órdenes`} color="#f59e0b"/>
+        <KPI icon="📅" label="Esta semana" val={`$${sum(ventasSem).toFixed(2)}`} sub={`${ventasSem.length} órdenes`} color="#4db6e4"/>
+        <KPI icon="💚" label="Cobrado este mes" val={`$${cobrado(ventasMes).toFixed(2)}`} sub="Pagos recibidos" color="#4caf50"/>
+        <KPI icon="⏳" label="Por cobrar" val={`$${porCobrar(ventasMes).toFixed(2)}`} sub="Saldo pendiente" color="#e53935"/>
+      </div>
+
+      <Card title="💳 Cobros del mes por método">
+        {byPago.map(p=>(
+          <div key={p.label} style={{marginBottom:10}}>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:3}}><span>{p.label}</span><strong>${p.val.toFixed(2)}</strong></div>
+            <div style={{background:"#e8f0f7",borderRadius:4,height:8}}>
+              <div style={{background:p.label==="Efectivo"?"#4caf50":esTranferencia(p.label)?"#4db6e4":"#ff9800",width:`${totalCobradoMes?(p.val/totalCobradoMes)*100:0}%`,height:"100%",borderRadius:4}}/>
+            </div>
+          </div>
+        ))}
+      </Card>
+
+      <Card title="📈 Ventas por mes (últimos 6)">
+        {ventasPorMes.length===0?<div style={S.empty}>Sin datos</div>:ventasPorMes.map(m=>{
+          const max=Math.max(...ventasPorMes.map(x=>x.val),1);
+          return(
+            <div key={m.label} style={{marginBottom:8}}>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:2}}><span>{m.label}</span><strong>${m.val.toFixed(2)}</strong></div>
+              <div style={{background:"#e8f0f7",borderRadius:4,height:10}}><div style={{background:"#1a3c5e",width:`${(m.val/max)*100}%`,height:"100%",borderRadius:4}}/></div>
+            </div>
+          );
+        })}
+      </Card>
+
+      <Card title="🏆 Ranking empleadas">
+        {empStats.map((e,i)=>{
+          const meta=e.metaVentas||20;
+          const pct=Math.min(100,(e.count/meta)*100);
+          const ganoBono=e.count>=meta;
+          return(
+            <div key={e.id} style={{padding:"10px 0",borderBottom:"1px solid #f0f4f8"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <div style={{fontSize:18}}>{i===0?"🥇":i===1?"🥈":i===2?"🥉":"👤"}</div>
+                <div style={{flex:1}}>
+                  <div style={{fontWeight:600,fontSize:14}}>{e.nombre}</div>
+                  <div style={{fontSize:12,color:"#888"}}>{e.count} ventas · ${e.total.toFixed(2)} · Meta: {meta}</div>
+                </div>
+                {ganoBono&&<div style={{...S.badge,background:"#fff8e1",color:"#f59e0b"}}>🌟 ${e.montoBonus||0}</div>}
+              </div>
+              <div style={{marginTop:6}}>
+                <div style={{background:"#e8f0f7",borderRadius:6,height:6}}><div style={{background:ganoBono?"#f59e0b":"#4db6e4",width:`${pct}%`,height:"100%",borderRadius:6}}/></div>
+              </div>
+            </div>
+          );
+        })}
+      </Card>
+    </div>
+  );
+}
+
+// ─── INVENTARIO ────────────────────────────────────────────────────
+function Inventario({ inventario, setInventario }) {
+  const [nuevo,setNuevo]=useState({nombre:"",stock:0,min:1,unidad:"pzas"});
+  const update=(id,field,val)=>setInventario(prev=>prev.map(i=>i.id===id?{...i,[field]:val}:i));
+  const eliminar=(id)=>setInventario(prev=>prev.filter(i=>i.id!==id));
+  const agregar=()=>{if(!nuevo.nombre.trim()) return;setInventario(prev=>[...prev,{...nuevo,id:Date.now(),stock:parseFloat(nuevo.stock)||0}]);setNuevo({nombre:"",stock:0,min:1,unidad:"pzas"});};
+  const bajoStock=inventario.filter(i=>i.stock<=i.min);
+  return (
+    <div style={S.panel}>
+      <h2 style={S.panelTitle}>Inventario de Insumos</h2>
+      {bajoStock.length>0&&<div style={S.alerta}>⚠️ Stock bajo: {bajoStock.map(i=>i.nombre).join(", ")}</div>}
+      <Card title="📋 Insumos">
+        {inventario.map(item=>(
+          <div key={item.id} style={S.ventaCard}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div><div style={{fontWeight:600}}>{item.nombre}</div><div style={{fontSize:12,color:"#888"}}>Mínimo: {item.min} {item.unidad}</div></div>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <div style={{...S.badge,background:item.stock<=item.min?"#ffebee":"#e8f5e9",color:item.stock<=item.min?"#c62828":"#2e7d32",fontSize:14,fontWeight:700}}>{item.stock} {item.unidad}</div>
+                <button style={S.btnRemove} onClick={()=>eliminar(item.id)}>✕</button>
+              </div>
+            </div>
+            <div style={{display:"flex",gap:6,marginTop:8,alignItems:"center"}}>
+              <button style={S.btnSmall} onClick={()=>update(item.id,"stock",Math.max(0,item.stock-1))}>−</button>
+              <input type="number" style={{...S.input,width:70,textAlign:"center",padding:"4px 6px"}} value={item.stock} onChange={e=>update(item.id,"stock",parseFloat(e.target.value)||0)}/>
+              <button style={S.btnSmall} onClick={()=>update(item.id,"stock",item.stock+1)}>+</button>
+            </div>
+          </div>
+        ))}
+      </Card>
+      <Card title="➕ Agregar insumo">
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <input style={{...S.input,gridColumn:"1/-1"}} placeholder="Nombre" value={nuevo.nombre} onChange={e=>setNuevo({...nuevo,nombre:e.target.value})}/>
+          <input type="number" style={S.input} placeholder="Stock inicial" value={nuevo.stock} onChange={e=>setNuevo({...nuevo,stock:e.target.value})}/>
+          <input type="number" style={S.input} placeholder="Stock mínimo" value={nuevo.min} onChange={e=>setNuevo({...nuevo,min:e.target.value})}/>
+          <input style={S.input} placeholder="Unidad (kg,L,pzas)" value={nuevo.unidad} onChange={e=>setNuevo({...nuevo,unidad:e.target.value})}/>
+        </div>
+        <button style={{...S.btnPrimary,marginTop:10}} onClick={agregar}>Agregar</button>
+      </Card>
+    </div>
+  );
+}
+
+// ─── EQUIPO ────────────────────────────────────────────────────────
+function Equipo({ empleadas, setEmpleadas, ventas, esAdmin }) {
+  const [nuevo,setNuevo]=useState({nombre:"",metaVentas:20,montoBonus:20});
+  const [editId,setEditId]=useState(null);
+  const [editData,setEditData]=useState({nombre:"",metaVentas:20,montoBonus:20});
+  const mes=mesKey(new Date());
+
+  const agregar=()=>{
+    if(!nuevo.nombre.trim()) return;
+    setEmpleadas(prev=>[...prev,{id:Date.now(),nombre:nuevo.nombre,activa:true,metaVentas:parseInt(nuevo.metaVentas)||20,montoBonus:parseFloat(nuevo.montoBonus)||0}]);
+    setNuevo({nombre:"",metaVentas:20,montoBonus:20});
+  };
+  const toggle=(id)=>setEmpleadas(prev=>prev.map(e=>e.id===id?{...e,activa:!e.activa}:e));
+  const iniciarEdicion=(e)=>{setEditId(e.id);setEditData({nombre:e.nombre,metaVentas:e.metaVentas||20,montoBonus:e.montoBonus||0});};
+  const guardarEdicion=()=>{
+    setEmpleadas(prev=>prev.map(e=>e.id===editId?{...e,...editData,metaVentas:parseInt(editData.metaVentas)||20,montoBonus:parseFloat(editData.montoBonus)||0}:e));
+    setEditId(null);
+  };
+  const empStats=empleadas.map(e=>{
+    const mv=ventas.filter(v=>v.empleadaId===e.id&&mesKey(v.fecha)===mes);
+    return {...e,ventasMes:mv.length,totalMes:mv.reduce((a,v)=>a+v.total,0)};
+  });
+
+  return (
+    <div style={S.panel}>
+      <h2 style={S.panelTitle}>Equipo & Bonos</h2>
+      <Card title="👩 Empleadas">
+        {empStats.map(e=>{
+          const meta=e.metaVentas||20;
+          const bono=e.montoBonus||0;
+          const pct=Math.min(100,(e.ventasMes/meta)*100);
+          const ganoBono=e.ventasMes>=meta;
+          return(
+            <div key={e.id} style={{...S.ventaCard,opacity:e.activa?1:0.6}}>
+              {editId===e.id?(
+                <div>
+                  <div style={{fontWeight:700,color:"#1a3c5e",marginBottom:8}}>✏️ Editando</div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr",gap:8,marginBottom:8}}>
+                    <div><label style={S.label}>Nombre</label><input style={S.input} value={editData.nombre} onChange={ev=>setEditData({...editData,nombre:ev.target.value})}/></div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                      <div><label style={S.label}>Meta ventas/mes</label><input type="number" style={S.input} value={editData.metaVentas} onChange={ev=>setEditData({...editData,metaVentas:ev.target.value})}/></div>
+                      <div><label style={S.label}>Monto bono ($)</label><input type="number" style={S.input} value={editData.montoBonus} onChange={ev=>setEditData({...editData,montoBonus:ev.target.value})}/></div>
+                    </div>
+                  </div>
+                  <div style={{display:"flex",gap:8}}>
+                    <button style={{...S.btnPrimary,flex:1}} onClick={guardarEdicion}>✓ Guardar</button>
+                    <button style={S.btnClose} onClick={()=>setEditId(null)}>Cancelar</button>
+                  </div>
+                </div>
+              ):(
+                <>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div>
+                      <div style={{fontWeight:700,fontSize:15}}>{e.nombre}</div>
+                      <div style={{fontSize:12,color:"#888"}}>{e.ventasMes} ventas este mes</div>
+                      {esAdmin && <div style={{fontSize:11,color:"#4db6e4"}}>Meta: {meta} ventas · Bono: ${bono}</div>}
+                    </div>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
+                      {ganoBono&&<div style={{...S.badge,background:"#fff8e1",color:"#f59e0b"}}>🌟 {esAdmin?`$${bono}`:"¡Bono!"}</div>}
+                      {esAdmin && <button style={S.btnSmall} onClick={()=>iniciarEdicion(e)}>✏️</button>}
+                      {esAdmin && <button style={{...S.btnSmall,background:e.activa?"#ffebee":"#e8f5e9",color:e.activa?"#c62828":"#2e7d32"}} onClick={()=>toggle(e.id)}>{e.activa?"Desactivar":"Activar"}</button>}
+                    </div>
+                  </div>
+                  <div style={{marginTop:8}}>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#888",marginBottom:3}}><span>Progreso bono</span><span>{e.ventasMes}/{meta}</span></div>
+                    <div style={{background:"#e8f0f7",borderRadius:6,height:8}}><div style={{background:ganoBono?"#f59e0b":"#4db6e4",width:`${pct}%`,height:"100%",borderRadius:6}}/></div>
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })}
+      </Card>
+      {esAdmin && <Card title="➕ Agregar empleada">
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <input style={{...S.input,gridColumn:"1/-1"}} placeholder="Nombre completo" value={nuevo.nombre} onChange={e=>setNuevo({...nuevo,nombre:e.target.value})}/>
+          <div><label style={S.label}>Meta ventas/mes</label><input type="number" style={S.input} value={nuevo.metaVentas} onChange={e=>setNuevo({...nuevo,metaVentas:e.target.value})}/></div>
+          <div><label style={S.label}>Monto bono ($)</label><input type="number" style={S.input} value={nuevo.montoBonus} onChange={e=>setNuevo({...nuevo,montoBonus:e.target.value})}/></div>
+        </div>
+        <button style={{...S.btnPrimary,marginTop:10}} onClick={agregar}>Agregar empleada</button>
+      </Card>}
+    </div>
+  );
+}
+
+// ─── CONFIGURACION ─────────────────────────────────────────────────
+function Configuracion({ servicios, setServicios, exportarDatos, importarDatos }) {
+  const [nuevo,setNuevo]=useState({label:"",precio:""});
+  const [editId,setEditId]=useState(null);
+  const [editData,setEditData]=useState({label:"",precio:""});
+  const [busq,setBusq]=useState("");
+
+  const agregar=()=>{
+    if(!nuevo.label.trim()||!nuevo.precio) return;
+    setServicios(prev=>[...prev,{id:"custom-"+Date.now(),label:nuevo.label.toUpperCase(),precio:parseFloat(nuevo.precio)}]);
+    setNuevo({label:"",precio:""});
+  };
+  const eliminar=(id)=>setServicios(prev=>prev.filter(s=>s.id!==id));
+  const iniciarEdicion=(s)=>{setEditId(s.id);setEditData({label:s.label,precio:s.precio});};
+  const guardarEdicion=()=>{
+    setServicios(prev=>prev.map(s=>s.id===editId?{...s,label:editData.label.toUpperCase(),precio:parseFloat(editData.precio)}:s));
+    setEditId(null);
+  };
+  const filtrados=servicios.filter(s=>s.label.toLowerCase().includes(busq.toLowerCase()));
+
+  return (
+    <div style={S.panel}>
+      <h2 style={S.panelTitle}>⚙️ Configuración</h2>
+      <Card title="💾 Respaldo de datos">
+        <p style={{fontSize:13,color:"#555",marginBottom:12}}>Exporta todos tus datos para guardar o restaurar en otro dispositivo.</p>
+        <button style={{...S.btnPrimary,marginBottom:10}} onClick={exportarDatos}>📥 Exportar datos (Respaldo)</button>
+        <label style={{...S.btnPrimary,display:"block",textAlign:"center",cursor:"pointer",background:"#e8f5fd",color:"#1a3c5e",padding:"13px",borderRadius:10,fontSize:15,fontWeight:700}}>
+          📤 Importar datos (Restaurar)
+          <input type="file" accept=".json" style={{display:"none"}} onChange={importarDatos}/>
+        </label>
+        <p style={{fontSize:11,color:"#aaa",marginTop:8}}>⚠️ Importar reemplazará todos los datos actuales.</p>
+      </Card>
+      <Card title="➕ Agregar nuevo servicio">
+        <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8}}>
+          <input style={S.input} placeholder="Nombre del servicio" value={nuevo.label} onChange={e=>setNuevo({...nuevo,label:e.target.value})}/>
+          <input type="number" style={{...S.input,width:90}} placeholder="$Precio" value={nuevo.precio} onChange={e=>setNuevo({...nuevo,precio:e.target.value})}/>
+        </div>
+        <button style={{...S.btnPrimary,marginTop:8}} onClick={agregar}>Agregar servicio</button>
+      </Card>
+      <Card title={`📋 Servicios (${servicios.length})`}>
+        <input style={{...S.input,marginBottom:10}} placeholder="Buscar servicio..." value={busq} onChange={e=>setBusq(e.target.value)}/>
+        {filtrados.map(s=>(
+          <div key={s.id} style={{...S.ventaCard,padding:"8px 12px"}}>
+            {editId===s.id?(
+              <div style={{display:"grid",gridTemplateColumns:"1fr auto auto",gap:6,alignItems:"center"}}>
+                <input style={S.input} value={editData.label} onChange={e=>setEditData({...editData,label:e.target.value})}/>
+                <input type="number" style={{...S.input,width:80}} value={editData.precio} onChange={e=>setEditData({...editData,precio:e.target.value})}/>
+                <button style={{...S.btnSmall,background:"#e8f5e9",color:"#2e7d32"}} onClick={guardarEdicion}>✓</button>
+              </div>
+            ):(
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div>
+                  <div style={{fontSize:13,fontWeight:600}}>{s.label}</div>
+                  <div style={{fontSize:12,color:"#4db6e4",fontWeight:700}}>${s.precio.toFixed(2)}</div>
+                </div>
+                <div style={{display:"flex",gap:6}}>
+                  <button style={S.btnSmall} onClick={()=>iniciarEdicion(s)}>✏️</button>
+                  <button style={S.btnRemove} onClick={()=>eliminar(s.id)}>✕</button>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </Card>
+    </div>
+  );
+}
+
+// ─── CIERRE DE CAJA ────────────────────────────────────────────────
 function CierreCaja({ ventas, empleadas }) {
   const hoy = new Date().toISOString().split("T")[0];
   const APERTURA_KEY = "ll_apertura_" + hoy;
