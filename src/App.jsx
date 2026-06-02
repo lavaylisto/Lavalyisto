@@ -397,7 +397,9 @@ export default function LavaListo() {
 function AppContent({ sesion, onLogout }) {
   const hoy = new Date().toISOString().split("T")[0];
   const APERTURA_KEY = "ll_apertura_" + hoy;
+  const CIERRE_KEY = "ll_cierre_" + hoy;
   const cajaAbierta = !!load(APERTURA_KEY, null);
+  const cierreHecho = !!load(CIERRE_KEY, null);
 
   const [tab,setTab]=useState("ventas");
   const [ventas,setVentas]=useState(()=>load(KEYS.ventas,[]));
@@ -408,6 +410,7 @@ function AppContent({ sesion, onLogout }) {
   const [gastos,setGastos]=useState(()=>load("ll_gastos",[]));
   const [ticketVenta,setTicketVenta]=useState(null);
   const [cajaListaState, setCajaListaState] = useState(cajaAbierta);
+  const [cierreListoState, setCierreListoState] = useState(cierreHecho);
 
   useEffect(()=>save(KEYS.ventas,ventas),[ventas]);
   useEffect(()=>save(KEYS.clientes,clientes),[clientes]);
@@ -470,6 +473,11 @@ function AppContent({ sesion, onLogout }) {
     return <AperturaObligatoria sesion={sesion} onLogout={onLogout} onAbierta={() => setCajaListaState(true)} empleadas={empleadas}/>;
   }
 
+  // Empleadas tienen su propia pantalla simple
+  if (!esAdmin) {
+    return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={servicios} sesion={sesion} addAbono={addAbono} onLogout={cierreListoState ? onLogout : null} cierreListoState={cierreListoState} onCierreListo={() => setCierreListoState(true)}/>;
+  }
+
   return (
     <div style={S.app}>
       <style>{`
@@ -485,9 +493,19 @@ function AppContent({ sesion, onLogout }) {
             <span style={{ fontSize: 12, color: "#a0c4da", fontFamily: "'DM Sans',sans-serif" }}>
               👤 {sesion.nombre}
             </span>
-            <button onClick={onLogout} style={{ background: "rgba(255,255,255,.15)", border: "none", borderRadius: 6, color: "#fff", fontSize: 11, padding: "4px 10px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
-              Salir
-            </button>
+            {cierreListoState ? (
+              <button onClick={onLogout} style={{ background: "rgba(255,255,255,.15)", border: "none", borderRadius: 6, color: "#fff", fontSize: 11, padding: "4px 10px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
+                Salir
+              </button>
+            ) : (
+              <div style={{ position: "relative" }}>
+                <button
+                  onClick={() => alert("⚠️ Debes realizar el cierre de caja antes de salir.\n\nVe a la pestaña 💰 Caja para cerrar.")}
+                  style={{ background: "rgba(255,100,100,.3)", border: "1px solid rgba(255,150,150,.4)", borderRadius: 6, color: "#ffcccc", fontSize: 11, padding: "4px 10px", cursor: "not-allowed", fontFamily: "'DM Sans',sans-serif" }}>
+                  🔒 Salir
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -511,7 +529,7 @@ function AppContent({ sesion, onLogout }) {
         {tab==="inventario"&&esAdmin&&<Inventario inventario={inventario} setInventario={setInventario}/>}
         {tab==="equipo"&&<Equipo empleadas={empleadas} setEmpleadas={setEmpleadas} ventas={ventas} esAdmin={esAdmin}/>}
         {tab==="config"&&esAdmin&&<Configuracion servicios={servicios} setServicios={setServicios} exportarDatos={exportarDatos} importarDatos={importarDatos} ventas={ventas} empleadas={empleadas}/>}
-        {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} sesion={sesion}/>}
+        {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={()=>setCierreListoState(true)}/>}
         {tab==="gastos"&&esAdmin&&<Gastos gastos={gastos} setGastos={setGastos} sesion={sesion}/>}
         {tab==="usuarios"&&esAdmin&&<GestionUsuarios/>}
       </div>
@@ -568,7 +586,7 @@ function NuevaVenta({ ventas, setVentas, clientes, setClientes, empleadas, setTi
         return {...it,label:s?.label,precio:s?.precio};
       }),
       pago:metodoPago,total,abonos,pagada:tipoPago==="completo",
-      notas,checkMsgRetiro:false,checkMsgEntrega:false,facturadoSRI:false,
+      notas,checkMsgRetiro:false,checkMsgEntrega:false,facturadoSRI:false,estado:"recibido",
     };
     setVentas([venta,...ventas]);
     setTicket(venta);
@@ -948,1381 +966,6 @@ function PendienteItem({ v, empleadas, setTicket, addAbono, setVentas }) {
 }
 
 // ─── REPORTES CON EXPORTACIÓN EXCEL ───────────────────────────────
-function Reportes({ ventas, empleadas }) {
-  const hoy=new Date().toISOString().split("T")[0];
-  const semana=semanaISO(new Date());
-  const mes=mesKey(new Date());
-  const [mesSelec,setMesSelec]=useState(mes);
-  const [empSelec,setEmpSelec]=useState("Todos");
-
-  const ventasHoy=ventas.filter(v=>v.fecha.startsWith(hoy));
-  const ventasSem=ventas.filter(v=>semanaISO(v.fecha)===semana);
-  const ventasMes=ventas.filter(v=>mesKey(v.fecha)===mesSelec);
-  const ventasMesEmp=empSelec==="Todos"?ventasMes:ventasMes.filter(v=>String(v.empleadaId)===empSelec);
-
-  const sum=arr=>arr.reduce((a,v)=>a+v.total,0);
-  const cobrado=arr=>arr.reduce((a,v)=>a+(v.abonos||[]).reduce((x,ab)=>x+ab.monto,0),0);
-  const porCobrar=arr=>arr.reduce((a,v)=>a+saldoPendiente(v),0);
-
-  const byPago=PAGOS.map(p=>({label:p,val:ventasMes.flatMap(v=>(v.abonos||[]).filter(a=>a.metodo===p)).reduce((a,ab)=>a+ab.monto,0)}));
-  const totalCobradoMes=byPago.reduce((a,p)=>a+p.val,0);
-
-  const ventasPorMes=(()=>{const map={};ventas.forEach(v=>{const k=mesKey(v.fecha);map[k]=(map[k]||0)+v.total;});return Object.entries(map).sort().slice(-6).map(([k,v])=>({label:k.slice(5)+"/"+k.slice(0,4),val:v}));})();
-
-  const empStats=empleadas.map(e=>{
-    const mv=ventas.filter(v=>v.empleadaId===e.id&&mesKey(v.fecha)===mesSelec);
-    return {...e,count:mv.length,total:mv.reduce((a,v)=>a+v.total,0)};
-  }).sort((a,b)=>b.count-a.count);
-
-  const BtnExport=({label,arr,titulo})=>(
-    <button style={{...S.btnSmall,background:"#e8f5e9",color:"#2e7d32",display:"flex",alignItems:"center",gap:4}}
-      onClick={()=>exportarCSV(arr,titulo,empleadas)}>
-      📥 {label}
-    </button>
-  );
-
-  const KPI=({icon,label,val,sub,color})=>(
-    <div style={{...S.kpi,borderLeft:`4px solid ${color}`}}>
-      <div style={{fontSize:22}}>{icon}</div>
-      <div><div style={{fontWeight:800,fontSize:18,color}}>{val}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>{label}</div>{sub&&<div style={{fontSize:11,color:"#888"}}>{sub}</div>}</div>
-    </div>
-  );
-
-  return (
-    <div style={S.panel}>
-      <h2 style={S.panelTitle}>📊 Reportes</h2>
-
-      {/* EXPORTAR */}
-      <Card title="📥 Exportar a Excel">
-        <p style={{fontSize:13,color:"#555",marginBottom:12}}>Descarga reportes en formato CSV que se abren directamente en Excel.</p>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-          <BtnExport label="Reporte hoy" arr={ventasHoy} titulo="reporte-hoy"/>
-          <BtnExport label="Reporte semanal" arr={ventasSem} titulo="reporte-semana"/>
-          <BtnExport label="Reporte mensual" arr={ventasMes} titulo={`reporte-${mesSelec}`}/>
-          <BtnExport label="Todas las ventas" arr={ventas} titulo="reporte-completo"/>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:8}}>
-          <div>
-            <label style={S.label}>Mes para reporte</label>
-            <input type="month" style={S.input} value={mesSelec} onChange={e=>setMesSelec(e.target.value)}/>
-          </div>
-          <div>
-            <label style={S.label}>Filtrar por empleada</label>
-            <select style={S.input} value={empSelec} onChange={e=>setEmpSelec(e.target.value)}>
-              <option value="Todos">Todas</option>
-              {empleadas.map(e=><option key={e.id} value={String(e.id)}>{e.nombre}</option>)}
-            </select>
-          </div>
-        </div>
-        {empSelec!=="Todos"&&(
-          <button style={{...S.btnSmall,marginTop:8,background:"#e8f5e9",color:"#2e7d32"}}
-            onClick={()=>exportarCSV(ventasMesEmp,`reporte-${empleadas.find(e=>String(e.id)===empSelec)?.nombre}-${mesSelec}`,empleadas)}>
-            📥 Exportar reporte por empleada
-          </button>
-        )}
-      </Card>
-
-      {/* KPIs */}
-      <div style={S.kpiGrid}>
-        <KPI icon="☀️" label="Ventas hoy" val={`$${sum(ventasHoy).toFixed(2)}`} sub={`${ventasHoy.length} órdenes`} color="#f59e0b"/>
-        <KPI icon="📅" label="Esta semana" val={`$${sum(ventasSem).toFixed(2)}`} sub={`${ventasSem.length} órdenes`} color="#4db6e4"/>
-        <KPI icon="💚" label="Cobrado este mes" val={`$${cobrado(ventasMes).toFixed(2)}`} sub="Pagos recibidos" color="#4caf50"/>
-        <KPI icon="⏳" label="Por cobrar" val={`$${porCobrar(ventasMes).toFixed(2)}`} sub="Saldo pendiente" color="#e53935"/>
-      </div>
-
-      <Card title="💳 Cobros del mes por método">
-        {byPago.map(p=>(
-          <div key={p.label} style={{marginBottom:10}}>
-            <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:3}}><span>{p.label}</span><strong>${p.val.toFixed(2)}</strong></div>
-            <div style={{background:"#e8f0f7",borderRadius:4,height:8}}>
-              <div style={{background:p.label==="Efectivo"?"#4caf50":esTranferencia(p.label)?"#4db6e4":"#ff9800",width:`${totalCobradoMes?(p.val/totalCobradoMes)*100:0}%`,height:"100%",borderRadius:4}}/>
-            </div>
-          </div>
-        ))}
-      </Card>
-
-      <Card title="📈 Ventas por mes (últimos 6)">
-        {ventasPorMes.length===0?<div style={S.empty}>Sin datos</div>:ventasPorMes.map(m=>{
-          const max=Math.max(...ventasPorMes.map(x=>x.val),1);
-          return(
-            <div key={m.label} style={{marginBottom:8}}>
-              <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:2}}><span>{m.label}</span><strong>${m.val.toFixed(2)}</strong></div>
-              <div style={{background:"#e8f0f7",borderRadius:4,height:10}}><div style={{background:"#1a3c5e",width:`${(m.val/max)*100}%`,height:"100%",borderRadius:4}}/></div>
-            </div>
-          );
-        })}
-      </Card>
-
-      <Card title="🏆 Ranking empleadas">
-        {empStats.map((e,i)=>{
-          const meta=e.metaVentas||20;
-          const pct=Math.min(100,(e.count/meta)*100);
-          const ganoBono=e.count>=meta;
-          return(
-            <div key={e.id} style={{padding:"10px 0",borderBottom:"1px solid #f0f4f8"}}>
-              <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <div style={{fontSize:18}}>{i===0?"🥇":i===1?"🥈":i===2?"🥉":"👤"}</div>
-                <div style={{flex:1}}>
-                  <div style={{fontWeight:600,fontSize:14}}>{e.nombre}</div>
-                  <div style={{fontSize:12,color:"#888"}}>{e.count} ventas · ${e.total.toFixed(2)} · Meta: {meta}</div>
-                </div>
-                {ganoBono&&<div style={{...S.badge,background:"#fff8e1",color:"#f59e0b"}}>🌟 ${e.montoBonus||0}</div>}
-              </div>
-              <div style={{marginTop:6}}>
-                <div style={{background:"#e8f0f7",borderRadius:6,height:6}}><div style={{background:ganoBono?"#f59e0b":"#4db6e4",width:`${pct}%`,height:"100%",borderRadius:6}}/></div>
-              </div>
-            </div>
-          );
-        })}
-      </Card>
-    </div>
-  );
-}
-
-// ─── INVENTARIO ────────────────────────────────────────────────────
-function Inventario({ inventario, setInventario }) {
-  const [nuevo,setNuevo]=useState({nombre:"",stock:0,min:1,unidad:"pzas"});
-  const update=(id,field,val)=>setInventario(prev=>prev.map(i=>i.id===id?{...i,[field]:val}:i));
-  const eliminar=(id)=>setInventario(prev=>prev.filter(i=>i.id!==id));
-  const agregar=()=>{if(!nuevo.nombre.trim()) return;setInventario(prev=>[...prev,{...nuevo,id:Date.now(),stock:parseFloat(nuevo.stock)||0}]);setNuevo({nombre:"",stock:0,min:1,unidad:"pzas"});};
-  const bajoStock=inventario.filter(i=>i.stock<=i.min);
-  return (
-    <div style={S.panel}>
-      <h2 style={S.panelTitle}>Inventario de Insumos</h2>
-      {bajoStock.length>0&&<div style={S.alerta}>⚠️ Stock bajo: {bajoStock.map(i=>i.nombre).join(", ")}</div>}
-      <Card title="📋 Insumos">
-        {inventario.map(item=>(
-          <div key={item.id} style={S.ventaCard}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <div><div style={{fontWeight:600}}>{item.nombre}</div><div style={{fontSize:12,color:"#888"}}>Mínimo: {item.min} {item.unidad}</div></div>
-              <div style={{display:"flex",alignItems:"center",gap:8}}>
-                <div style={{...S.badge,background:item.stock<=item.min?"#ffebee":"#e8f5e9",color:item.stock<=item.min?"#c62828":"#2e7d32",fontSize:14,fontWeight:700}}>{item.stock} {item.unidad}</div>
-                <button style={S.btnRemove} onClick={()=>eliminar(item.id)}>✕</button>
-              </div>
-            </div>
-            <div style={{display:"flex",gap:6,marginTop:8,alignItems:"center"}}>
-              <button style={S.btnSmall} onClick={()=>update(item.id,"stock",Math.max(0,item.stock-1))}>−</button>
-              <input type="number" style={{...S.input,width:70,textAlign:"center",padding:"4px 6px"}} value={item.stock} onChange={e=>update(item.id,"stock",parseFloat(e.target.value)||0)}/>
-              <button style={S.btnSmall} onClick={()=>update(item.id,"stock",item.stock+1)}>+</button>
-            </div>
-          </div>
-        ))}
-      </Card>
-      <Card title="➕ Agregar insumo">
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-          <input style={{...S.input,gridColumn:"1/-1"}} placeholder="Nombre" value={nuevo.nombre} onChange={e=>setNuevo({...nuevo,nombre:e.target.value})}/>
-          <input type="number" style={S.input} placeholder="Stock inicial" value={nuevo.stock} onChange={e=>setNuevo({...nuevo,stock:e.target.value})}/>
-          <input type="number" style={S.input} placeholder="Stock mínimo" value={nuevo.min} onChange={e=>setNuevo({...nuevo,min:e.target.value})}/>
-          <input style={S.input} placeholder="Unidad (kg,L,pzas)" value={nuevo.unidad} onChange={e=>setNuevo({...nuevo,unidad:e.target.value})}/>
-        </div>
-        <button style={{...S.btnPrimary,marginTop:10}} onClick={agregar}>Agregar</button>
-      </Card>
-    </div>
-  );
-}
-
-// ─── EQUIPO ────────────────────────────────────────────────────────
-function Equipo({ empleadas, setEmpleadas, ventas, esAdmin }) {
-  const [nuevo,setNuevo]=useState({nombre:"",metaVentas:20,montoBonus:20});
-  const [editId,setEditId]=useState(null);
-  const [editData,setEditData]=useState({nombre:"",metaVentas:20,montoBonus:20});
-  const mes=mesKey(new Date());
-
-  const agregar=()=>{
-    if(!nuevo.nombre.trim()) return;
-    setEmpleadas(prev=>[...prev,{id:Date.now(),nombre:nuevo.nombre,activa:true,metaVentas:parseInt(nuevo.metaVentas)||20,montoBonus:parseFloat(nuevo.montoBonus)||0}]);
-    setNuevo({nombre:"",metaVentas:20,montoBonus:20});
-  };
-  const toggle=(id)=>setEmpleadas(prev=>prev.map(e=>e.id===id?{...e,activa:!e.activa}:e));
-  const iniciarEdicion=(e)=>{setEditId(e.id);setEditData({nombre:e.nombre,metaVentas:e.metaVentas||20,montoBonus:e.montoBonus||0});};
-  const guardarEdicion=()=>{
-    setEmpleadas(prev=>prev.map(e=>e.id===editId?{...e,...editData,metaVentas:parseInt(editData.metaVentas)||20,montoBonus:parseFloat(editData.montoBonus)||0}:e));
-    setEditId(null);
-  };
-  const empStats=empleadas.map(e=>{
-    const mv=ventas.filter(v=>v.empleadaId===e.id&&mesKey(v.fecha)===mes);
-    return {...e,ventasMes:mv.length,totalMes:mv.reduce((a,v)=>a+v.total,0)};
-  });
-
-  return (
-    <div style={S.panel}>
-      <h2 style={S.panelTitle}>Equipo & Bonos</h2>
-      <Card title="👩 Empleadas">
-        {empStats.map(e=>{
-          const meta=e.metaVentas||20;
-          const bono=e.montoBonus||0;
-          const pct=Math.min(100,(e.ventasMes/meta)*100);
-          const ganoBono=e.ventasMes>=meta;
-          return(
-            <div key={e.id} style={{...S.ventaCard,opacity:e.activa?1:0.6}}>
-              {editId===e.id?(
-                <div>
-                  <div style={{fontWeight:700,color:"#1a3c5e",marginBottom:8}}>✏️ Editando</div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr",gap:8,marginBottom:8}}>
-                    <div><label style={S.label}>Nombre</label><input style={S.input} value={editData.nombre} onChange={ev=>setEditData({...editData,nombre:ev.target.value})}/></div>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                      <div><label style={S.label}>Meta ventas/mes</label><input type="number" style={S.input} value={editData.metaVentas} onChange={ev=>setEditData({...editData,metaVentas:ev.target.value})}/></div>
-                      <div><label style={S.label}>Monto bono ($)</label><input type="number" style={S.input} value={editData.montoBonus} onChange={ev=>setEditData({...editData,montoBonus:ev.target.value})}/></div>
-                    </div>
-                  </div>
-                  <div style={{display:"flex",gap:8}}>
-                    <button style={{...S.btnPrimary,flex:1}} onClick={guardarEdicion}>✓ Guardar</button>
-                    <button style={S.btnClose} onClick={()=>setEditId(null)}>Cancelar</button>
-                  </div>
-                </div>
-              ):(
-                <>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                    <div>
-                      <div style={{fontWeight:700,fontSize:15}}>{e.nombre}</div>
-                      <div style={{fontSize:12,color:"#888"}}>{e.ventasMes} ventas este mes</div>
-                      {esAdmin && <div style={{fontSize:11,color:"#4db6e4"}}>Meta: {meta} ventas · Bono: ${bono}</div>}
-                    </div>
-                    <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
-                      {ganoBono&&<div style={{...S.badge,background:"#fff8e1",color:"#f59e0b"}}>🌟 {esAdmin?`$${bono}`:"¡Bono!"}</div>}
-                      {esAdmin && <button style={S.btnSmall} onClick={()=>iniciarEdicion(e)}>✏️</button>}
-                      {esAdmin && <button style={{...S.btnSmall,background:e.activa?"#ffebee":"#e8f5e9",color:e.activa?"#c62828":"#2e7d32"}} onClick={()=>toggle(e.id)}>{e.activa?"Desactivar":"Activar"}</button>}
-                    </div>
-                  </div>
-                  <div style={{marginTop:8}}>
-                    <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#888",marginBottom:3}}><span>Progreso bono</span><span>{e.ventasMes}/{meta}</span></div>
-                    <div style={{background:"#e8f0f7",borderRadius:6,height:8}}><div style={{background:ganoBono?"#f59e0b":"#4db6e4",width:`${pct}%`,height:"100%",borderRadius:6}}/></div>
-                  </div>
-                </>
-              )}
-            </div>
-          );
-        })}
-      </Card>
-      {esAdmin && <Card title="➕ Agregar empleada">
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-          <input style={{...S.input,gridColumn:"1/-1"}} placeholder="Nombre completo" value={nuevo.nombre} onChange={e=>setNuevo({...nuevo,nombre:e.target.value})}/>
-          <div><label style={S.label}>Meta ventas/mes</label><input type="number" style={S.input} value={nuevo.metaVentas} onChange={e=>setNuevo({...nuevo,metaVentas:e.target.value})}/></div>
-          <div><label style={S.label}>Monto bono ($)</label><input type="number" style={S.input} value={nuevo.montoBonus} onChange={e=>setNuevo({...nuevo,montoBonus:e.target.value})}/></div>
-        </div>
-        <button style={{...S.btnPrimary,marginTop:10}} onClick={agregar}>Agregar empleada</button>
-      </Card>}
-    </div>
-  );
-}
-
-// ─── CONFIGURACION ─────────────────────────────────────────────────
-function Configuracion({ servicios, setServicios, exportarDatos, importarDatos }) {
-  const [nuevo,setNuevo]=useState({label:"",precio:""});
-  const [editId,setEditId]=useState(null);
-  const [editData,setEditData]=useState({label:"",precio:""});
-  const [busq,setBusq]=useState("");
-
-  const agregar=()=>{
-    if(!nuevo.label.trim()||!nuevo.precio) return;
-    setServicios(prev=>[...prev,{id:"custom-"+Date.now(),label:nuevo.label.toUpperCase(),precio:parseFloat(nuevo.precio)}]);
-    setNuevo({label:"",precio:""});
-  };
-  const eliminar=(id)=>setServicios(prev=>prev.filter(s=>s.id!==id));
-  const iniciarEdicion=(s)=>{setEditId(s.id);setEditData({label:s.label,precio:s.precio});};
-  const guardarEdicion=()=>{
-    setServicios(prev=>prev.map(s=>s.id===editId?{...s,label:editData.label.toUpperCase(),precio:parseFloat(editData.precio)}:s));
-    setEditId(null);
-  };
-  const filtrados=servicios.filter(s=>s.label.toLowerCase().includes(busq.toLowerCase()));
-
-  return (
-    <div style={S.panel}>
-      <h2 style={S.panelTitle}>⚙️ Configuración</h2>
-      <Card title="💾 Respaldo de datos">
-        <p style={{fontSize:13,color:"#555",marginBottom:12}}>Exporta todos tus datos para guardar o restaurar en otro dispositivo.</p>
-        <button style={{...S.btnPrimary,marginBottom:10}} onClick={exportarDatos}>📥 Exportar datos (Respaldo)</button>
-        <label style={{...S.btnPrimary,display:"block",textAlign:"center",cursor:"pointer",background:"#e8f5fd",color:"#1a3c5e",padding:"13px",borderRadius:10,fontSize:15,fontWeight:700}}>
-          📤 Importar datos (Restaurar)
-          <input type="file" accept=".json" style={{display:"none"}} onChange={importarDatos}/>
-        </label>
-        <p style={{fontSize:11,color:"#aaa",marginTop:8}}>⚠️ Importar reemplazará todos los datos actuales.</p>
-      </Card>
-      <Card title="➕ Agregar nuevo servicio">
-        <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8}}>
-          <input style={S.input} placeholder="Nombre del servicio" value={nuevo.label} onChange={e=>setNuevo({...nuevo,label:e.target.value})}/>
-          <input type="number" style={{...S.input,width:90}} placeholder="$Precio" value={nuevo.precio} onChange={e=>setNuevo({...nuevo,precio:e.target.value})}/>
-        </div>
-        <button style={{...S.btnPrimary,marginTop:8}} onClick={agregar}>Agregar servicio</button>
-      </Card>
-      <Card title={`📋 Servicios (${servicios.length})`}>
-        <input style={{...S.input,marginBottom:10}} placeholder="Buscar servicio..." value={busq} onChange={e=>setBusq(e.target.value)}/>
-        {filtrados.map(s=>(
-          <div key={s.id} style={{...S.ventaCard,padding:"8px 12px"}}>
-            {editId===s.id?(
-              <div style={{display:"grid",gridTemplateColumns:"1fr auto auto",gap:6,alignItems:"center"}}>
-                <input style={S.input} value={editData.label} onChange={e=>setEditData({...editData,label:e.target.value})}/>
-                <input type="number" style={{...S.input,width:80}} value={editData.precio} onChange={e=>setEditData({...editData,precio:e.target.value})}/>
-                <button style={{...S.btnSmall,background:"#e8f5e9",color:"#2e7d32"}} onClick={guardarEdicion}>✓</button>
-              </div>
-            ):(
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div>
-                  <div style={{fontSize:13,fontWeight:600}}>{s.label}</div>
-                  <div style={{fontSize:12,color:"#4db6e4",fontWeight:700}}>${s.precio.toFixed(2)}</div>
-                </div>
-                <div style={{display:"flex",gap:6}}>
-                  <button style={S.btnSmall} onClick={()=>iniciarEdicion(s)}>✏️</button>
-                  <button style={S.btnRemove} onClick={()=>eliminar(s.id)}>✕</button>
-                </div>
-              </div>
-            )}
-          </div>
-        ))}
-      </Card>
-    </div>
-  );
-}
-
-// ─── CIERRE DE CAJA ────────────────────────────────────────────────
-const BILLETES = [100, 50, 20, 10, 5, 1];
-const MONEDAS = [0.50, 0.25, 0.10, 0.05, 0.01];
-
-function CierreCaja({ ventas, empleadas }) {
-  const hoy = new Date().toISOString().split("T")[0];
-  const APERTURA_KEY = "ll_apertura_" + hoy;
-  const CIERRE_KEY = "ll_cierre_" + hoy;
-
-  const [modo, setModo] = useState(() => {
-    try { return localStorage.getItem(APERTURA_KEY) ? "cierre" : "apertura"; } catch { return "apertura"; }
-  });
-  const [apertura, setApertura] = useState(() => {
-    try { const a = localStorage.getItem(APERTURA_KEY); return a ? JSON.parse(a) : null; } catch { return null; }
-  });
-  const [cierreGuardado, setCierreGuardado] = useState(() => {
-    try { const c = localStorage.getItem(CIERRE_KEY); return c ? JSON.parse(c) : null; } catch { return null; }
-  });
-
-  // APERTURA STATE
-  const [aperturaEmpleada, setAperturaEmpleada] = useState(empleadas[0]?.id || null);
-  const [fondoInicial, setFondoInicial] = useState("15.00");
-
-  // CIERRE STATE - conteo por denominación
-  const [empleadaId, setEmpleadaId] = useState(empleadas[0]?.id || null);
-  const [billetes, setBilletes] = useState(() => Object.fromEntries(BILLETES.map(b => [b, ""])));
-  const [monedas, setMonedas] = useState(() => Object.fromEntries(MONEDAS.map(m => [m, ""])));
-  const [transferPichincha, setTransferPichincha] = useState("");
-  const [transferJEP, setTransferJEP] = useState("");
-  const [tarjeta, setTarjeta] = useState("");
-  const [paso, setPaso] = useState(1); // 1=billetes, 2=monedas, 3=transferencias, 4=resultado
-  const [confirmado, setConfirmado] = useState(false);
-
-  const ventasHoy = ventas.filter(v => v.fecha.startsWith(hoy) && !v.anulada);
-  const ventasEmp = empleadaId === "todos" ? ventasHoy : ventasHoy.filter(v => String(v.empleadaId) === String(empleadaId));
-
-  const esperadoEfectivo = ventasEmp.flatMap(v => (v.abonos || []).filter(a => a.metodo === "Efectivo")).reduce((a, ab) => a + ab.monto, 0);
-  const esperadoTransferencia = ventasEmp.flatMap(v => (v.abonos || []).filter(a => esTranferencia(a.metodo))).reduce((a, ab) => a + ab.monto, 0);
-  const esperadoTarjeta = ventasEmp.flatMap(v => (v.abonos || []).filter(a => a.metodo === "Tarjeta")).reduce((a, ab) => a + ab.monto, 0);
-  const esperadoTotal = esperadoEfectivo + esperadoTransferencia + esperadoTarjeta;
-
-  // Calcular totales del conteo
-  const totalBilletes = BILLETES.reduce((a, b) => a + (parseFloat(billetes[b]) || 0) * b, 0);
-  const totalMonedas = MONEDAS.reduce((a, m) => a + (parseFloat(monedas[m]) || 0) * m, 0);
-  const totalEfectivo = parseFloat((totalBilletes + totalMonedas).toFixed(2));
-  const totalTransfer = (parseFloat(transferPichincha) || 0) + (parseFloat(transferJEP) || 0);
-  const totalTarjeta = parseFloat(tarjeta) || 0;
-  const fondo = apertura?.fondo || 15;
-  const efNeto = parseFloat((totalEfectivo - fondo).toFixed(2));
-  const ventasReales = parseFloat((efNeto + totalTransfer + totalTarjeta).toFixed(2));
-  const difEf = parseFloat((efNeto - esperadoEfectivo).toFixed(2));
-  const difTr = parseFloat((totalTransfer - esperadoTransferencia).toFixed(2));
-  const difTa = parseFloat((totalTarjeta - esperadoTarjeta).toFixed(2));
-  const difTotal = parseFloat((ventasReales - esperadoTotal).toFixed(2));
-
-  const confirmarCierre = () => {
-    const datos = {
-      fecha: new Date().toISOString(),
-      empleada: empleadas.find(e => String(e.id) === String(empleadaId))?.nombre || "Todas",
-      billetes, monedas, totalBilletes, totalMonedas, totalEfectivo,
-      transferPichincha: parseFloat(transferPichincha) || 0,
-      transferJEP: parseFloat(transferJEP) || 0,
-      totalTransfer, totalTarjeta, fondo, efNeto, ventasReales,
-      esperadoEfectivo, esperadoTransferencia, esperadoTarjeta, esperadoTotal,
-      difEf, difTr, difTa, difTotal,
-      totalVentas: ventasEmp.length,
-      totalVentasVal: ventasEmp.reduce((a, v) => a + v.total, 0),
-    };
-    try { localStorage.setItem(CIERRE_KEY, JSON.stringify(datos)); } catch {}
-    setCierreGuardado(datos);
-    setConfirmado(true);
-    imprimirCierre(datos);
-  };
-
-  const imprimirCierre = (d) => {
-    const w = window.open("", "_blank", "width=420,height=700");
-    w.document.write(`
-      <html><head><title>Cierre de Caja</title>
-      <style>
-        body{font-family:sans-serif;padding:16px;max-width:360px;margin:0 auto}
-        h2{text-align:center;color:#1a3c5e;margin:4px 0}.sub{text-align:center;color:#888;font-size:12px;margin-bottom:12px}
-        .row{display:flex;justify-content:space-between;margin:4px 0;font-size:13px}
-        .row-sm{display:flex;justify-content:space-between;margin:2px 0;font-size:12px;color:#555}
-        .divider{border-top:1px dashed #ccc;margin:10px 0}
-        .total{font-size:16px;font-weight:800;margin:4px 0}
-        .ok{color:#2e7d32;font-weight:700}.bad{color:#c62828;font-weight:700}.info{color:#1565c0;font-weight:700}
-        .result{text-align:center;font-size:20px;font-weight:800;padding:12px;border-radius:8px;margin:12px 0}
-        .result.ok{background:#e8f5e9;color:#2e7d32}.result.bad{background:#ffebee;color:#c62828}.result.info{background:#e3f2fd;color:#1565c0}
-        table{width:100%;border-collapse:collapse;font-size:12px}
-        td{padding:3px 4px}td:last-child{text-align:right}
-        .logo{text-align:center;font-size:32px;margin-bottom:4px}
-      </style></head><body>
-      <div class="logo">🫧</div>
-      <h2>Lava&Listo</h2>
-      <div class="sub">CIERRE DE CAJA</div>
-      <div class="divider"></div>
-      <div class="row"><span>Fecha</span><span>${new Date(d.fecha).toLocaleString("es-MX")}</span></div>
-      <div class="row"><span>Empleada</span><span>${d.empleada}</span></div>
-      <div class="row"><span>Ventas del día</span><span>${d.totalVentas} órdenes · $${d.totalVentasVal.toFixed(2)}</span></div>
-      <div class="divider"></div>
-      <strong>💵 CONTEO DE EFECTIVO</strong>
-      <table style="margin-top:6px">
-        ${BILLETES.filter(b => (parseFloat(d.billetes[b]) || 0) > 0).map(b => `<tr><td>$${b} × ${d.billetes[b]}</td><td>$${(b * d.billetes[b]).toFixed(2)}</td></tr>`).join("")}
-        ${MONEDAS.filter(m => (parseFloat(d.monedas[m]) || 0) > 0).map(m => `<tr><td>$${m} × ${d.monedas[m]}</td><td>$${(m * d.monedas[m]).toFixed(2)}</td></tr>`).join("")}
-        <tr style="font-weight:700;border-top:1px solid #ccc"><td>Total efectivo</td><td>$${d.totalEfectivo.toFixed(2)}</td></tr>
-        <tr style="color:#e65100"><td>— Fondo caja</td><td>-$${d.fondo.toFixed(2)}</td></tr>
-        <tr style="font-weight:800"><td>Efectivo neto</td><td>$${d.efNeto.toFixed(2)}</td></tr>
-      </table>
-      <div class="divider"></div>
-      <div class="row"><span>🏦 Transf. Pichincha</span><span>$${d.transferPichincha.toFixed(2)}</span></div>
-      <div class="row"><span>🏦 Transf. JEP</span><span>$${d.transferJEP.toFixed(2)}</span></div>
-      <div class="row"><span>💳 Tarjeta</span><span>$${d.totalTarjeta.toFixed(2)}</span></div>
-      <div class="divider"></div>
-      <div class="row total"><span>TOTAL CONTADO</span><span>$${(d.efNeto + d.totalTransfer + d.totalTarjeta).toFixed(2)}</span></div>
-      <div class="row total"><span>TOTAL ESPERADO</span><span>$${d.esperadoTotal.toFixed(2)}</span></div>
-      <div class="divider"></div>
-      <div class="row"><span>Efectivo</span><span class="${d.difEf===0?"ok":d.difEf>0?"info":"bad"}">${d.difEf===0?"✅ Cuadra":d.difEf>0?`+$${d.difEf.toFixed(2)}`:`-$${Math.abs(d.difEf).toFixed(2)}`}</span></div>
-      <div class="row"><span>Transferencias</span><span class="${d.difTr===0?"ok":d.difTr>0?"info":"bad"}">${d.difTr===0?"✅ Cuadra":d.difTr>0?`+$${d.difTr.toFixed(2)}`:`-$${Math.abs(d.difTr).toFixed(2)}`}</span></div>
-      <div class="row"><span>Tarjeta</span><span class="${d.difTa===0?"ok":d.difTa>0?"info":"bad"}">${d.difTa===0?"✅ Cuadra":d.difTa>0?`+$${d.difTa.toFixed(2)}`:`-$${Math.abs(d.difTa).toFixed(2)}`}</span></div>
-      <div class="${d.difTotal===0?"result ok":d.difTotal>0?"result info":"result bad"}">
-        ${d.difTotal===0?"✅ CAJA CUADRADA":d.difTotal>0?`📈 SOBRA $${d.difTotal.toFixed(2)}`:`⚠️ FALTA $${Math.abs(d.difTotal).toFixed(2)}`}
-      </div>
-      <div class="divider"></div>
-      <p style="text-align:center;font-size:10px;color:#aaa">Lava&Listo · Sistema de ventas<br>Cierre generado: ${new Date().toLocaleString("es-MX")}</p>
-      <script>window.print();window.close();</script>
-      </body></html>
-    `);
-    w.document.close();
-  };
-
-  const registrarApertura = () => {
-    const datos = {
-      empleadaId: aperturaEmpleada,
-      empleadaNombre: empleadas.find(e => String(e.id) === String(aperturaEmpleada))?.nombre || "",
-      fondo: parseFloat(fondoInicial) || 15,
-      fecha: new Date().toISOString(),
-    };
-    try { localStorage.setItem(APERTURA_KEY, JSON.stringify(datos)); } catch {}
-    setApertura(datos);
-    setModo("cierre");
-    const w = window.open("", "_blank", "width=380,height=400");
-    if (w) {
-      w.document.write(`<html><head><title>Apertura</title><style>body{font-family:sans-serif;padding:20px;max-width:320px;margin:0 auto;text-align:center}h2{color:#1a3c5e}.divider{border-top:1px dashed #ccc;margin:12px 0}.row{display:flex;justify-content:space-between;margin:6px 0;font-size:14px;text-align:left}.big{font-size:26px;font-weight:800;color:#1a3c5e}</style></head><body><div style="font-size:36px">🫧</div><h2>Lava&Listo</h2><p><strong>APERTURA DE CAJA</strong></p><div class="divider"></div><div class="row"><span>Fecha</span><span>${new Date(datos.fecha).toLocaleString("es-MX")}</span></div><div class="row"><span>Abrió</span><span>${datos.empleadaNombre}</span></div><div class="divider"></div><p>Fondo inicial:</p><div class="big">$${datos.fondo.toFixed(2)}</div><div class="divider"></div><p style="font-size:11px;color:#aaa">Lava&Listo · Sistema de ventas</p><script>window.print();window.close();</script></body></html>`);
-      w.document.close();
-    }
-  };
-
-  const DifBadge = ({ dif }) => (
-    <span style={{ fontWeight: 700, fontSize: 13, color: dif === 0 ? "#2e7d32" : dif > 0 ? "#1565c0" : "#c62828" }}>
-      {dif === 0 ? "✅ Cuadra" : dif > 0 ? `📈 Sobra $${dif.toFixed(2)}` : `⚠️ Falta $${Math.abs(dif).toFixed(2)}`}
-    </span>
-  );
-
-  const ContadorDenominacion = ({ valor, cantidad, onChange, tipo }) => (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #f0f4f8" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <div style={{ background: tipo === "billete" ? "#fff8e1" : "#e8f5e9", borderRadius: 6, padding: "4px 10px", fontSize: 14, fontWeight: 700, color: tipo === "billete" ? "#f59e0b" : "#2e7d32", minWidth: 56, textAlign: "center" }}>
-          ${valor}
-        </div>
-        <span style={{ fontSize: 12, color: "#888" }}>× cantidad</span>
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <button style={{ ...S.btnSmall, width: 32, textAlign: "center" }} onClick={() => onChange(Math.max(0, (parseFloat(cantidad) || 0) - 1))}>−</button>
-        <input type="number" min="0" style={{ ...S.input, width: 60, textAlign: "center", padding: "6px 4px" }}
-          value={cantidad} onChange={e => onChange(e.target.value)} />
-        <button style={{ ...S.btnSmall, width: 32, textAlign: "center" }} onClick={() => onChange((parseFloat(cantidad) || 0) + 1)}>+</button>
-        <div style={{ minWidth: 64, textAlign: "right", fontWeight: 700, color: "#1a3c5e", fontSize: 13 }}>
-          ${((parseFloat(cantidad) || 0) * valor).toFixed(2)}
-        </div>
-      </div>
-    </div>
-  );
-
-  // Si el cierre ya fue confirmado hoy, mostrar solo el resultado
-  if (cierreGuardado) {
-    const d = cierreGuardado;
-    return (
-      <div style={S.panel}>
-        <h2 style={S.panelTitle}>💰 Caja</h2>
-        <div style={{ background: "#e8f5fd", borderRadius: 10, padding: "12px 16px", marginBottom: 14, fontSize: 13 }}>
-          🔓 Apertura: <strong>{apertura?.empleadaNombre}</strong> · Fondo: <strong>${apertura?.fondo?.toFixed(2)}</strong>
-        </div>
-        <div style={{ ...S.kpi, borderLeft: `4px solid ${d.difTotal === 0 ? "#4caf50" : d.difTotal > 0 ? "#1565c0" : "#e53935"}`, marginBottom: 14 }}>
-          <div style={{ fontSize: 32 }}>{d.difTotal === 0 ? "✅" : d.difTotal > 0 ? "📈" : "⚠️"}</div>
-          <div>
-            <div style={{ fontWeight: 800, fontSize: 18, color: d.difTotal === 0 ? "#2e7d32" : d.difTotal > 0 ? "#1565c0" : "#e53935" }}>
-              {d.difTotal === 0 ? "¡Caja cuadrada!" : d.difTotal > 0 ? `Sobran $${d.difTotal.toFixed(2)}` : `Faltan $${Math.abs(d.difTotal).toFixed(2)}`}
-            </div>
-            <div style={{ fontSize: 12, color: "#888" }}>Cierre realizado · {new Date(d.fecha).toLocaleString("es-MX")}</div>
-            <div style={{ fontSize: 11, color: "#e65100" }}>El cierre del día ya fue confirmado</div>
-          </div>
-        </div>
-        <Card title="📊 Resumen del cierre">
-          <div style={{ fontSize: 13, marginBottom: 8 }}>💵 Efectivo contado: <strong>${d.totalEfectivo.toFixed(2)}</strong> — Fondo: <strong>${d.fondo.toFixed(2)}</strong> = Neto: <strong>${d.efNeto.toFixed(2)}</strong></div>
-          <div style={{ fontSize: 13, marginBottom: 4 }}>🏦 Pichincha: <strong>${d.transferPichincha.toFixed(2)}</strong> · JEP: <strong>${d.transferJEP.toFixed(2)}</strong></div>
-          <div style={{ fontSize: 13, marginBottom: 8 }}>💳 Tarjeta: <strong>${d.totalTarjeta.toFixed(2)}</strong></div>
-          {[{l:"💵 Efectivo",dif:d.difEf},{l:"🏦 Transferencias",dif:d.difTr},{l:"💳 Tarjeta",dif:d.difTa}].map(r=>(
-            <div key={r.l} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid #f0f4f8"}}>
-              <span style={{fontSize:13}}>{r.l}</span><DifBadge dif={r.dif}/>
-            </div>
-          ))}
-        </Card>
-        <button style={{ ...S.btnPrimary, background: "linear-gradient(135deg,#2e7d32,#388e3c)" }} onClick={() => imprimirCierre(d)}>
-          🖨️ Reimprimir ticket de cierre
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div style={S.panel}>
-      <h2 style={S.panelTitle}>💰 Caja</h2>
-
-      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-        <button style={{ ...S.pill, ...(modo === "apertura" ? S.pillActive : {}) }} onClick={() => setModo("apertura")}>🔓 Apertura</button>
-        <button style={{ ...S.pill, ...(modo === "cierre" ? S.pillActive : {}) }} onClick={() => setModo("cierre")}>🔒 Cierre</button>
-      </div>
-
-      {/* APERTURA */}
-      {modo === "apertura" && (
-        <div>
-          {apertura && <div style={{ ...S.alerta, background: "#e8f5e9", color: "#2e7d32" }}>✅ Caja ya abierta hoy por <strong>{apertura.empleadaNombre}</strong> con fondo de <strong>${apertura.fondo.toFixed(2)}</strong></div>}
-          <Card title="🔓 Apertura de caja">
-            <label style={S.label}>Empleada que abre caja</label>
-            <select style={{ ...S.input, marginBottom: 10 }} value={aperturaEmpleada} onChange={e => setAperturaEmpleada(e.target.value)}>
-              {empleadas.filter(e => e.activa).map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
-            </select>
-            <label style={S.label}>💵 Fondo inicial en caja</label>
-            <input type="number" style={{ ...S.input, marginBottom: 14, fontSize: 18, fontWeight: 700 }} value={fondoInicial} onChange={e => setFondoInicial(e.target.value)} />
-            <div style={{ background: "#e8f5fd", borderRadius: 8, padding: "10px 14px", marginBottom: 14, textAlign: "center" }}>
-              <div style={{ fontSize: 11, color: "#888" }}>Fondo que queda en caja</div>
-              <div style={{ fontSize: 24, fontWeight: 800, color: "#1a3c5e" }}>${parseFloat(fondoInicial || 0).toFixed(2)}</div>
-            </div>
-            <button style={S.btnPrimary} onClick={registrarApertura}>🔓 Registrar apertura e imprimir ticket</button>
-          </Card>
-        </div>
-      )}
-
-      {/* CIERRE */}
-      {modo === "cierre" && (
-        <div>
-          {apertura && <div style={{ background: "#e8f5fd", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 13 }}>🔓 Abierta por <strong>{apertura.empleadaNombre}</strong> · Fondo: <strong>${apertura.fondo.toFixed(2)}</strong></div>}
-
-          {/* RESUMEN ESPERADO */}
-          <Card title="📋 Lo esperado del día">
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
-              <div style={{ ...S.kpi, borderLeft: "4px solid #1a3c5e", padding: 10 }}>
-                <div style={{ fontSize: 18 }}>🧾</div>
-                <div><div style={{ fontWeight: 800, fontSize: 16, color: "#1a3c5e" }}>{ventasEmp.length}</div><div style={{ fontSize: 11, color: "#888" }}>Ventas hoy</div></div>
-              </div>
-              <div style={{ ...S.kpi, borderLeft: "4px solid #4caf50", padding: 10 }}>
-                <div style={{ fontSize: 18 }}>💰</div>
-                <div><div style={{ fontWeight: 800, fontSize: 16, color: "#4caf50" }}>${(esperadoTotal + fondo).toFixed(2)}</div><div style={{ fontSize: 11, color: "#888" }}>Esperado en caja</div></div>
-              </div>
-            </div>
-            <div style={{ fontSize: 12, color: "#555" }}>💵 Efectivo: <strong>${esperadoEfectivo.toFixed(2)}</strong> + fondo <strong>${fondo.toFixed(2)}</strong> = <strong>${(esperadoEfectivo + fondo).toFixed(2)}</strong></div>
-            <div style={{ fontSize: 12, color: "#555", marginTop: 2 }}>🏦 Transferencias: <strong>${esperadoTransferencia.toFixed(2)}</strong></div>
-            <div style={{ fontSize: 12, color: "#555", marginTop: 2 }}>💳 Tarjeta: <strong>${esperadoTarjeta.toFixed(2)}</strong></div>
-          </Card>
-
-          {/* PASOS */}
-          <div style={{ display: "flex", gap: 6, marginBottom: 14, overflowX: "auto" }}>
-            {[{n:1,l:"💵 Billetes"},{n:2,l:"🪙 Monedas"},{n:3,l:"🏦 Digital"},{n:4,l:"✅ Confirmar"}].map(p => (
-              <div key={p.n} style={{ ...S.badge, background: paso >= p.n ? "#1a3c5e" : "#e8f0f7", color: paso >= p.n ? "#fff" : "#888", padding: "6px 10px", fontSize: 11, whiteSpace: "nowrap", cursor: paso > p.n ? "pointer" : "default" }}
-                onClick={() => { if (!confirmado && paso > p.n) setPaso(p.n); }}>
-                {p.n}. {p.l}
-              </div>
-            ))}
-          </div>
-
-          {/* PASO 1: BILLETES */}
-          {paso === 1 && (
-            <Card title="💵 Paso 1 — Cuenta los billetes">
-              {BILLETES.map(b => (
-                <ContadorDenominacion key={b} valor={b} cantidad={billetes[b]} tipo="billete"
-                  onChange={val => setBilletes(prev => ({ ...prev, [b]: val }))} />
-              ))}
-              <div style={{ background: "#fff8e1", borderRadius: 8, padding: "10px 14px", marginTop: 10, display: "flex", justifyContent: "space-between" }}>
-                <span style={{ fontWeight: 700 }}>Total billetes:</span>
-                <span style={{ fontWeight: 800, fontSize: 16, color: "#f59e0b" }}>${totalBilletes.toFixed(2)}</span>
-              </div>
-              <button style={{ ...S.btnPrimary, marginTop: 10 }} onClick={() => setPaso(2)}>Siguiente: Monedas →</button>
-            </Card>
-          )}
-
-          {/* PASO 2: MONEDAS */}
-          {paso === 2 && (
-            <Card title="🪙 Paso 2 — Cuenta las monedas">
-              {MONEDAS.map(m => (
-                <ContadorDenominacion key={m} valor={m} cantidad={monedas[m]} tipo="moneda"
-                  onChange={val => setMonedas(prev => ({ ...prev, [m]: val }))} />
-              ))}
-              <div style={{ background: "#e8f5e9", borderRadius: 8, padding: "10px 14px", marginTop: 10, display: "flex", justifyContent: "space-between" }}>
-                <span style={{ fontWeight: 700 }}>Total monedas:</span>
-                <span style={{ fontWeight: 800, fontSize: 16, color: "#2e7d32" }}>${totalMonedas.toFixed(2)}</span>
-              </div>
-              <div style={{ background: "#e8f5fd", borderRadius: 8, padding: "10px 14px", marginTop: 6, display: "flex", justifyContent: "space-between" }}>
-                <span style={{ fontWeight: 700 }}>💵 Total efectivo:</span>
-                <span style={{ fontWeight: 800, fontSize: 16, color: "#1a3c5e" }}>${totalEfectivo.toFixed(2)}</span>
-              </div>
-              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                <button style={{ ...S.btnClose, flex: 1 }} onClick={() => setPaso(1)}>← Billetes</button>
-                <button style={{ ...S.btnPrimary, flex: 2 }} onClick={() => setPaso(3)}>Siguiente: Digital →</button>
-              </div>
-            </Card>
-          )}
-
-          {/* PASO 3: TRANSFERENCIAS Y TARJETA */}
-          {paso === 3 && (
-            <Card title="🏦 Paso 3 — Pagos digitales">
-              <label style={S.label}>🏦 Transferencias Banco Pichincha</label>
-              <input type="number" style={{ ...S.input, marginBottom: 12 }} placeholder="$0.00" value={transferPichincha} onChange={e => setTransferPichincha(e.target.value)} />
-              <label style={S.label}>🏦 Transferencias JEP</label>
-              <input type="number" style={{ ...S.input, marginBottom: 12 }} placeholder="$0.00" value={transferJEP} onChange={e => setTransferJEP(e.target.value)} />
-              <label style={S.label}>💳 Pagos con tarjeta</label>
-              <input type="number" style={{ ...S.input, marginBottom: 12 }} placeholder="$0.00" value={tarjeta} onChange={e => setTarjeta(e.target.value)} />
-              <div style={{ background: "#e8f5fd", borderRadius: 8, padding: "10px 14px", marginBottom: 10 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}><span>🏦 Total transferencias:</span><strong>${totalTransfer.toFixed(2)}</strong></div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginTop: 4 }}><span>💳 Tarjeta:</span><strong>${totalTarjeta.toFixed(2)}</strong></div>
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button style={{ ...S.btnClose, flex: 1 }} onClick={() => setPaso(2)}>← Monedas</button>
-                <button style={{ ...S.btnPrimary, flex: 2 }} onClick={() => setPaso(4)}>Ver resultado →</button>
-              </div>
-            </Card>
-          )}
-
-          {/* PASO 4: RESULTADO Y CONFIRMACIÓN */}
-          {paso === 4 && !confirmado && (
-            <div>
-              <Card title="✅ Paso 4 — Resumen del cierre">
-                <div style={{ marginBottom: 10 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#1a3c5e", marginBottom: 6 }}>💵 Efectivo</div>
-                  {BILLETES.filter(b => (parseFloat(billetes[b]) || 0) > 0).map(b => (
-                    <div key={b} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#555" }}>
-                      <span>${b} × {billetes[b]}</span><span>${(b * billetes[b]).toFixed(2)}</span>
-                    </div>
-                  ))}
-                  {MONEDAS.filter(m => (parseFloat(monedas[m]) || 0) > 0).map(m => (
-                    <div key={m} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#555" }}>
-                      <span>${m} × {monedas[m]}</span><span>${(m * monedas[m]).toFixed(2)}</span>
-                    </div>
-                  ))}
-                  <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, fontSize: 13, borderTop: "1px solid #e8f0f7", marginTop: 4, paddingTop: 4 }}>
-                    <span>Total efectivo contado</span><span>${totalEfectivo.toFixed(2)}</span>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#e65100" }}>
-                    <span>— Fondo que queda en caja</span><span>-${fondo.toFixed(2)}</span>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800, fontSize: 14, color: "#1a3c5e" }}>
-                    <span>Efectivo neto</span><span>${efNeto.toFixed(2)}</span>
-                  </div>
-                </div>
-                <div style={{ borderTop: "1px dashed #d0dce8", paddingTop: 8, marginBottom: 8 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}><span>🏦 Pichincha</span><strong>${(parseFloat(transferPichincha)||0).toFixed(2)}</strong></div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}><span>🏦 JEP</span><strong>${(parseFloat(transferJEP)||0).toFixed(2)}</strong></div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}><span>💳 Tarjeta</span><strong>${totalTarjeta.toFixed(2)}</strong></div>
-                </div>
-                <div style={{ borderTop: "2px solid #1a3c5e", paddingTop: 8 }}>
-                  {[{l:"💵 Efectivo (neto)",c:efNeto,e:esperadoEfectivo,d:difEf},{l:"🏦 Transferencias",c:totalTransfer,e:esperadoTransferencia,d:difTr},{l:"💳 Tarjeta",c:totalTarjeta,e:esperadoTarjeta,d:difTa}].map(r => (
-                    <div key={r.l} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 0", borderBottom: "1px solid #f0f4f8" }}>
-                      <div>
-                        <div style={{ fontSize: 13, fontWeight: 600 }}>{r.l}</div>
-                        <div style={{ fontSize: 11, color: "#888" }}>Contado ${r.c.toFixed(2)} / Esperado ${r.e.toFixed(2)}</div>
-                      </div>
-                      <DifBadge dif={r.d}/>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ background: difTotal === 0 ? "#e8f5e9" : difTotal > 0 ? "#e3f2fd" : "#ffebee", borderRadius: 10, padding: "14px", marginTop: 10, textAlign: "center" }}>
-                  <div style={{ fontSize: 22, fontWeight: 800, color: difTotal === 0 ? "#2e7d32" : difTotal > 0 ? "#1565c0" : "#c62828" }}>
-                    {difTotal === 0 ? "✅ ¡CAJA CUADRADA!" : difTotal > 0 ? `📈 SOBRA $${difTotal.toFixed(2)}` : `⚠️ FALTA $${Math.abs(difTotal).toFixed(2)}`}
-                  </div>
-                </div>
-              </Card>
-              <div style={{ background: "#fff3e0", borderRadius: 8, padding: "10px 14px", marginBottom: 10, fontSize: 13, color: "#e65100" }}>
-                ⚠️ Una vez confirmado el cierre <strong>no podrás modificarlo</strong>. Revisa bien antes de confirmar.
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button style={{ ...S.btnClose, flex: 1 }} onClick={() => setPaso(3)}>← Corregir</button>
-                <button style={{ ...S.btnPrimary, flex: 2, background: "linear-gradient(135deg,#2e7d32,#388e3c)" }} onClick={confirmarCierre}>
-                  ✅ Confirmar e imprimir cierre
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-
-function PendienteItem({ v, empleadas, setTicket, addAbono, setVentas }) {
-  const [showAbono, setShowAbono] = useState(false);
-  const emp = empleadas.find(e => e.id === v.empleadaId);
-  const pendiente = saldoPendiente(v);
-  const pagada = estaPagada(v);
-  const abonos = v.abonos || [];
-  const totalAbonado = abonos.reduce((a, ab) => a + ab.monto, 0);
-
-  const toggleField = (field) => setVentas && setVentas(prev =>
-    prev.map(vv => vv.folio === v.folio ? { ...vv, [field]: !vv[field] } : vv)
-  );
-
-  return (
-    <div>
-      <div style={{ ...S.ventaCard, borderLeft: `4px solid ${pagada ? "#ff9800" : "#e53935"}` }}>
-        <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-          {!pagada && <div style={{ ...S.badge, background: "#ffebee", color: "#c62828" }}>💸 Pendiente cobro</div>}
-          {pagada && !v.checkMsgEntrega && <div style={{ ...S.badge, background: "#fff3e0", color: "#e65100" }}>📦 Pendiente retiro</div>}
-        </div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-          <div>
-            <div style={{ fontWeight: 700, color: "#1a3c5e", fontSize: 15 }}>{v.clienteNombre}</div>
-            <div style={{ fontSize: 11, color: "#888" }}>{v.folio} · {fmt(v.fecha)}</div>
-            {emp && <div style={{ fontSize: 11, color: "#4db6e4" }}>👩 Registró: {emp.nombre}</div>}
-            <div style={{ fontSize: 12, color: "#555", marginTop: 4 }}>
-              {v.items.map((it, i) => <span key={i}>{it.label}{it.piezas > 1 ? ` ×${it.piezas}` : ""}{i < v.items.length - 1 ? " · " : ""}</span>)}
-            </div>
-            <div style={{ fontSize: 12, color: "#555", marginTop: 2 }}>📅 Entrega: {fmtDate(v.entrega)}</div>
-          </div>
-          <div style={{ textAlign: "right" }}>
-            <div style={{ fontWeight: 800, fontSize: 18, color: "#1a3c5e" }}>${v.total.toFixed(2)}</div>
-            {!pagada && <div style={{ fontSize: 13, color: "#e53935", fontWeight: 700 }}>Debe: ${pendiente.toFixed(2)}</div>}
-            {totalAbonado > 0 && <div style={{ fontSize: 11, color: "#2e7d32" }}>Abonado: ${totalAbonado.toFixed(2)}</div>}
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
-          <label style={S.checkLabel}>
-            <input type="checkbox" checked={v.checkMsgRetiro||false} onChange={() => toggleField("checkMsgRetiro")}/>
-            <span>📲 Msg retiro enviado</span>
-          </label>
-          <label style={S.checkLabel}>
-            <input type="checkbox" checked={v.checkMsgEntrega||false} onChange={() => toggleField("checkMsgEntrega")}/>
-            <span>✅ Entregado al cliente</span>
-          </label>
-        </div>
-        <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-          <button style={S.btnTicket} onClick={() => setTicket(v)}>🧾 Ticket</button>
-          {!pagada && (
-            <button style={{ ...S.btnTicket, background: "#e8f5e9", color: "#2e7d32", fontWeight: 700 }}
-              onClick={() => setShowAbono(true)}>
-              💰 Cobrar
-            </button>
-          )}
-        </div>
-      </div>
-      {showAbono && (
-        <AbonoModal venta={v}
-          onSave={(abono) => { addAbono(v.folio, abono); setShowAbono(false); }}
-          onClose={() => setShowAbono(false)}/>
-      )}
-    </div>
-  );
-}
-
-// ─── REPORTES CON EXPORTACIÓN EXCEL ───────────────────────────────
-function Reportes({ ventas, empleadas }) {
-  const hoy=new Date().toISOString().split("T")[0];
-  const semana=semanaISO(new Date());
-  const mes=mesKey(new Date());
-  const [mesSelec,setMesSelec]=useState(mes);
-  const [empSelec,setEmpSelec]=useState("Todos");
-
-  const ventasHoy=ventas.filter(v=>v.fecha.startsWith(hoy));
-  const ventasSem=ventas.filter(v=>semanaISO(v.fecha)===semana);
-  const ventasMes=ventas.filter(v=>mesKey(v.fecha)===mesSelec);
-  const ventasMesEmp=empSelec==="Todos"?ventasMes:ventasMes.filter(v=>String(v.empleadaId)===empSelec);
-
-  const sum=arr=>arr.reduce((a,v)=>a+v.total,0);
-  const cobrado=arr=>arr.reduce((a,v)=>a+(v.abonos||[]).reduce((x,ab)=>x+ab.monto,0),0);
-  const porCobrar=arr=>arr.reduce((a,v)=>a+saldoPendiente(v),0);
-
-  const byPago=PAGOS.map(p=>({label:p,val:ventasMes.flatMap(v=>(v.abonos||[]).filter(a=>a.metodo===p)).reduce((a,ab)=>a+ab.monto,0)}));
-  const totalCobradoMes=byPago.reduce((a,p)=>a+p.val,0);
-
-  const ventasPorMes=(()=>{const map={};ventas.forEach(v=>{const k=mesKey(v.fecha);map[k]=(map[k]||0)+v.total;});return Object.entries(map).sort().slice(-6).map(([k,v])=>({label:k.slice(5)+"/"+k.slice(0,4),val:v}));})();
-
-  const empStats=empleadas.map(e=>{
-    const mv=ventas.filter(v=>v.empleadaId===e.id&&mesKey(v.fecha)===mesSelec);
-    return {...e,count:mv.length,total:mv.reduce((a,v)=>a+v.total,0)};
-  }).sort((a,b)=>b.count-a.count);
-
-  const BtnExport=({label,arr,titulo})=>(
-    <button style={{...S.btnSmall,background:"#e8f5e9",color:"#2e7d32",display:"flex",alignItems:"center",gap:4}}
-      onClick={()=>exportarCSV(arr,titulo,empleadas)}>
-      📥 {label}
-    </button>
-  );
-
-  const KPI=({icon,label,val,sub,color})=>(
-    <div style={{...S.kpi,borderLeft:`4px solid ${color}`}}>
-      <div style={{fontSize:22}}>{icon}</div>
-      <div><div style={{fontWeight:800,fontSize:18,color}}>{val}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>{label}</div>{sub&&<div style={{fontSize:11,color:"#888"}}>{sub}</div>}</div>
-    </div>
-  );
-
-  return (
-    <div style={S.panel}>
-      <h2 style={S.panelTitle}>📊 Reportes</h2>
-
-      {/* EXPORTAR */}
-      <Card title="📥 Exportar a Excel">
-        <p style={{fontSize:13,color:"#555",marginBottom:12}}>Descarga reportes en formato CSV que se abren directamente en Excel.</p>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-          <BtnExport label="Reporte hoy" arr={ventasHoy} titulo="reporte-hoy"/>
-          <BtnExport label="Reporte semanal" arr={ventasSem} titulo="reporte-semana"/>
-          <BtnExport label="Reporte mensual" arr={ventasMes} titulo={`reporte-${mesSelec}`}/>
-          <BtnExport label="Todas las ventas" arr={ventas} titulo="reporte-completo"/>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:8}}>
-          <div>
-            <label style={S.label}>Mes para reporte</label>
-            <input type="month" style={S.input} value={mesSelec} onChange={e=>setMesSelec(e.target.value)}/>
-          </div>
-          <div>
-            <label style={S.label}>Filtrar por empleada</label>
-            <select style={S.input} value={empSelec} onChange={e=>setEmpSelec(e.target.value)}>
-              <option value="Todos">Todas</option>
-              {empleadas.map(e=><option key={e.id} value={String(e.id)}>{e.nombre}</option>)}
-            </select>
-          </div>
-        </div>
-        {empSelec!=="Todos"&&(
-          <button style={{...S.btnSmall,marginTop:8,background:"#e8f5e9",color:"#2e7d32"}}
-            onClick={()=>exportarCSV(ventasMesEmp,`reporte-${empleadas.find(e=>String(e.id)===empSelec)?.nombre}-${mesSelec}`,empleadas)}>
-            📥 Exportar reporte por empleada
-          </button>
-        )}
-      </Card>
-
-      {/* KPIs */}
-      <div style={S.kpiGrid}>
-        <KPI icon="☀️" label="Ventas hoy" val={`$${sum(ventasHoy).toFixed(2)}`} sub={`${ventasHoy.length} órdenes`} color="#f59e0b"/>
-        <KPI icon="📅" label="Esta semana" val={`$${sum(ventasSem).toFixed(2)}`} sub={`${ventasSem.length} órdenes`} color="#4db6e4"/>
-        <KPI icon="💚" label="Cobrado este mes" val={`$${cobrado(ventasMes).toFixed(2)}`} sub="Pagos recibidos" color="#4caf50"/>
-        <KPI icon="⏳" label="Por cobrar" val={`$${porCobrar(ventasMes).toFixed(2)}`} sub="Saldo pendiente" color="#e53935"/>
-      </div>
-
-      <Card title="💳 Cobros del mes por método">
-        {byPago.map(p=>(
-          <div key={p.label} style={{marginBottom:10}}>
-            <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:3}}><span>{p.label}</span><strong>${p.val.toFixed(2)}</strong></div>
-            <div style={{background:"#e8f0f7",borderRadius:4,height:8}}>
-              <div style={{background:p.label==="Efectivo"?"#4caf50":esTranferencia(p.label)?"#4db6e4":"#ff9800",width:`${totalCobradoMes?(p.val/totalCobradoMes)*100:0}%`,height:"100%",borderRadius:4}}/>
-            </div>
-          </div>
-        ))}
-      </Card>
-
-      <Card title="📈 Ventas por mes (últimos 6)">
-        {ventasPorMes.length===0?<div style={S.empty}>Sin datos</div>:ventasPorMes.map(m=>{
-          const max=Math.max(...ventasPorMes.map(x=>x.val),1);
-          return(
-            <div key={m.label} style={{marginBottom:8}}>
-              <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:2}}><span>{m.label}</span><strong>${m.val.toFixed(2)}</strong></div>
-              <div style={{background:"#e8f0f7",borderRadius:4,height:10}}><div style={{background:"#1a3c5e",width:`${(m.val/max)*100}%`,height:"100%",borderRadius:4}}/></div>
-            </div>
-          );
-        })}
-      </Card>
-
-      <Card title="🏆 Ranking empleadas">
-        {empStats.map((e,i)=>{
-          const meta=e.metaVentas||20;
-          const pct=Math.min(100,(e.count/meta)*100);
-          const ganoBono=e.count>=meta;
-          return(
-            <div key={e.id} style={{padding:"10px 0",borderBottom:"1px solid #f0f4f8"}}>
-              <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <div style={{fontSize:18}}>{i===0?"🥇":i===1?"🥈":i===2?"🥉":"👤"}</div>
-                <div style={{flex:1}}>
-                  <div style={{fontWeight:600,fontSize:14}}>{e.nombre}</div>
-                  <div style={{fontSize:12,color:"#888"}}>{e.count} ventas · ${e.total.toFixed(2)} · Meta: {meta}</div>
-                </div>
-                {ganoBono&&<div style={{...S.badge,background:"#fff8e1",color:"#f59e0b"}}>🌟 ${e.montoBonus||0}</div>}
-              </div>
-              <div style={{marginTop:6}}>
-                <div style={{background:"#e8f0f7",borderRadius:6,height:6}}><div style={{background:ganoBono?"#f59e0b":"#4db6e4",width:`${pct}%`,height:"100%",borderRadius:6}}/></div>
-              </div>
-            </div>
-          );
-        })}
-      </Card>
-    </div>
-  );
-}
-
-// ─── INVENTARIO ────────────────────────────────────────────────────
-function Inventario({ inventario, setInventario }) {
-  const [nuevo,setNuevo]=useState({nombre:"",stock:0,min:1,unidad:"pzas"});
-  const update=(id,field,val)=>setInventario(prev=>prev.map(i=>i.id===id?{...i,[field]:val}:i));
-  const eliminar=(id)=>setInventario(prev=>prev.filter(i=>i.id!==id));
-  const agregar=()=>{if(!nuevo.nombre.trim()) return;setInventario(prev=>[...prev,{...nuevo,id:Date.now(),stock:parseFloat(nuevo.stock)||0}]);setNuevo({nombre:"",stock:0,min:1,unidad:"pzas"});};
-  const bajoStock=inventario.filter(i=>i.stock<=i.min);
-  return (
-    <div style={S.panel}>
-      <h2 style={S.panelTitle}>Inventario de Insumos</h2>
-      {bajoStock.length>0&&<div style={S.alerta}>⚠️ Stock bajo: {bajoStock.map(i=>i.nombre).join(", ")}</div>}
-      <Card title="📋 Insumos">
-        {inventario.map(item=>(
-          <div key={item.id} style={S.ventaCard}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <div><div style={{fontWeight:600}}>{item.nombre}</div><div style={{fontSize:12,color:"#888"}}>Mínimo: {item.min} {item.unidad}</div></div>
-              <div style={{display:"flex",alignItems:"center",gap:8}}>
-                <div style={{...S.badge,background:item.stock<=item.min?"#ffebee":"#e8f5e9",color:item.stock<=item.min?"#c62828":"#2e7d32",fontSize:14,fontWeight:700}}>{item.stock} {item.unidad}</div>
-                <button style={S.btnRemove} onClick={()=>eliminar(item.id)}>✕</button>
-              </div>
-            </div>
-            <div style={{display:"flex",gap:6,marginTop:8,alignItems:"center"}}>
-              <button style={S.btnSmall} onClick={()=>update(item.id,"stock",Math.max(0,item.stock-1))}>−</button>
-              <input type="number" style={{...S.input,width:70,textAlign:"center",padding:"4px 6px"}} value={item.stock} onChange={e=>update(item.id,"stock",parseFloat(e.target.value)||0)}/>
-              <button style={S.btnSmall} onClick={()=>update(item.id,"stock",item.stock+1)}>+</button>
-            </div>
-          </div>
-        ))}
-      </Card>
-      <Card title="➕ Agregar insumo">
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-          <input style={{...S.input,gridColumn:"1/-1"}} placeholder="Nombre" value={nuevo.nombre} onChange={e=>setNuevo({...nuevo,nombre:e.target.value})}/>
-          <input type="number" style={S.input} placeholder="Stock inicial" value={nuevo.stock} onChange={e=>setNuevo({...nuevo,stock:e.target.value})}/>
-          <input type="number" style={S.input} placeholder="Stock mínimo" value={nuevo.min} onChange={e=>setNuevo({...nuevo,min:e.target.value})}/>
-          <input style={S.input} placeholder="Unidad (kg,L,pzas)" value={nuevo.unidad} onChange={e=>setNuevo({...nuevo,unidad:e.target.value})}/>
-        </div>
-        <button style={{...S.btnPrimary,marginTop:10}} onClick={agregar}>Agregar</button>
-      </Card>
-    </div>
-  );
-}
-
-// ─── EQUIPO ────────────────────────────────────────────────────────
-function Equipo({ empleadas, setEmpleadas, ventas, esAdmin }) {
-  const [nuevo,setNuevo]=useState({nombre:"",metaVentas:20,montoBonus:20});
-  const [editId,setEditId]=useState(null);
-  const [editData,setEditData]=useState({nombre:"",metaVentas:20,montoBonus:20});
-  const mes=mesKey(new Date());
-
-  const agregar=()=>{
-    if(!nuevo.nombre.trim()) return;
-    setEmpleadas(prev=>[...prev,{id:Date.now(),nombre:nuevo.nombre,activa:true,metaVentas:parseInt(nuevo.metaVentas)||20,montoBonus:parseFloat(nuevo.montoBonus)||0}]);
-    setNuevo({nombre:"",metaVentas:20,montoBonus:20});
-  };
-  const toggle=(id)=>setEmpleadas(prev=>prev.map(e=>e.id===id?{...e,activa:!e.activa}:e));
-  const iniciarEdicion=(e)=>{setEditId(e.id);setEditData({nombre:e.nombre,metaVentas:e.metaVentas||20,montoBonus:e.montoBonus||0});};
-  const guardarEdicion=()=>{
-    setEmpleadas(prev=>prev.map(e=>e.id===editId?{...e,...editData,metaVentas:parseInt(editData.metaVentas)||20,montoBonus:parseFloat(editData.montoBonus)||0}:e));
-    setEditId(null);
-  };
-  const empStats=empleadas.map(e=>{
-    const mv=ventas.filter(v=>v.empleadaId===e.id&&mesKey(v.fecha)===mes);
-    return {...e,ventasMes:mv.length,totalMes:mv.reduce((a,v)=>a+v.total,0)};
-  });
-
-  return (
-    <div style={S.panel}>
-      <h2 style={S.panelTitle}>Equipo & Bonos</h2>
-      <Card title="👩 Empleadas">
-        {empStats.map(e=>{
-          const meta=e.metaVentas||20;
-          const bono=e.montoBonus||0;
-          const pct=Math.min(100,(e.ventasMes/meta)*100);
-          const ganoBono=e.ventasMes>=meta;
-          return(
-            <div key={e.id} style={{...S.ventaCard,opacity:e.activa?1:0.6}}>
-              {editId===e.id?(
-                <div>
-                  <div style={{fontWeight:700,color:"#1a3c5e",marginBottom:8}}>✏️ Editando</div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr",gap:8,marginBottom:8}}>
-                    <div><label style={S.label}>Nombre</label><input style={S.input} value={editData.nombre} onChange={ev=>setEditData({...editData,nombre:ev.target.value})}/></div>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                      <div><label style={S.label}>Meta ventas/mes</label><input type="number" style={S.input} value={editData.metaVentas} onChange={ev=>setEditData({...editData,metaVentas:ev.target.value})}/></div>
-                      <div><label style={S.label}>Monto bono ($)</label><input type="number" style={S.input} value={editData.montoBonus} onChange={ev=>setEditData({...editData,montoBonus:ev.target.value})}/></div>
-                    </div>
-                  </div>
-                  <div style={{display:"flex",gap:8}}>
-                    <button style={{...S.btnPrimary,flex:1}} onClick={guardarEdicion}>✓ Guardar</button>
-                    <button style={S.btnClose} onClick={()=>setEditId(null)}>Cancelar</button>
-                  </div>
-                </div>
-              ):(
-                <>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                    <div>
-                      <div style={{fontWeight:700,fontSize:15}}>{e.nombre}</div>
-                      <div style={{fontSize:12,color:"#888"}}>{e.ventasMes} ventas este mes</div>
-                      {esAdmin && <div style={{fontSize:11,color:"#4db6e4"}}>Meta: {meta} ventas · Bono: ${bono}</div>}
-                    </div>
-                    <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
-                      {ganoBono&&<div style={{...S.badge,background:"#fff8e1",color:"#f59e0b"}}>🌟 {esAdmin?`$${bono}`:"¡Bono!"}</div>}
-                      {esAdmin && <button style={S.btnSmall} onClick={()=>iniciarEdicion(e)}>✏️</button>}
-                      {esAdmin && <button style={{...S.btnSmall,background:e.activa?"#ffebee":"#e8f5e9",color:e.activa?"#c62828":"#2e7d32"}} onClick={()=>toggle(e.id)}>{e.activa?"Desactivar":"Activar"}</button>}
-                    </div>
-                  </div>
-                  <div style={{marginTop:8}}>
-                    <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#888",marginBottom:3}}><span>Progreso bono</span><span>{e.ventasMes}/{meta}</span></div>
-                    <div style={{background:"#e8f0f7",borderRadius:6,height:8}}><div style={{background:ganoBono?"#f59e0b":"#4db6e4",width:`${pct}%`,height:"100%",borderRadius:6}}/></div>
-                  </div>
-                </>
-              )}
-            </div>
-          );
-        })}
-      </Card>
-      {esAdmin && <Card title="➕ Agregar empleada">
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-          <input style={{...S.input,gridColumn:"1/-1"}} placeholder="Nombre completo" value={nuevo.nombre} onChange={e=>setNuevo({...nuevo,nombre:e.target.value})}/>
-          <div><label style={S.label}>Meta ventas/mes</label><input type="number" style={S.input} value={nuevo.metaVentas} onChange={e=>setNuevo({...nuevo,metaVentas:e.target.value})}/></div>
-          <div><label style={S.label}>Monto bono ($)</label><input type="number" style={S.input} value={nuevo.montoBonus} onChange={e=>setNuevo({...nuevo,montoBonus:e.target.value})}/></div>
-        </div>
-        <button style={{...S.btnPrimary,marginTop:10}} onClick={agregar}>Agregar empleada</button>
-      </Card>}
-    </div>
-  );
-}
-
-// ─── CONFIGURACION ─────────────────────────────────────────────────
-function Configuracion({ servicios, setServicios, exportarDatos, importarDatos }) {
-  const [nuevo,setNuevo]=useState({label:"",precio:""});
-  const [editId,setEditId]=useState(null);
-  const [editData,setEditData]=useState({label:"",precio:""});
-  const [busq,setBusq]=useState("");
-
-  const agregar=()=>{
-    if(!nuevo.label.trim()||!nuevo.precio) return;
-    setServicios(prev=>[...prev,{id:"custom-"+Date.now(),label:nuevo.label.toUpperCase(),precio:parseFloat(nuevo.precio)}]);
-    setNuevo({label:"",precio:""});
-  };
-  const eliminar=(id)=>setServicios(prev=>prev.filter(s=>s.id!==id));
-  const iniciarEdicion=(s)=>{setEditId(s.id);setEditData({label:s.label,precio:s.precio});};
-  const guardarEdicion=()=>{
-    setServicios(prev=>prev.map(s=>s.id===editId?{...s,label:editData.label.toUpperCase(),precio:parseFloat(editData.precio)}:s));
-    setEditId(null);
-  };
-  const filtrados=servicios.filter(s=>s.label.toLowerCase().includes(busq.toLowerCase()));
-
-  return (
-    <div style={S.panel}>
-      <h2 style={S.panelTitle}>⚙️ Configuración</h2>
-      <Card title="💾 Respaldo de datos">
-        <p style={{fontSize:13,color:"#555",marginBottom:12}}>Exporta todos tus datos para guardar o restaurar en otro dispositivo.</p>
-        <button style={{...S.btnPrimary,marginBottom:10}} onClick={exportarDatos}>📥 Exportar datos (Respaldo)</button>
-        <label style={{...S.btnPrimary,display:"block",textAlign:"center",cursor:"pointer",background:"#e8f5fd",color:"#1a3c5e",padding:"13px",borderRadius:10,fontSize:15,fontWeight:700}}>
-          📤 Importar datos (Restaurar)
-          <input type="file" accept=".json" style={{display:"none"}} onChange={importarDatos}/>
-        </label>
-        <p style={{fontSize:11,color:"#aaa",marginTop:8}}>⚠️ Importar reemplazará todos los datos actuales.</p>
-      </Card>
-      <Card title="➕ Agregar nuevo servicio">
-        <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8}}>
-          <input style={S.input} placeholder="Nombre del servicio" value={nuevo.label} onChange={e=>setNuevo({...nuevo,label:e.target.value})}/>
-          <input type="number" style={{...S.input,width:90}} placeholder="$Precio" value={nuevo.precio} onChange={e=>setNuevo({...nuevo,precio:e.target.value})}/>
-        </div>
-        <button style={{...S.btnPrimary,marginTop:8}} onClick={agregar}>Agregar servicio</button>
-      </Card>
-      <Card title={`📋 Servicios (${servicios.length})`}>
-        <input style={{...S.input,marginBottom:10}} placeholder="Buscar servicio..." value={busq} onChange={e=>setBusq(e.target.value)}/>
-        {filtrados.map(s=>(
-          <div key={s.id} style={{...S.ventaCard,padding:"8px 12px"}}>
-            {editId===s.id?(
-              <div style={{display:"grid",gridTemplateColumns:"1fr auto auto",gap:6,alignItems:"center"}}>
-                <input style={S.input} value={editData.label} onChange={e=>setEditData({...editData,label:e.target.value})}/>
-                <input type="number" style={{...S.input,width:80}} value={editData.precio} onChange={e=>setEditData({...editData,precio:e.target.value})}/>
-                <button style={{...S.btnSmall,background:"#e8f5e9",color:"#2e7d32"}} onClick={guardarEdicion}>✓</button>
-              </div>
-            ):(
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div>
-                  <div style={{fontSize:13,fontWeight:600}}>{s.label}</div>
-                  <div style={{fontSize:12,color:"#4db6e4",fontWeight:700}}>${s.precio.toFixed(2)}</div>
-                </div>
-                <div style={{display:"flex",gap:6}}>
-                  <button style={S.btnSmall} onClick={()=>iniciarEdicion(s)}>✏️</button>
-                  <button style={S.btnRemove} onClick={()=>eliminar(s.id)}>✕</button>
-                </div>
-              </div>
-            )}
-          </div>
-        ))}
-      </Card>
-    </div>
-  );
-}
-
-// ─── CIERRE DE CAJA ────────────────────────────────────────────────
-function CierreCaja({ ventas, empleadas }) {
-  const hoy = new Date().toISOString().split("T")[0];
-  const APERTURA_KEY = "ll_apertura_" + hoy;
-
-  const [modo, setModo] = useState(() => {
-    try { return localStorage.getItem(APERTURA_KEY) ? "cierre" : "apertura"; } catch { return "apertura"; }
-  });
-  const [apertura, setApertura] = useState(() => {
-    try { const a = localStorage.getItem(APERTURA_KEY); return a ? JSON.parse(a) : null; } catch { return null; }
-  });
-
-  // APERTURA STATE
-  const [aperturaEmpleada, setAperturaEmpleada] = useState(empleadas[0]?.id || null);
-  const [fondoInicial, setFondoInicial] = useState("15.00");
-
-  // CIERRE STATE
-  const [empleadaId, setEmpleadaId] = useState(empleadas[0]?.id || null);
-  const [montoEfectivo, setMontoEfectivo] = useState("");
-  const [montoTransferencia, setMontoTransferencia] = useState("");
-  const [montoTarjeta, setMontoTarjeta] = useState("");
-  const [resultado, setResultado] = useState(null);
-
-  const registrarApertura = () => {
-    const datos = {
-      empleadaId: aperturaEmpleada,
-      empleadaNombre: empleadas.find(e => String(e.id) === String(aperturaEmpleada))?.nombre || "",
-      fondo: parseFloat(fondoInicial) || 15,
-      fecha: new Date().toISOString(),
-    };
-    try { localStorage.setItem(APERTURA_KEY, JSON.stringify(datos)); } catch {}
-    setApertura(datos);
-    setModo("cierre");
-
-    // Imprimir ticket de apertura
-    const w = window.open("", "_blank", "width=380,height=400");
-    w.document.write(`
-      <html><head><title>Apertura de Caja</title>
-      <style>body{font-family:sans-serif;padding:20px;max-width:320px;margin:0 auto;text-align:center}
-      h2{color:#1a3c5e}.divider{border-top:1px dashed #ccc;margin:12px 0}
-      .row{display:flex;justify-content:space-between;margin:6px 0;font-size:14px;text-align:left}
-      .big{font-size:22px;font-weight:800;color:#1a3c5e}</style></head>
-      <body>
-      <div style="font-size:36px">🫧</div>
-      <h2>Lava&Listo</h2>
-      <p><strong>APERTURA DE CAJA</strong></p>
-      <div class="divider"></div>
-      <div class="row"><span>Fecha</span><span>${new Date(datos.fecha).toLocaleString("es-MX")}</span></div>
-      <div class="row"><span>Abrió</span><span>${datos.empleadaNombre}</span></div>
-      <div class="divider"></div>
-      <p>Fondo inicial en caja:</p>
-      <div class="big">$${datos.fondo.toFixed(2)}</div>
-      <div class="divider"></div>
-      <p style="font-size:11px;color:#aaa">Lava&Listo · Sistema de ventas</p>
-      <script>window.print();window.close();</script>
-      </body></html>
-    `);
-    w.document.close();
-  };
-
-  const ventasHoy = ventas.filter(v => v.fecha.startsWith(hoy) && !v.anulada);
-  const ventasEmp = empleadaId === "todos"
-    ? ventasHoy
-    : ventasHoy.filter(v => String(v.empleadaId) === String(empleadaId));
-
-  const esperadoEfectivo = ventasEmp.flatMap(v => (v.abonos || []).filter(a => a.metodo === "Efectivo")).reduce((a, ab) => a + ab.monto, 0);
-  const esperadoTransferencia = ventasEmp.flatMap(v => (v.abonos || []).filter(a => esTranferencia(a.metodo))).reduce((a, ab) => a + ab.monto, 0);
-  const esperadoTarjeta = ventasEmp.flatMap(v => (v.abonos || []).filter(a => a.metodo === "Tarjeta")).reduce((a, ab) => a + ab.monto, 0);
-  const esperadoTotal = esperadoEfectivo + esperadoTransferencia + esperadoTarjeta;
-
-  const calcularCierre = () => {
-    const ef = parseFloat(montoEfectivo) || 0;
-    const tr = parseFloat(montoTransferencia) || 0;
-    const ta = parseFloat(montoTarjeta) || 0;
-    const fondo = apertura?.fondo || 15;
-    const contadoTotal = ef + tr + ta;
-    // Efectivo neto = lo contado menos el fondo que siempre queda
-    const efNeto = ef - fondo;
-    const esperadoEfConFondo = esperadoEfectivo + fondo;
-    const ventasReales = efNeto + tr + ta;
-    setResultado({
-      ef, tr, ta, contadoTotal, fondo, efNeto,
-      ventasReales,
-      difEf: efNeto - esperadoEfectivo,
-      difTr: tr - esperadoTransferencia,
-      difTa: ta - esperadoTarjeta,
-      difTotal: ventasReales - esperadoTotal,
-      esperadoEfConFondo,
-      fecha: new Date().toISOString(),
-      empleada: empleadas.find(e => String(e.id) === String(empleadaId))?.nombre || "Todas",
-      totalVentas: ventasEmp.length,
-      totalVentasVal: ventasEmp.reduce((a, v) => a + v.total, 0),
-    });
-  };
-
-  const DifBadge = ({ dif }) => (
-    <span style={{ fontWeight: 700, color: dif === 0 ? "#2e7d32" : dif > 0 ? "#1565c0" : "#c62828" }}>
-      {dif === 0 ? "✅ Cuadra" : dif > 0 ? `📈 Sobra $${dif.toFixed(2)}` : `⚠️ Falta $${Math.abs(dif).toFixed(2)}`}
-    </span>
-  );
-
-  return (
-    <div style={S.panel}>
-      <h2 style={S.panelTitle}>💰 Caja</h2>
-
-      {/* TABS APERTURA / CIERRE */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-        <button style={{ ...S.pill, ...(modo === "apertura" ? S.pillActive : {}) }} onClick={() => setModo("apertura")}>🔓 Apertura</button>
-        <button style={{ ...S.pill, ...(modo === "cierre" ? S.pillActive : {}) }} onClick={() => setModo("cierre")}>🔒 Cierre</button>
-      </div>
-
-      {/* APERTURA */}
-      {modo === "apertura" && (
-        <div>
-          {apertura && (
-            <div style={{ ...S.alerta, background: "#e8f5e9", color: "#2e7d32" }}>
-              ✅ Caja ya abierta hoy por <strong>{apertura.empleadaNombre}</strong> con fondo de <strong>${apertura.fondo.toFixed(2)}</strong>
-            </div>
-          )}
-          <Card title="🔓 Apertura de caja">
-            <p style={{ fontSize: 13, color: "#555", marginBottom: 12 }}>Registra la apertura del día con el fondo inicial en caja.</p>
-            <label style={S.label}>Empleada que abre caja</label>
-            <select style={{ ...S.input, marginBottom: 10 }} value={aperturaEmpleada} onChange={e => setAperturaEmpleada(e.target.value)}>
-              {empleadas.filter(e => e.activa).map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
-            </select>
-            <label style={S.label}>💵 Fondo inicial en caja</label>
-            <input type="number" style={{ ...S.input, marginBottom: 14, fontSize: 18, fontWeight: 700 }}
-              value={fondoInicial} onChange={e => setFondoInicial(e.target.value)} />
-            <div style={{ background: "#e8f5fd", borderRadius: 8, padding: "10px 14px", marginBottom: 14, textAlign: "center" }}>
-              <div style={{ fontSize: 11, color: "#888" }}>Fondo que queda en caja</div>
-              <div style={{ fontSize: 24, fontWeight: 800, color: "#1a3c5e" }}>${parseFloat(fondoInicial || 0).toFixed(2)}</div>
-            </div>
-            <button style={S.btnPrimary} onClick={registrarApertura}>🔓 Registrar apertura e imprimir ticket</button>
-          </Card>
-        </div>
-      )}
-
-      {/* CIERRE */}
-      {modo === "cierre" && (
-        <div>
-          {apertura && (
-            <div style={{ background: "#e8f5fd", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 13 }}>
-              🔓 Abierta por <strong>{apertura.empleadaNombre}</strong> · Fondo: <strong>${apertura.fondo.toFixed(2)}</strong>
-            </div>
-          )}
-
-      <Card title="📋 Resumen del día">
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
-          <div style={{ ...S.kpi, borderLeft: "4px solid #1a3c5e" }}>
-            <div style={{ fontSize: 20 }}>🧾</div>
-            <div><div style={{ fontWeight: 800, fontSize: 16, color: "#1a3c5e" }}>{ventasEmp.length}</div><div style={{ fontSize: 11, color: "#888" }}>Ventas hoy</div></div>
-          </div>
-          <div style={{ ...S.kpi, borderLeft: "4px solid #4caf50" }}> 
-            <div style={{ fontSize: 20 }}>💵</div>
-            <div><div style={{ fontWeight: 800, fontSize: 16, color: "#4caf50" }}>${(esperadoTotal + (apertura?.fondo || 0)).toFixed(2)}</div><div style={{ fontSize: 11, color: "#888" }}>Esperado en caja</div></div>
-          </div>
-        </div>
-        <div style={{ fontSize: 12, color: "#555", marginBottom: 4 }}>💵 Efectivo esperado: <strong>${esperadoEfectivo.toFixed(2)}</strong></div>
-        <div style={{ fontSize: 12, color: "#555", marginBottom: 4 }}>🏦 Transferencia esperada: <strong>${esperadoTransferencia.toFixed(2)}</strong></div>
-        <div style={{ fontSize: 12, color: "#555" }}>💳 Tarjeta esperada: <strong>${esperadoTarjeta.toFixed(2)}</strong></div>
-      </Card>
-
-      <Card title="👩 Seleccionar empleada">
-        <select style={S.input} value={empleadaId} onChange={e => { setEmpleadaId(e.target.value); setResultado(null); }}>
-          <option value="todos">Todas las empleadas</option>
-          {empleadas.filter(e => e.activa).map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
-        </select>
-      </Card>
-
-      <Card title="🔢 Ingresa el dinero contado">
-        <div style={{ marginBottom: 10 }}>
-          <label style={S.label}>💵 Efectivo en caja</label>
-          <input type="number" style={S.input} placeholder="$0.00" value={montoEfectivo} onChange={e => { setMontoEfectivo(e.target.value); setResultado(null); }} />
-        </div>
-        <div style={{ marginBottom: 10 }}>
-          <label style={S.label}>🏦 Transferencias recibidas</label>
-          <input type="number" style={S.input} placeholder="$0.00" value={montoTransferencia} onChange={e => { setMontoTransferencia(e.target.value); setResultado(null); }} />
-        </div>
-        <div style={{ marginBottom: 14 }}>
-          <label style={S.label}>💳 Pagos con tarjeta</label>
-          <input type="number" style={S.input} placeholder="$0.00" value={montoTarjeta} onChange={e => { setMontoTarjeta(e.target.value); setResultado(null); }} />
-        </div>
-        <button style={S.btnPrimary} onClick={calcularCierre}>🧮 Calcular cierre de caja</button>
-      </Card>
-
-      {resultado && (
-        <div>
-          <div style={{ ...S.kpi, borderLeft: `4px solid ${resultado.difTotal === 0 ? "#4caf50" : resultado.difTotal > 0 ? "#1565c0" : "#e53935"}`, marginBottom: 14 }}>
-            <div style={{ fontSize: 28 }}>{resultado.difTotal === 0 ? "✅" : resultado.difTotal > 0 ? "📈" : "⚠️"}</div>
-            <div>
-              <div style={{ fontWeight: 800, fontSize: 16, color: resultado.difTotal === 0 ? "#2e7d32" : resultado.difTotal > 0 ? "#1565c0" : "#e53935" }}>
-                {resultado.difTotal === 0 ? "¡Caja cuadrada!" : resultado.difTotal > 0 ? `Sobran $${resultado.difTotal.toFixed(2)}` : `Faltan $${Math.abs(resultado.difTotal).toFixed(2)}`}
-              </div>
-              <div style={{ fontSize: 12, color: "#888" }}>Ventas reales: ${resultado.ventasReales.toFixed(2)} · Esperado: ${esperadoTotal.toFixed(2)}</div>
-              <div style={{ fontSize: 12, color: "#e65100", fontWeight: 600 }}>💵 Fondo restado: ${resultado.fondo.toFixed(2)} queda en caja</div>
-            </div>
-          </div>
-
-          <Card title="📊 Detalle por método">
-            <div style={{ background: "#fff3e0", borderRadius: 6, padding: "8px 12px", marginBottom: 10, fontSize: 12, color: "#e65100", fontWeight: 600 }}>
-              💵 Efectivo contado: ${resultado.ef.toFixed(2)} — Fondo ${resultado.fondo.toFixed(2)} = <strong>Neto ${resultado.efNeto.toFixed(2)}</strong>
-            </div>
-            {[
-              { label: "💵 Efectivo (neto)", contado: resultado.efNeto, esperado: esperadoEfectivo, dif: resultado.difEf },
-              { label: "🏦 Transferencia", contado: resultado.tr, esperado: esperadoTransferencia, dif: resultado.difTr },
-              { label: "💳 Tarjeta", contado: resultado.ta, esperado: esperadoTarjeta, dif: resultado.difTa },
-            ].map(row => (
-              <div key={row.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #f0f4f8" }}>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>{row.label}</span>
-                <div style={{ textAlign: "right" }}>
-                  <div style={{ fontSize: 12, color: "#888" }}>Contado: ${row.contado.toFixed(2)} / Esperado: ${row.esperado.toFixed(2)}</div>
-                  <DifBadge dif={row.dif} />
-                </div>
-              </div>
-            ))}
-          </Card>
-
-          <button style={{ ...S.btnPrimary, background: "linear-gradient(135deg,#2e7d32,#388e3c)", marginTop: 4 }} onClick={() => {
-            const w = window.open("", "_blank", "width=400,height=600");
-            w.document.write(`
-              <html><head><title>Cierre de Caja</title>
-              <style>body{font-family:sans-serif;padding:20px;max-width:340px;margin:0 auto}
-              h2{text-align:center;color:#1a3c5e}.row{display:flex;justify-content:space-between;margin:6px 0;font-size:14px}
-              .divider{border-top:1px dashed #ccc;margin:10px 0}.total{font-size:18px;font-weight:800}
-              .ok{color:#2e7d32}.bad{color:#c62828}.info{color:#1565c0}
-              .header{text-align:center;margin-bottom:16px}.logo{font-size:32px}</style>
-              </head><body>
-              <div class="header"><div class="logo">🫧</div><h2>Lava&amp;Listo</h2><p>CIERRE DE CAJA</p></div>
-              <div class="divider"></div>
-              <div class="row"><span>Fecha</span><span>${new Date(resultado.fecha).toLocaleString("es-MX")}</span></div>
-              <div class="row"><span>Empleada</span><span>${resultado.empleada}</span></div>
-              <div class="row"><span>Ventas del día</span><span>${resultado.totalVentas} · $${resultado.totalVentasVal.toFixed(2)}</span></div>
-              <div class="divider"></div>
-              <div class="row"><span>💵 Efectivo contado</span><span>$${resultado.ef.toFixed(2)}</span></div>
-              <div class="row"><span>— Fondo que queda</span><span>-$${resultado.fondo.toFixed(2)}</span></div>
-              <div class="row"><span>💵 Efectivo neto</span><span>$${resultado.efNeto.toFixed(2)}</span></div>
-              <div class="divider"></div>
-              <div class="row"><span>💵 Efectivo contado</span><span>$${resultado.ef.toFixed(2)}</span></div>
-              <div class="row"><span>💵 Efectivo esperado</span><span>$${esperadoEfectivo.toFixed(2)}</span></div>
-              <div class="row"><span>Diferencia</span><span class="${resultado.difEf===0?"ok":resultado.difEf>0?"info":"bad"}">${resultado.difEf===0?"✅ Cuadra":resultado.difEf>0?`+$${resultado.difEf.toFixed(2)}`:`-$${Math.abs(resultado.difEf).toFixed(2)}`}</span></div>
-              <div class="divider"></div>
-              <div class="row"><span>🏦 Transfer contada</span><span>$${resultado.tr.toFixed(2)}</span></div>
-              <div class="row"><span>🏦 Transfer esperada</span><span>$${esperadoTransferencia.toFixed(2)}</span></div>
-              <div class="row"><span>Diferencia</span><span class="${resultado.difTr===0?"ok":resultado.difTr>0?"info":"bad"}">${resultado.difTr===0?"✅ Cuadra":resultado.difTr>0?`+$${resultado.difTr.toFixed(2)}`:`-$${Math.abs(resultado.difTr).toFixed(2)}`}</span></div>
-              <div class="divider"></div>
-              <div class="row total"><span>TOTAL CONTADO</span><span>$${resultado.contadoTotal.toFixed(2)}</span></div>
-              <div class="row total"><span>TOTAL ESPERADO</span><span>$${esperadoTotal.toFixed(2)}</span></div>
-              <div class="divider"></div>
-              <div class="row total"><span>RESULTADO</span><span class="${resultado.difTotal===0?"ok":resultado.difTotal>0?"info":"bad"}">${resultado.difTotal===0?"✅ CUADRA":resultado.difTotal>0?`📈 SOBRA $${resultado.difTotal.toFixed(2)}`:`⚠️ FALTA $${Math.abs(resultado.difTotal).toFixed(2)}`}</span></div>
-              <div class="divider"></div>
-              <p style="text-align:center;font-size:11px;color:#aaa">Lava&amp;Listo · Sistema de ventas</p>
-              <script>window.print();window.close();</script>
-              </body></html>
-            `);
-            w.document.close();
-          }}>🖨️ Imprimir ticket de cierre</button>
-        </div>
-      )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── MIS VENTAS (EMPLEADA) ─────────────────────────────────────────
 function MisVentas({ ventas, sesion, empleadas, setTicket }) {
   const hoy = new Date().toISOString().split("T")[0];
   const semana = semanaISO(new Date());
@@ -2731,6 +1374,839 @@ function GestionUsuarios() {
     </div>
   );
 }
+
+// ─── ESTADOS DE ORDEN ──────────────────────────────────────────────
+const ESTADOS = [
+  { id: "recibido",  label: "Recibido",         color: "#f59e0b", bg: "#fff8e1", icon: "📥" },
+  { id: "proceso",   label: "En proceso",        color: "#1565c0", bg: "#e3f2fd", icon: "🔄" },
+  { id: "listo",     label: "Listo para retirar",color: "#2e7d32", bg: "#e8f5e9", icon: "✅" },
+  { id: "entregado", label: "Entregado",         color: "#888",    bg: "#f0f0f0", icon: "📦" },
+];
+const sigEstado = (actual) => {
+  const idx = ESTADOS.findIndex(e => e.id === actual);
+  return idx < ESTADOS.length - 1 ? ESTADOS[idx + 1] : null;
+};
+const getEstado = (v) => ESTADOS.find(e => e.id === (v.estado || "recibido")) || ESTADOS[0];
+
+// ─── PANTALLA EMPLEADA (SIMPLE) ────────────────────────────────────
+function PantallaEmpleada({ ventas, setVentas, clientes, setClientes, empleadas, servicios, sesion, addAbono, onLogout, cierreListoState, onCierreListo }) {
+  const hoy = new Date().toISOString().split("T")[0];
+  const [vistaTab, setVistaTab] = useState("hoy");
+  const [busq, setBusq] = useState("");
+  const [fechaSel, setFechaSel] = useState(hoy);
+  const [showNueva, setShowNueva] = useState(false);
+  const [ticketV, setTicketV] = useState(null);
+  const [ticketV, setTicketV] = useState(null);
+  const ventasHoy = ventas.filter(v => v.fecha.startsWith(hoy) && !v.anulada);
+  const pendientesCobro = ventas.filter(v => !estaPagada(v) && !v.anulada);
+  const pendientesRetiro = ventas.filter(v => estaPagada(v) && !v.anulada && (v.estado || "recibido") !== "entregado");
+
+  const cambiarEstado = (folio, nuevoEstado) => {
+    setVentas(prev => prev.map(v => v.folio === folio ? { ...v, estado: nuevoEstado } : v));
+  };
+  const toggleField = (folio, field) => {
+    setVentas(prev => prev.map(v => v.folio === folio ? { ...v, [field]: !v[field] } : v));
+  };
+
+  const mostrar = vistaTab === "hoy" ? ventasFecha
+    : vistaTab === "cobrar" ? pendientesCobro
+    : pendientesRetiro;
+
+  const filtrados = busq
+    ? mostrar.filter(v => v.clienteNombre?.toLowerCase().includes(busq.toLowerCase()) || v.folio.toLowerCase().includes(busq.toLowerCase()))
+    : mostrar;
+
+  const OrdenCard = ({ v }) => {
+    const [showAbono, setShowAbono] = useState(false);
+    const est = getEstado(v);
+    const sig = sigEstado(v.estado || "recibido");
+    const pagada = estaPagada(v);
+    const pendiente = saldoPendiente(v);
+    return (
+      <div style={{ borderRadius: 14, border: `2px solid ${est.color}`, background: "#fff", marginBottom: 12, overflow: "hidden" }}>
+        {/* HEADER COLOR */}
+        <div style={{ background: est.bg, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontWeight: 800, fontSize: 15, color: est.color }}>{est.icon} {est.label}</div>
+          <div style={{ fontSize: 11, color: "#888" }}>{v.folio}</div>
+        </div>
+        {/* BODY */}
+        <div style={{ padding: "12px 14px" }}>
+          <div style={{ fontWeight: 700, fontSize: 16, color: "#1a3c5e", marginBottom: 4 }}>{v.clienteNombre}</div>
+          {v.clienteTel && <div style={{ fontSize: 12, color: "#888" }}>📱 {v.clienteTel}</div>}
+          <div style={{ fontSize: 13, color: "#555", margin: "6px 0" }}>
+            {v.items.map((it, i) => <span key={i}>{it.label}{it.piezas > 1 ? ` ×${it.piezas}` : ""}{i < v.items.length - 1 ? " · " : ""}</span>)}
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
+            <div>
+              <div style={{ fontWeight: 800, fontSize: 18, color: "#1a3c5e" }}>${v.total.toFixed(2)}</div>
+              {!pagada && <div style={{ fontSize: 12, color: "#e53935", fontWeight: 700 }}>⚠️ Debe ${pendiente.toFixed(2)}</div>}
+              {pagada && <div style={{ fontSize: 12, color: "#2e7d32", fontWeight: 600 }}>✅ Pagado</div>}
+            </div>
+            <div style={{ fontSize: 12, color: "#888" }}>📅 Entrega: {fmtDate(v.entrega)}</div>
+          </div>
+          {/* CHECKLIST */}
+          <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+            <label style={{ ...S.checkLabel, fontSize: 13 }}>
+              <input type="checkbox" checked={v.checkMsgRetiro || false} onChange={() => toggleField(v.folio, "checkMsgRetiro")} />
+              <span>📲 Avisé al cliente</span>
+            </label>
+          </div>
+          {/* BOTONES */}
+          <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+            {sig && (
+              <button style={{ flex: 1, padding: "10px", background: sig.bg, color: sig.color, border: `1.5px solid ${sig.color}`, borderRadius: 10, fontWeight: 700, fontSize: 13, cursor: "pointer" }}
+                onClick={() => cambiarEstado(v.folio, sig.id)}>
+                {sig.icon} Marcar como {sig.label}
+              </button>
+            )}
+            {!pagada && (
+              <button style={{ flex: 1, padding: "10px", background: "#e8f5e9", color: "#2e7d32", border: "1.5px solid #2e7d32", borderRadius: 10, fontWeight: 700, fontSize: 13, cursor: "pointer" }}
+                onClick={() => setShowAbono(true)}>
+                💰 Cobrar
+              </button>
+            )}
+            <button style={{ padding: "10px 14px", background: "#f0f4f8", color: "#1a3c5e", border: "none", borderRadius: 10, fontWeight: 600, fontSize: 12, cursor: "pointer" }}
+              onClick={() => setTicketV(v)}>🧾</button>
+          </div>
+        </div>
+        {showAbono && <AbonoModal venta={v} onSave={(ab) => { addAbono(v.folio, ab); setShowAbono(false); }} onClose={() => setShowAbono(false)} />}
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ fontFamily: "'DM Sans',sans-serif", minHeight: "100vh", background: "#f0f4f8", paddingBottom: 40 }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=DM+Sans:wght@400;500;600;700&display=swap');*{box-sizing:border-box;margin:0;padding:0;}`}</style>
+
+      {/* HEADER */}
+      <div style={{ background: "linear-gradient(135deg,#1a3c5e,#2563a8)", padding: "14px 16px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 20, color: "#fff", fontWeight: 700 }}>🫧 Lava<span style={{ color: "#4db6e4" }}>&</span>Listo</div>
+            <div style={{ fontSize: 12, color: "#a0c4da" }}>Hola, {sesion.nombre} 👋</div>
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button onClick={() => setShowCaja(true)} style={{ background: "rgba(255,255,255,.15)", border: "none", borderRadius: 6, color: "#fff", fontSize: 11, padding: "5px 10px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
+              💰 Caja
+            </button>
+            {cierreListoState
+              ? <button onClick={onLogout} style={{ background: "rgba(255,255,255,.2)", border: "none", borderRadius: 6, color: "#fff", fontSize: 11, padding: "5px 10px", cursor: "pointer" }}>Salir</button>
+              : <button onClick={() => alert("⚠️ Debes hacer el cierre de caja antes de salir.\n\nToca 💰 Caja para cerrar.")} style={{ background: "rgba(255,100,100,.3)", border: "1px solid rgba(255,150,150,.4)", borderRadius: 6, color: "#ffcccc", fontSize: 11, padding: "5px 10px", cursor: "not-allowed" }}>🔒 Salir</button>
+            }
+          </div>
+        </div>
+      </div>
+
+      {/* MODAL CAJA */}
+      {showCaja && (
+        <div style={S.overlay}>
+          <div style={{ background: "#fff", borderRadius: 16, width: "100%", maxWidth: 500, maxHeight: "90vh", overflowY: "auto", padding: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 18, fontWeight: 700, color: "#1a3c5e" }}>💰 Caja</div>
+              <button style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#888" }} onClick={() => setShowCaja(false)}>✕</button>
+            </div>
+            <CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={onCierreListo} />
+          </div>
+        </div>
+      )}
+
+      {/* TABS PRINCIPALES */}
+      <div style={{ background: "#fff", display: "flex", borderBottom: "2px solid #e8f0f7", position: "sticky", top: 0, zIndex: 10, boxShadow: "0 2px 8px rgba(0,0,0,.06)" }}>
+        {[
+          { id: "hoy", label: "📋 Órdenes", count: ventasHoy.length },
+          { id: "cobrar", label: "💸 Cobrar", count: pendientesCobro.length },
+          { id: "entregar", label: "📦 Entregar", count: pendientesRetiro.length },
+          { id: "nueva", label: "➕ Nueva" },
+        ].map(t => (
+          <button key={t.id} style={{ flex: 1, padding: "12px 4px", border: "none", background: "transparent", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", fontWeight: vistaTab === t.id ? 700 : 500, color: vistaTab === t.id ? "#1a3c5e" : "#888", borderBottom: vistaTab === t.id ? "2px solid #4db6e4" : "none", marginBottom: -2, fontSize: 12, position: "relative" }}
+            onClick={() => { if (t.id === "nueva") setShowNueva(true); else setVistaTab(t.id); }}>
+            {t.label}
+            {t.count > 0 && <span style={{ position: "absolute", top: 6, right: 6, background: "#e53935", color: "#fff", borderRadius: 10, fontSize: 9, fontWeight: 800, padding: "1px 4px" }}>{t.count}</span>}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ padding: "12px" }}>
+        {/* BUSCADOR + FECHA */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+          <input style={{ ...S.input, flex: 1 }} placeholder="🔍 Buscar cliente o folio..." value={busq} onChange={e => setBusq(e.target.value)} />
+          {vistaTab === "hoy" && (
+            <input type="date" style={{ ...S.input, width: 140 }} value={fechaSel} onChange={e => setFechaSel(e.target.value)} />
+          )}
+        </div>
+
+        {/* RESUMEN RÁPIDO */}
+        {vistaTab === "hoy" && (
+          <div style={{ display: "flex", gap: 8, marginBottom: 12, overflowX: "auto" }}>
+            {ESTADOS.map(est => {
+              const cnt = ventasFecha.filter(v => (v.estado || "recibido") === est.id).length;
+              return (
+                <div key={est.id} style={{ background: est.bg, borderRadius: 10, padding: "8px 12px", textAlign: "center", minWidth: 70, border: `1.5px solid ${est.color}` }}>
+                  <div style={{ fontSize: 18 }}>{est.icon}</div>
+                  <div style={{ fontWeight: 800, fontSize: 18, color: est.color }}>{cnt}</div>
+                  <div style={{ fontSize: 10, color: est.color }}>{est.label}</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* LISTA */}
+        {filtrados.length === 0
+          ? <div style={{ textAlign: "center", padding: "40px 20px", color: "#aaa" }}>
+              <div style={{ fontSize: 48, marginBottom: 8 }}>
+                {vistaTab === "cobrar" ? "🎉" : vistaTab === "entregar" ? "✅" : "📋"}
+              </div>
+              <div style={{ fontSize: 16 }}>
+                {vistaTab === "cobrar" ? "¡Todo cobrado!" : vistaTab === "entregar" ? "¡Todo entregado!" : "Sin órdenes para esta fecha"}
+              </div>
+            </div>
+          : filtrados.map(v => <OrdenCard key={v.folio} v={v} />)
+        }
+      </div>
+
+      {/* MODAL NUEVA VENTA */}
+      {showNueva && (
+        <div style={S.overlay}>
+          <div style={{ background: "#fff", borderRadius: 16, width: "100%", maxWidth: 500, maxHeight: "90vh", overflowY: "auto", padding: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 18, fontWeight: 700, color: "#1a3c5e" }}>➕ Nueva Venta</div>
+              <button style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#888" }} onClick={() => setShowNueva(false)}>✕</button>
+            </div>
+            <NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={(v) => { setShowNueva(false); setTicketV(v); }} servicios={servicios} sesion={sesion} />
+          </div>
+        </div>
+      )}
+
+      {ticketV && <TicketModal venta={ticketV} empleadas={empleadas} onClose={() => setTicketV(null)} />}
+    </div>
+  );
+}
+
+// ─── REPORTES ──────────────────────────────────────────────────────
+function Reportes({ ventas, empleadas }) {
+  const hoy = new Date().toISOString().split("T")[0];
+  const semana = semanaISO(new Date());
+  const mes = mesKey(new Date());
+  const [mesSelec, setMesSelec] = useState(mes);
+  const [tabReporte, setTabReporte] = useState("resumen");
+  const [fechaDesde, setFechaDesde] = useState(mes + "-01");
+  const [fechaHasta, setFechaHasta] = useState(hoy);
+
+  const ventasHoy = ventas.filter(v => v.fecha.startsWith(hoy) && !v.anulada);
+  const ventasSem = ventas.filter(v => semanaISO(v.fecha) === semana && !v.anulada);
+  const ventasMes = ventas.filter(v => mesKey(v.fecha) === mesSelec && !v.anulada);
+  const ventasRango = ventas.filter(v => !v.anulada && v.fecha.split("T")[0] >= fechaDesde && v.fecha.split("T")[0] <= fechaHasta);
+
+  const sum = arr => arr.reduce((a, v) => a + v.total, 0);
+  const cobrado = arr => arr.reduce((a, v) => a + (v.abonos || []).reduce((x, ab) => x + ab.monto, 0), 0);
+  const porCobrar = arr => arr.reduce((a, v) => a + saldoPendiente(v), 0);
+
+  // Cuadre de caja
+  const efectivoCobrado = ventasMes.flatMap(v => (v.abonos || []).filter(a => a.metodo === "Efectivo")).reduce((a, ab) => a + ab.monto, 0);
+  const pichinhaCobrado = ventasMes.flatMap(v => (v.abonos || []).filter(a => a.metodo === "Transferencia Pichincha")).reduce((a, ab) => a + ab.monto, 0);
+  const jepCobrado = ventasMes.flatMap(v => (v.abonos || []).filter(a => a.metodo === "Transferencia JEP")).reduce((a, ab) => a + ab.monto, 0);
+  const tarjetaCobrado = ventasMes.flatMap(v => (v.abonos || []).filter(a => a.metodo === "Tarjeta")).reduce((a, ab) => a + ab.monto, 0);
+  const totalCobradoMes = efectivoCobrado + pichinhaCobrado + jepCobrado + tarjetaCobrado;
+  const totalPendienteMes = porCobrar(ventasMes);
+  const totalVentasMes = sum(ventasMes);
+  const cuadre = Math.abs(totalVentasMes - (totalCobradoMes + totalPendienteMes)) < 0.01;
+
+  const ventasPorMes = (() => {
+    const map = {};
+    ventas.filter(v => !v.anulada).forEach(v => { const k = mesKey(v.fecha); map[k] = (map[k] || 0) + v.total; });
+    return Object.entries(map).sort().slice(-6).map(([k, v]) => ({ label: k.slice(5) + "/" + k.slice(0, 4), val: v }));
+  })();
+
+  const empStats = empleadas.map(e => {
+    const mv = ventas.filter(v => v.empleadaId === e.id && mesKey(v.fecha) === mesSelec && !v.anulada);
+    return { ...e, count: mv.length, total: mv.reduce((a, v) => a + v.total, 0) };
+  }).sort((a, b) => b.count - a.count);
+
+  const KPI = ({ icon, label, val, sub, color }) => (
+    <div style={{ ...S.kpi, borderLeft: `4px solid ${color}` }}>
+      <div style={{ fontSize: 22 }}>{icon}</div>
+      <div>
+        <div style={{ fontWeight: 800, fontSize: 18, color }}>{val}</div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: "#1a3c5e" }}>{label}</div>
+        {sub && <div style={{ fontSize: 11, color: "#888" }}>{sub}</div>}
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={S.panel}>
+      <h2 style={S.panelTitle}>📊 Reportes</h2>
+
+      {/* SUB TABS */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+        {[{id:"resumen",l:"📈 Resumen"},{id:"cuadre",l:"🧮 Cuadre"},{id:"ventas",l:"📋 Ventas"},{id:"excel",l:"📥 Excel"}].map(t => (
+          <button key={t.id} style={{ ...S.pill, ...(tabReporte === t.id ? S.pillActive : {}), fontSize: 12 }} onClick={() => setTabReporte(t.id)}>{t.l}</button>
+        ))}
+      </div>
+
+      <div style={{ marginBottom: 12 }}>
+        <label style={S.label}>Mes</label>
+        <input type="month" style={S.input} value={mesSelec} onChange={e => setMesSelec(e.target.value)} />
+      </div>
+
+      {/* RESUMEN */}
+      {tabReporte === "resumen" && (
+        <div>
+          <div style={S.kpiGrid}>
+            <KPI icon="☀️" label="Hoy" val={`$${sum(ventasHoy).toFixed(2)}`} sub={`${ventasHoy.length} ventas`} color="#f59e0b" />
+            <KPI icon="📅" label="Esta semana" val={`$${sum(ventasSem).toFixed(2)}`} sub={`${ventasSem.length} ventas`} color="#4db6e4" />
+            <KPI icon="💚" label="Cobrado mes" val={`$${totalCobradoMes.toFixed(2)}`} sub="Pagos recibidos" color="#4caf50" />
+            <KPI icon="⏳" label="Por cobrar" val={`$${totalPendienteMes.toFixed(2)}`} sub="Pendiente" color="#e53935" />
+          </div>
+          <Card title="📈 Ventas por mes">
+            {ventasPorMes.map(m => {
+              const max = Math.max(...ventasPorMes.map(x => x.val), 1);
+              return (
+                <div key={m.label} style={{ marginBottom: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 2 }}><span>{m.label}</span><strong>${m.val.toFixed(2)}</strong></div>
+                  <div style={{ background: "#e8f0f7", borderRadius: 4, height: 10 }}><div style={{ background: "#1a3c5e", width: `${(m.val / max) * 100}%`, height: "100%", borderRadius: 4 }} /></div>
+                </div>
+              );
+            })}
+          </Card>
+          <Card title="🏆 Ranking empleadas">
+            {empStats.map((e, i) => {
+              const meta = e.metaVentas || 20;
+              const pct = Math.min(100, (e.count / meta) * 100);
+              return (
+                <div key={e.id} style={{ padding: "8px 0", borderBottom: "1px solid #f0f4f8" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ fontSize: 18 }}>{i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : "👤"}</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 600 }}>{e.nombre}</div>
+                      <div style={{ fontSize: 12, color: "#888" }}>{e.count} ventas · ${e.total.toFixed(2)}</div>
+                    </div>
+                    {e.count >= meta && <div style={{ ...S.badge, background: "#fff8e1", color: "#f59e0b" }}>🌟 Bono</div>}
+                  </div>
+                  <div style={{ background: "#e8f0f7", borderRadius: 6, height: 6, marginTop: 6 }}>
+                    <div style={{ background: e.count >= meta ? "#f59e0b" : "#4db6e4", width: `${pct}%`, height: "100%", borderRadius: 6 }} />
+                  </div>
+                </div>
+              );
+            })}
+          </Card>
+        </div>
+      )}
+
+      {/* CUADRE DE CAJA */}
+      {tabReporte === "cuadre" && (
+        <div>
+          {!cuadre && (
+            <div style={{ background: "#ffebee", border: "2px solid #e53935", borderRadius: 10, padding: "12px 16px", marginBottom: 14 }}>
+              <div style={{ fontWeight: 800, color: "#c62828", fontSize: 15 }}>⚠️ ¡Alerta! El cuadre no coincide</div>
+              <div style={{ fontSize: 13, color: "#c62828", marginTop: 4 }}>
+                Total ventas ${totalVentasMes.toFixed(2)} ≠ Cobrado ${totalCobradoMes.toFixed(2)} + Pendiente ${totalPendienteMes.toFixed(2)}
+              </div>
+            </div>
+          )}
+          {cuadre && (
+            <div style={{ background: "#e8f5e9", border: "2px solid #4caf50", borderRadius: 10, padding: "12px 16px", marginBottom: 14 }}>
+              <div style={{ fontWeight: 800, color: "#2e7d32", fontSize: 15 }}>✅ ¡Cuadre perfecto!</div>
+              <div style={{ fontSize: 13, color: "#2e7d32", marginTop: 4 }}>Todos los valores coinciden correctamente.</div>
+            </div>
+          )}
+          <Card title="🧮 Cuadre del mes">
+            <div style={{ display: "grid", gap: 10 }}>
+              {[
+                { l: "Total ventas del mes", v: totalVentasMes, color: "#1a3c5e" },
+                { l: "✅ Cobrado — Efectivo", v: efectivoCobrado, color: "#2e7d32" },
+                { l: "✅ Cobrado — Pichincha", v: pichinhaCobrado, color: "#2e7d32" },
+                { l: "✅ Cobrado — JEP", v: jepCobrado, color: "#2e7d32" },
+                { l: "✅ Cobrado — Tarjeta", v: tarjetaCobrado, color: "#2e7d32" },
+                { l: "⏳ Pendiente por cobrar", v: totalPendienteMes, color: "#e65100" },
+              ].map(r => (
+                <div key={r.l} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #f0f4f8" }}>
+                  <span style={{ fontSize: 13 }}>{r.l}</span>
+                  <strong style={{ color: r.color, fontSize: 15 }}>${r.v.toFixed(2)}</strong>
+                </div>
+              ))}
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderTop: "2px solid #1a3c5e" }}>
+                <span style={{ fontWeight: 700, fontSize: 14 }}>Cobrado + Pendiente</span>
+                <strong style={{ color: cuadre ? "#2e7d32" : "#c62828", fontSize: 16 }}>${(totalCobradoMes + totalPendienteMes).toFixed(2)}</strong>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* VENTAS PAGADAS */}
+      {tabReporte === "ventas" && (
+        <div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+            <div><label style={S.label}>Desde</label><input type="date" style={S.input} value={fechaDesde} onChange={e => setFechaDesde(e.target.value)} /></div>
+            <div><label style={S.label}>Hasta</label><input type="date" style={S.input} value={fechaHasta} onChange={e => setFechaHasta(e.target.value)} /></div>
+          </div>
+          <div style={{ fontSize: 12, color: "#888", marginBottom: 8 }}>
+            {ventasRango.length} ventas · Total: ${sum(ventasRango).toFixed(2)} · Cobrado: ${cobrado(ventasRango).toFixed(2)} · Pendiente: ${porCobrar(ventasRango).toFixed(2)}
+          </div>
+          {ventasRango.slice(0, 50).map(v => {
+            const pagada = estaPagada(v);
+            return (
+              <div key={v.folio} style={{ ...S.ventaCard, borderLeft: `4px solid ${pagada ? "#4caf50" : "#ff9800"}` }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <div>
+                    <div style={{ fontWeight: 700 }}>{v.clienteNombre}</div>
+                    <div style={{ fontSize: 11, color: "#888" }}>{v.folio} · {fmt(v.fecha)}</div>
+                    <div style={{ fontSize: 12, color: "#555", marginTop: 4 }}>
+                      {v.items.map((it, i) => <span key={i}>{it.label}{i < v.items.length - 1 ? " · " : ""}</span>)}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontWeight: 800, fontSize: 15 }}>${v.total.toFixed(2)}</div>
+                    <div style={{ ...S.badge, background: pagada ? "#e8f5e9" : "#fff3e0", color: pagada ? "#2e7d32" : "#e65100" }}>
+                      {pagada ? "✅ Pagado" : `⏳ Debe $${saldoPendiente(v).toFixed(2)}`}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          {ventasRango.length > 50 && <div style={S.empty}>Mostrando 50 de {ventasRango.length} — usa el filtro de fechas para acotar</div>}
+        </div>
+      )}
+
+      {/* EXPORTAR */}
+      {tabReporte === "excel" && (
+        <Card title="📥 Exportar a Excel">
+          <p style={{ fontSize: 13, color: "#555", marginBottom: 14 }}>Descarga reportes en formato CSV que se abren en Excel.</p>
+          {[
+            { l: "📅 Reporte de hoy", arr: ventasHoy, t: "reporte-hoy" },
+            { l: "📅 Reporte semanal", arr: ventasSem, t: "reporte-semana" },
+            { l: "📅 Reporte mensual", arr: ventasMes, t: `reporte-${mesSelec}` },
+            { l: "📋 Todas las ventas", arr: ventas.filter(v => !v.anulada), t: "reporte-completo" },
+          ].map(r => (
+            <button key={r.t} style={{ ...S.btnPrimary, marginBottom: 8, background: "#1a3c5e" }}
+              onClick={() => exportarCSV(r.arr, r.t, empleadas)}>
+              {r.l} ({r.arr.length} ventas · ${sum(r.arr).toFixed(2)})
+            </button>
+          ))}
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ─── INVENTARIO ────────────────────────────────────────────────────
+function Inventario({ inventario, setInventario }) {
+  const [nuevo, setNuevo] = useState({ nombre: "", stock: 0, min: 1, unidad: "pzas" });
+  const update = (id, field, val) => setInventario(prev => prev.map(i => i.id === id ? { ...i, [field]: val } : i));
+  const eliminar = (id) => setInventario(prev => prev.filter(i => i.id !== id));
+  const agregar = () => {
+    if (!nuevo.nombre.trim()) return;
+    setInventario(prev => [...prev, { ...nuevo, id: Date.now(), stock: parseFloat(nuevo.stock) || 0 }]);
+    setNuevo({ nombre: "", stock: 0, min: 1, unidad: "pzas" });
+  };
+  const bajoStock = inventario.filter(i => i.stock <= i.min);
+  return (
+    <div style={S.panel}>
+      <h2 style={S.panelTitle}>📦 Inventario</h2>
+      {bajoStock.length > 0 && <div style={S.alerta}>⚠️ Stock bajo: {bajoStock.map(i => i.nombre).join(", ")}</div>}
+      <Card title="📋 Insumos">
+        {inventario.map(item => (
+          <div key={item.id} style={S.ventaCard}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div><div style={{ fontWeight: 600 }}>{item.nombre}</div><div style={{ fontSize: 12, color: "#888" }}>Mínimo: {item.min} {item.unidad}</div></div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ ...S.badge, background: item.stock <= item.min ? "#ffebee" : "#e8f5e9", color: item.stock <= item.min ? "#c62828" : "#2e7d32", fontSize: 14, fontWeight: 700 }}>{item.stock} {item.unidad}</div>
+                <button style={S.btnRemove} onClick={() => eliminar(item.id)}>✕</button>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center" }}>
+              <button style={S.btnSmall} onClick={() => update(item.id, "stock", Math.max(0, item.stock - 1))}>−</button>
+              <input type="number" style={{ ...S.input, width: 70, textAlign: "center", padding: "4px 6px" }} value={item.stock} onChange={e => update(item.id, "stock", parseFloat(e.target.value) || 0)} />
+              <button style={S.btnSmall} onClick={() => update(item.id, "stock", item.stock + 1)}>+</button>
+            </div>
+          </div>
+        ))}
+      </Card>
+      <Card title="➕ Agregar">
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <input style={{ ...S.input, gridColumn: "1/-1" }} placeholder="Nombre" value={nuevo.nombre} onChange={e => setNuevo({ ...nuevo, nombre: e.target.value })} />
+          <input type="number" style={S.input} placeholder="Stock inicial" value={nuevo.stock} onChange={e => setNuevo({ ...nuevo, stock: e.target.value })} />
+          <input type="number" style={S.input} placeholder="Stock mínimo" value={nuevo.min} onChange={e => setNuevo({ ...nuevo, min: e.target.value })} />
+          <input style={S.input} placeholder="Unidad" value={nuevo.unidad} onChange={e => setNuevo({ ...nuevo, unidad: e.target.value })} />
+        </div>
+        <button style={{ ...S.btnPrimary, marginTop: 10 }} onClick={agregar}>Agregar</button>
+      </Card>
+    </div>
+  );
+}
+
+// ─── EQUIPO ────────────────────────────────────────────────────────
+function Equipo({ empleadas, setEmpleadas, ventas, esAdmin }) {
+  const [nuevo, setNuevo] = useState({ nombre: "", metaVentas: 20, montoBonus: 20 });
+  const [editId, setEditId] = useState(null);
+  const [editData, setEditData] = useState({});
+  const mes = mesKey(new Date());
+  const agregar = () => {
+    if (!nuevo.nombre.trim()) return;
+    setEmpleadas(prev => [...prev, { id: Date.now(), nombre: nuevo.nombre, activa: true, metaVentas: parseInt(nuevo.metaVentas) || 20, montoBonus: parseFloat(nuevo.montoBonus) || 0 }]);
+    setNuevo({ nombre: "", metaVentas: 20, montoBonus: 20 });
+  };
+  const toggle = (id) => setEmpleadas(prev => prev.map(e => e.id === id ? { ...e, activa: !e.activa } : e));
+  const guardarEdicion = () => {
+    setEmpleadas(prev => prev.map(e => e.id === editId ? { ...e, ...editData, metaVentas: parseInt(editData.metaVentas) || 20, montoBonus: parseFloat(editData.montoBonus) || 0 } : e));
+    setEditId(null);
+  };
+  const empStats = empleadas.map(e => {
+    const mv = ventas.filter(v => v.empleadaId === e.id && mesKey(v.fecha) === mes);
+    return { ...e, ventasMes: mv.length, totalMes: mv.reduce((a, v) => a + v.total, 0) };
+  });
+  return (
+    <div style={S.panel}>
+      <h2 style={S.panelTitle}>👩 Equipo & Bonos</h2>
+      <Card title="👩 Empleadas">
+        {empStats.map(e => {
+          const meta = e.metaVentas || 20;
+          const pct = Math.min(100, (e.ventasMes / meta) * 100);
+          const ganoBono = e.ventasMes >= meta;
+          return (
+            <div key={e.id} style={{ ...S.ventaCard, opacity: e.activa ? 1 : 0.6 }}>
+              {editId === e.id ? (
+                <div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 8, marginBottom: 8 }}>
+                    <div><label style={S.label}>Nombre</label><input style={S.input} value={editData.nombre || ""} onChange={ev => setEditData({ ...editData, nombre: ev.target.value })} /></div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                      <div><label style={S.label}>Meta ventas/mes</label><input type="number" style={S.input} value={editData.metaVentas || 20} onChange={ev => setEditData({ ...editData, metaVentas: ev.target.value })} /></div>
+                      <div><label style={S.label}>Monto bono ($)</label><input type="number" style={S.input} value={editData.montoBonus || 0} onChange={ev => setEditData({ ...editData, montoBonus: ev.target.value })} /></div>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button style={{ ...S.btnPrimary, flex: 1 }} onClick={guardarEdicion}>✓ Guardar</button>
+                    <button style={S.btnClose} onClick={() => setEditId(null)}>Cancelar</button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 15 }}>{e.nombre}</div>
+                      <div style={{ fontSize: 12, color: "#888" }}>{e.ventasMes} ventas este mes</div>
+                      {esAdmin && <div style={{ fontSize: 11, color: "#4db6e4" }}>Meta: {meta} · Bono: ${e.montoBonus || 0}</div>}
+                    </div>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                      {ganoBono && <div style={{ ...S.badge, background: "#fff8e1", color: "#f59e0b" }}>🌟 {esAdmin ? `$${e.montoBonus || 0}` : "¡Bono!"}</div>}
+                      {esAdmin && <button style={S.btnSmall} onClick={() => { setEditId(e.id); setEditData({ ...e }); }}>✏️</button>}
+                      {esAdmin && <button style={{ ...S.btnSmall, background: e.activa ? "#ffebee" : "#e8f5e9", color: e.activa ? "#c62828" : "#2e7d32" }} onClick={() => toggle(e.id)}>{e.activa ? "Desactivar" : "Activar"}</button>}
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#888", marginBottom: 3 }}><span>Progreso bono</span><span>{e.ventasMes}/{meta}</span></div>
+                    <div style={{ background: "#e8f0f7", borderRadius: 6, height: 8 }}><div style={{ background: ganoBono ? "#f59e0b" : "#4db6e4", width: `${pct}%`, height: "100%", borderRadius: 6 }} /></div>
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })}
+      </Card>
+      {esAdmin && <Card title="➕ Agregar empleada">
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <input style={{ ...S.input, gridColumn: "1/-1" }} placeholder="Nombre completo" value={nuevo.nombre} onChange={e => setNuevo({ ...nuevo, nombre: e.target.value })} />
+          <div><label style={S.label}>Meta ventas/mes</label><input type="number" style={S.input} value={nuevo.metaVentas} onChange={e => setNuevo({ ...nuevo, metaVentas: e.target.value })} /></div>
+          <div><label style={S.label}>Monto bono ($)</label><input type="number" style={S.input} value={nuevo.montoBonus} onChange={e => setNuevo({ ...nuevo, montoBonus: e.target.value })} /></div>
+        </div>
+        <button style={{ ...S.btnPrimary, marginTop: 10 }} onClick={agregar}>Agregar empleada</button>
+      </Card>}
+    </div>
+  );
+}
+
+// ─── CONFIGURACION ─────────────────────────────────────────────────
+function Configuracion({ servicios, setServicios, exportarDatos, importarDatos }) {
+  const [nuevo, setNuevo] = useState({ label: "", precio: "" });
+  const [editId, setEditId] = useState(null);
+  const [editData, setEditData] = useState({ label: "", precio: "" });
+  const [busq, setBusq] = useState("");
+  const agregar = () => {
+    if (!nuevo.label.trim() || !nuevo.precio) return;
+    setServicios(prev => [...prev, { id: "custom-" + Date.now(), label: nuevo.label.toUpperCase(), precio: parseFloat(nuevo.precio) }]);
+    setNuevo({ label: "", precio: "" });
+  };
+  const eliminar = (id) => setServicios(prev => prev.filter(s => s.id !== id));
+  const guardarEdicion = () => {
+    setServicios(prev => prev.map(s => s.id === editId ? { ...s, label: editData.label.toUpperCase(), precio: parseFloat(editData.precio) } : s));
+    setEditId(null);
+  };
+  const filtrados = servicios.filter(s => s.label.toLowerCase().includes(busq.toLowerCase()));
+  return (
+    <div style={S.panel}>
+      <h2 style={S.panelTitle}>⚙️ Configuración</h2>
+      <Card title="💾 Respaldo">
+        <button style={{ ...S.btnPrimary, marginBottom: 10 }} onClick={exportarDatos}>📥 Exportar datos</button>
+        <label style={{ ...S.btnPrimary, display: "block", textAlign: "center", cursor: "pointer", background: "#e8f5fd", color: "#1a3c5e", padding: "13px", borderRadius: 10, fontSize: 15, fontWeight: 700 }}>
+          📤 Importar datos
+          <input type="file" accept=".json" style={{ display: "none" }} onChange={importarDatos} />
+        </label>
+      </Card>
+      <Card title="➕ Agregar servicio">
+        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
+          <input style={S.input} placeholder="Nombre del servicio" value={nuevo.label} onChange={e => setNuevo({ ...nuevo, label: e.target.value })} />
+          <input type="number" style={{ ...S.input, width: 90 }} placeholder="$Precio" value={nuevo.precio} onChange={e => setNuevo({ ...nuevo, precio: e.target.value })} />
+        </div>
+        <button style={{ ...S.btnPrimary, marginTop: 8 }} onClick={agregar}>Agregar</button>
+      </Card>
+      <Card title={`📋 Servicios (${servicios.length})`}>
+        <input style={{ ...S.input, marginBottom: 10 }} placeholder="Buscar..." value={busq} onChange={e => setBusq(e.target.value)} />
+        {filtrados.map(s => (
+          <div key={s.id} style={{ ...S.ventaCard, padding: "8px 12px" }}>
+            {editId === s.id ? (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 6, alignItems: "center" }}>
+                <input style={S.input} value={editData.label} onChange={e => setEditData({ ...editData, label: e.target.value })} />
+                <input type="number" style={{ ...S.input, width: 80 }} value={editData.precio} onChange={e => setEditData({ ...editData, precio: e.target.value })} />
+                <button style={{ ...S.btnSmall, background: "#e8f5e9", color: "#2e7d32" }} onClick={guardarEdicion}>✓</button>
+              </div>
+            ) : (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div><div style={{ fontSize: 13, fontWeight: 600 }}>{s.label}</div><div style={{ fontSize: 12, color: "#4db6e4", fontWeight: 700 }}>${s.precio.toFixed(2)}</div></div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button style={S.btnSmall} onClick={() => { setEditId(s.id); setEditData({ label: s.label, precio: s.precio }); }}>✏️</button>
+                  <button style={S.btnRemove} onClick={() => eliminar(s.id)}>✕</button>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </Card>
+    </div>
+  );
+}
+
+
+
+// ─── CIERRE DE CAJA ────────────────────────────────────────────────
+const BILLETES = [100, 50, 20, 10, 5, 1];
+const MONEDAS = [0.50, 0.25, 0.10, 0.05, 0.01];
+
+function CierreCaja({ ventas, empleadas, onLogout, onCierreListo }) {
+  const hoy = new Date().toISOString().split("T")[0];
+  const APERTURA_KEY = "ll_apertura_" + hoy;
+  const CIERRE_KEY = "ll_cierre_" + hoy;
+  const [modo, setModo] = useState(() => { try { return localStorage.getItem(APERTURA_KEY) ? "cierre" : "apertura"; } catch { return "apertura"; } });
+  const [apertura, setApertura] = useState(() => { try { const a = localStorage.getItem(APERTURA_KEY); return a ? JSON.parse(a) : null; } catch { return null; } });
+  const [cierreGuardado, setCierreGuardado] = useState(() => { try { const c = localStorage.getItem(CIERRE_KEY); return c ? JSON.parse(c) : null; } catch { return null; } });
+  const [aperturaEmpleada, setAperturaEmpleada] = useState(empleadas[0]?.id || null);
+  const [fondoInicial, setFondoInicial] = useState("15.00");
+  const [empleadaId, setEmpleadaId] = useState(empleadas[0]?.id || null);
+  const [billetes, setBilletes] = useState(() => Object.fromEntries(BILLETES.map(b => [b, ""])));
+  const [monedas, setMonedas] = useState(() => Object.fromEntries(MONEDAS.map(m => [m, ""])));
+  const [transferPichincha, setTransferPichincha] = useState("");
+  const [transferJEP, setTransferJEP] = useState("");
+  const [tarjeta, setTarjeta] = useState("");
+  const [paso, setPaso] = useState(1);
+
+  const ventasHoy = ventas.filter(v => v.fecha.startsWith(hoy) && !v.anulada);
+  const ventasEmp = empleadaId === "todos" ? ventasHoy : ventasHoy.filter(v => String(v.empleadaId) === String(empleadaId));
+  const esperadoEfectivo = ventasEmp.flatMap(v => (v.abonos || []).filter(a => a.metodo === "Efectivo")).reduce((a, ab) => a + ab.monto, 0);
+  const esperadoTransferencia = ventasEmp.flatMap(v => (v.abonos || []).filter(a => esTranferencia(a.metodo))).reduce((a, ab) => a + ab.monto, 0);
+  const esperadoTarjeta = ventasEmp.flatMap(v => (v.abonos || []).filter(a => a.metodo === "Tarjeta")).reduce((a, ab) => a + ab.monto, 0);
+  const esperadoTotal = esperadoEfectivo + esperadoTransferencia + esperadoTarjeta;
+
+  const totalBilletes = BILLETES.reduce((a, b) => a + (parseFloat(billetes[b]) || 0) * b, 0);
+  const totalMonedas = MONEDAS.reduce((a, m) => a + (parseFloat(monedas[m]) || 0) * m, 0);
+  const totalEfectivo = parseFloat((totalBilletes + totalMonedas).toFixed(2));
+  const totalTransfer = (parseFloat(transferPichincha) || 0) + (parseFloat(transferJEP) || 0);
+  const totalTarjeta = parseFloat(tarjeta) || 0;
+  const fondo = apertura?.fondo || 15;
+  const efNeto = parseFloat((totalEfectivo - fondo).toFixed(2));
+  const ventasReales = parseFloat((efNeto + totalTransfer + totalTarjeta).toFixed(2));
+  const difEf = parseFloat((efNeto - esperadoEfectivo).toFixed(2));
+  const difTr = parseFloat((totalTransfer - esperadoTransferencia).toFixed(2));
+  const difTa = parseFloat((totalTarjeta - esperadoTarjeta).toFixed(2));
+  const difTotal = parseFloat((ventasReales - esperadoTotal).toFixed(2));
+
+  const imprimirCierre = (d) => {
+    const w = window.open("", "_blank", "width=420,height=700");
+    if (!w) return;
+    w.document.write(`<html><head><title>Cierre</title><style>body{font-family:sans-serif;padding:16px;max-width:360px;margin:0 auto}h2{text-align:center;color:#1a3c5e}.row{display:flex;justify-content:space-between;margin:4px 0;font-size:13px}.divider{border-top:1px dashed #ccc;margin:10px 0}.result{text-align:center;font-size:20px;font-weight:800;padding:12px;border-radius:8px;margin:12px 0}.ok{color:#2e7d32;background:#e8f5e9}.bad{color:#c62828;background:#ffebee}.info{color:#1565c0;background:#e3f2fd}</style></head><body><div style="text-align:center;font-size:32px">🫧</div><h2>Lava&Listo — CIERRE DE CAJA</h2><div class="divider"></div><div class="row"><span>Fecha</span><span>${new Date(d.fecha).toLocaleString("es-MX")}</span></div><div class="row"><span>Empleada</span><span>${d.empleada}</span></div><div class="row"><span>Ventas del día</span><span>${d.totalVentas} · $${d.totalVentasVal.toFixed(2)}</span></div><div class="divider"></div><strong>💵 Efectivo</strong>${BILLETES.filter(b=>(parseFloat(d.billetes[b])||0)>0).map(b=>`<div class="row"><span>$${b} × ${d.billetes[b]}</span><span>$${(b*d.billetes[b]).toFixed(2)}</span></div>`).join("")}${MONEDAS.filter(m=>(parseFloat(d.monedas[m])||0)>0).map(m=>`<div class="row"><span>$${m} × ${d.monedas[m]}</span><span>$${(m*d.monedas[m]).toFixed(2)}</span></div>`).join("")}<div class="row"><strong>Total efectivo</strong><strong>$${d.totalEfectivo.toFixed(2)}</strong></div><div class="row" style="color:#e65100"><span>— Fondo caja</span><span>-$${d.fondo.toFixed(2)}</span></div><div class="row"><strong>Efectivo neto</strong><strong>$${d.efNeto.toFixed(2)}</strong></div><div class="divider"></div><div class="row"><span>🏦 Pichincha</span><span>$${d.transferPichincha.toFixed(2)}</span></div><div class="row"><span>🏦 JEP</span><span>$${d.transferJEP.toFixed(2)}</span></div><div class="row"><span>💳 Tarjeta</span><span>$${d.totalTarjeta.toFixed(2)}</span></div><div class="divider"></div><div class="${d.difTotal===0?"result ok":d.difTotal>0?"result info":"result bad"}">${d.difTotal===0?"✅ CAJA CUADRADA":d.difTotal>0?`📈 SOBRA $${d.difTotal.toFixed(2)}`:`⚠️ FALTA $${Math.abs(d.difTotal).toFixed(2)}`}</div><div class="divider"></div><p style="text-align:center;font-size:10px;color:#aaa">Lava&Listo · ${new Date().toLocaleString("es-MX")}</p><script>window.print();window.close();</script></body></html>`);
+    w.document.close();
+  };
+
+  const confirmarCierre = () => {
+    const datos = {
+      fecha: new Date().toISOString(),
+      empleada: empleadas.find(e => String(e.id) === String(empleadaId))?.nombre || "Todas",
+      billetes, monedas, totalBilletes, totalMonedas, totalEfectivo,
+      transferPichincha: parseFloat(transferPichincha) || 0,
+      transferJEP: parseFloat(transferJEP) || 0,
+      totalTransfer, totalTarjeta, fondo, efNeto, ventasReales,
+      esperadoEfectivo, esperadoTransferencia, esperadoTarjeta, esperadoTotal,
+      difEf, difTr, difTa, difTotal,
+      totalVentas: ventasEmp.length,
+      totalVentasVal: ventasEmp.reduce((a, v) => a + v.total, 0),
+    };
+    try { localStorage.setItem(CIERRE_KEY, JSON.stringify(datos)); } catch {}
+    setCierreGuardado(datos);
+    if (onCierreListo) onCierreListo();
+    imprimirCierre(datos);
+    setTimeout(() => { if (onLogout) onLogout(); }, 3000);
+  };
+
+  const registrarApertura = () => {
+    const datos = { empleadaId: aperturaEmpleada, empleadaNombre: empleadas.find(e => String(e.id) === String(aperturaEmpleada))?.nombre || "", fondo: parseFloat(fondoInicial) || 15, fecha: new Date().toISOString() };
+    try { localStorage.setItem(APERTURA_KEY, JSON.stringify(datos)); } catch {}
+    setApertura(datos); setModo("cierre");
+  };
+
+  const DifBadge = ({ dif }) => <span style={{ fontWeight: 700, fontSize: 13, color: dif === 0 ? "#2e7d32" : dif > 0 ? "#1565c0" : "#c62828" }}>{dif === 0 ? "✅ Cuadra" : dif > 0 ? `📈 Sobra $${dif.toFixed(2)}` : `⚠️ Falta $${Math.abs(dif).toFixed(2)}`}</span>;
+
+  const ContadorDen = ({ valor, cantidad, onChange, tipo }) => (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #f0f4f8" }}>
+      <div style={{ background: tipo === "billete" ? "#fff8e1" : "#e8f5e9", borderRadius: 6, padding: "4px 10px", fontSize: 14, fontWeight: 700, color: tipo === "billete" ? "#f59e0b" : "#2e7d32", minWidth: 56, textAlign: "center" }}>${valor}</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <button style={{ ...S.btnSmall, width: 32, textAlign: "center" }} onClick={() => onChange(Math.max(0, (parseFloat(cantidad) || 0) - 1))}>−</button>
+        <input type="number" min="0" style={{ ...S.input, width: 60, textAlign: "center", padding: "6px 4px" }} value={cantidad} onChange={e => onChange(e.target.value)} />
+        <button style={{ ...S.btnSmall, width: 32, textAlign: "center" }} onClick={() => onChange((parseFloat(cantidad) || 0) + 1)}>+</button>
+        <div style={{ minWidth: 64, textAlign: "right", fontWeight: 700, color: "#1a3c5e", fontSize: 13 }}>${((parseFloat(cantidad) || 0) * valor).toFixed(2)}</div>
+      </div>
+    </div>
+  );
+
+  if (cierreGuardado) {
+    const d = cierreGuardado;
+    return (
+      <div style={S.panel}>
+        <h2 style={S.panelTitle}>💰 Caja</h2>
+        <div style={{ background: "#e8f5e9", borderRadius: 12, padding: "16px", marginBottom: 14, textAlign: "center" }}>
+          <div style={{ fontSize: 32 }}>✅</div>
+          <div style={{ fontWeight: 700, fontSize: 16, color: "#2e7d32" }}>Cierre confirmado</div>
+          <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>Ya no puede modificarse.</div>
+        </div>
+        <div style={{ ...S.kpi, borderLeft: `4px solid ${d.difTotal === 0 ? "#4caf50" : d.difTotal > 0 ? "#1565c0" : "#e53935"}`, marginBottom: 14 }}>
+          <div style={{ fontSize: 32 }}>{d.difTotal === 0 ? "✅" : d.difTotal > 0 ? "📈" : "⚠️"}</div>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 18, color: d.difTotal === 0 ? "#2e7d32" : d.difTotal > 0 ? "#1565c0" : "#e53935" }}>
+              {d.difTotal === 0 ? "¡Caja cuadrada!" : d.difTotal > 0 ? `Sobran $${d.difTotal.toFixed(2)}` : `Faltan $${Math.abs(d.difTotal).toFixed(2)}`}
+            </div>
+            <div style={{ fontSize: 12, color: "#888" }}>{new Date(d.fecha).toLocaleString("es-MX")}</div>
+          </div>
+        </div>
+        <button style={{ ...S.btnPrimary, background: "linear-gradient(135deg,#2e7d32,#388e3c)" }} onClick={() => imprimirCierre(d)}>🖨️ Reimprimir ticket</button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={S.panel}>
+      <h2 style={S.panelTitle}>💰 Caja</h2>
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        <button style={{ ...S.pill, ...(modo === "apertura" ? S.pillActive : {}) }} onClick={() => setModo("apertura")}>🔓 Apertura</button>
+        <button style={{ ...S.pill, ...(modo === "cierre" ? S.pillActive : {}) }} onClick={() => setModo("cierre")}>🔒 Cierre</button>
+      </div>
+
+      {modo === "apertura" && (
+        <Card title="🔓 Apertura de caja">
+          {apertura && <div style={{ ...S.alerta, background: "#e8f5e9", color: "#2e7d32", marginBottom: 10 }}>✅ Ya abierta por <strong>{apertura.empleadaNombre}</strong> · Fondo: ${apertura.fondo.toFixed(2)}</div>}
+          <label style={S.label}>Empleada que abre</label>
+          <select style={{ ...S.input, marginBottom: 10 }} value={aperturaEmpleada} onChange={e => setAperturaEmpleada(e.target.value)}>
+            {empleadas.filter(e => e.activa).map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
+          </select>
+          <label style={S.label}>💵 Fondo inicial ($)</label>
+          <input type="number" style={{ ...S.input, fontSize: 20, fontWeight: 700, marginBottom: 14 }} value={fondoInicial} onChange={e => setFondoInicial(e.target.value)} />
+          <button style={S.btnPrimary} onClick={registrarApertura}>🔓 Registrar apertura</button>
+        </Card>
+      )}
+
+      {modo === "cierre" && (
+        <div>
+          {apertura && <div style={{ background: "#e8f5fd", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 13 }}>🔓 Abierta por <strong>{apertura.empleadaNombre}</strong> · Fondo: <strong>${apertura.fondo.toFixed(2)}</strong></div>}
+
+          <div style={{ display: "flex", gap: 6, marginBottom: 14, overflowX: "auto" }}>
+            {[{n:1,l:"💵 Billetes"},{n:2,l:"🪙 Monedas"},{n:3,l:"🏦 Digital"},{n:4,l:"✅ Confirmar"}].map(p => (
+              <div key={p.n} style={{ ...S.badge, background: paso >= p.n ? "#1a3c5e" : "#e8f0f7", color: paso >= p.n ? "#fff" : "#888", padding: "6px 10px", fontSize: 11, whiteSpace: "nowrap", cursor: paso > p.n ? "pointer" : "default" }}
+                onClick={() => { if (paso > p.n) setPaso(p.n); }}>{p.n}. {p.l}</div>
+            ))}
+          </div>
+
+          {paso === 1 && (
+            <Card title="💵 Paso 1 — Billetes">
+              {BILLETES.map(b => <ContadorDen key={b} valor={b} cantidad={billetes[b]} tipo="billete" onChange={val => setBilletes(prev => ({ ...prev, [b]: val }))} />)}
+              <div style={{ background: "#fff8e1", borderRadius: 8, padding: "10px 14px", marginTop: 10, display: "flex", justifyContent: "space-between" }}>
+                <span style={{ fontWeight: 700 }}>Total billetes:</span><span style={{ fontWeight: 800, fontSize: 16, color: "#f59e0b" }}>${totalBilletes.toFixed(2)}</span>
+              </div>
+              <button style={{ ...S.btnPrimary, marginTop: 10 }} onClick={() => setPaso(2)}>Siguiente: Monedas →</button>
+            </Card>
+          )}
+
+          {paso === 2 && (
+            <Card title="🪙 Paso 2 — Monedas">
+              {MONEDAS.map(m => <ContadorDen key={m} valor={m} cantidad={monedas[m]} tipo="moneda" onChange={val => setMonedas(prev => ({ ...prev, [m]: val }))} />)}
+              <div style={{ background: "#e8f5e9", borderRadius: 8, padding: "10px 14px", marginTop: 10, display: "flex", justifyContent: "space-between" }}>
+                <span style={{ fontWeight: 700 }}>Total efectivo:</span><span style={{ fontWeight: 800, fontSize: 16, color: "#1a3c5e" }}>${totalEfectivo.toFixed(2)}</span>
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <button style={{ ...S.btnClose, flex: 1 }} onClick={() => setPaso(1)}>← Billetes</button>
+                <button style={{ ...S.btnPrimary, flex: 2 }} onClick={() => setPaso(3)}>Siguiente: Digital →</button>
+              </div>
+            </Card>
+          )}
+
+          {paso === 3 && (
+            <Card title="🏦 Paso 3 — Pagos digitales">
+              <label style={S.label}>🏦 Transferencias Banco Pichincha</label>
+              <input type="number" style={{ ...S.input, marginBottom: 12 }} placeholder="$0.00" value={transferPichincha} onChange={e => setTransferPichincha(e.target.value)} />
+              <label style={S.label}>🏦 Transferencias JEP</label>
+              <input type="number" style={{ ...S.input, marginBottom: 12 }} placeholder="$0.00" value={transferJEP} onChange={e => setTransferJEP(e.target.value)} />
+              <label style={S.label}>💳 Pagos con tarjeta</label>
+              <input type="number" style={{ ...S.input, marginBottom: 12 }} placeholder="$0.00" value={tarjeta} onChange={e => setTarjeta(e.target.value)} />
+              <div style={{ display: "flex", gap: 8 }}>
+                <button style={{ ...S.btnClose, flex: 1 }} onClick={() => setPaso(2)}>← Monedas</button>
+                <button style={{ ...S.btnPrimary, flex: 2 }} onClick={() => setPaso(4)}>Ver resultado →</button>
+              </div>
+            </Card>
+          )}
+
+          {paso === 4 && (
+            <div>
+              <Card title="✅ Resumen del cierre">
+                <div style={{ marginBottom: 10 }}>
+                  {BILLETES.filter(b => (parseFloat(billetes[b]) || 0) > 0).map(b => <div key={b} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#555" }}><span>${b} × {billetes[b]}</span><span>${(b * billetes[b]).toFixed(2)}</span></div>)}
+                  {MONEDAS.filter(m => (parseFloat(monedas[m]) || 0) > 0).map(m => <div key={m} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#555" }}><span>${m} × {monedas[m]}</span><span>${(m * monedas[m]).toFixed(2)}</span></div>)}
+                  <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, borderTop: "1px solid #e8f0f7", marginTop: 4, paddingTop: 4 }}><span>Total efectivo</span><span>${totalEfectivo.toFixed(2)}</span></div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#e65100" }}><span>— Fondo caja</span><span>-${fondo.toFixed(2)}</span></div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800, color: "#1a3c5e" }}><span>Efectivo neto</span><span>${efNeto.toFixed(2)}</span></div>
+                </div>
+                <div style={{ borderTop: "1px dashed #d0dce8", paddingTop: 8, marginBottom: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}><span>🏦 Pichincha</span><strong>${(parseFloat(transferPichincha)||0).toFixed(2)}</strong></div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}><span>🏦 JEP</span><strong>${(parseFloat(transferJEP)||0).toFixed(2)}</strong></div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}><span>💳 Tarjeta</span><strong>${totalTarjeta.toFixed(2)}</strong></div>
+                </div>
+                <div style={{ borderTop: "2px solid #1a3c5e", paddingTop: 8 }}>
+                  {[{l:"💵 Efectivo (neto)",c:efNeto,e:esperadoEfectivo,d:difEf},{l:"🏦 Transferencias",c:totalTransfer,e:esperadoTransferencia,d:difTr},{l:"💳 Tarjeta",c:totalTarjeta,e:esperadoTarjeta,d:difTa}].map(r => (
+                    <div key={r.l} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 0", borderBottom: "1px solid #f0f4f8" }}>
+                      <div><div style={{ fontSize: 13, fontWeight: 600 }}>{r.l}</div><div style={{ fontSize: 11, color: "#888" }}>Contado ${r.c.toFixed(2)} / Esperado ${r.e.toFixed(2)}</div></div>
+                      <DifBadge dif={r.d} />
+                    </div>
+                  ))}
+                </div>
+                <div style={{ background: difTotal === 0 ? "#e8f5e9" : difTotal > 0 ? "#e3f2fd" : "#ffebee", borderRadius: 10, padding: "14px", marginTop: 10, textAlign: "center" }}>
+                  <div style={{ fontSize: 22, fontWeight: 800, color: difTotal === 0 ? "#2e7d32" : difTotal > 0 ? "#1565c0" : "#c62828" }}>
+                    {difTotal === 0 ? "✅ ¡CAJA CUADRADA!" : difTotal > 0 ? `📈 SOBRA $${difTotal.toFixed(2)}` : `⚠️ FALTA $${Math.abs(difTotal).toFixed(2)}`}
+                  </div>
+                </div>
+              </Card>
+              <div style={{ background: "#fff3e0", borderRadius: 8, padding: "10px 14px", marginBottom: 10, fontSize: 13, color: "#e65100" }}>
+                ⚠️ Al confirmar <strong>no podrás modificarlo</strong> y la sesión se cerrará automáticamente.
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button style={{ ...S.btnClose, flex: 1 }} onClick={() => setPaso(3)}>← Corregir</button>
+                <button style={{ ...S.btnPrimary, flex: 2, background: "linear-gradient(135deg,#2e7d32,#388e3c)" }} onClick={confirmarCierre}>✅ Confirmar e imprimir</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 
 function Card({ title, children }) {
   return <div style={S.card}><div style={S.cardTitle}>{title}</div>{children}</div>;
