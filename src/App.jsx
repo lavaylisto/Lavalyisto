@@ -402,8 +402,8 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
     let cid=cId,cNom=selC?.nombre,cTel=selC?.tel,cDir=selC?.direccion||"";
     if(mC==="nuevo"){const nc={...nC,id:Date.now()};setClientes(prev=>[...prev,nc]);cid=nc.id;cNom=nc.nombre;cTel=nc.tel;cDir=nc.direccion||"";}
     let abs=[];
-    if(tPago==="completo")abs=[{monto:total,metodo,fecha:new Date().toISOString()}];
-    else if(tPago==="abono")abs=[{monto:parseFloat(abono),metodo,fecha:new Date().toISOString()}];
+    if(tPago==="completo")abs=[{monto:total,metodo,fecha:new Date().toISOString(),cobradoPorId:sesion?.id,cobradoPorNombre:sesion?.nombre}];
+    else if(tPago==="abono")abs=[{monto:parseFloat(abono),metodo,fecha:new Date().toISOString(),cobradoPorId:sesion?.id,cobradoPorNombre:sesion?.nombre}];
     const v={folio:folio(),fecha:new Date().toISOString(),entrega,clienteId:cid,clienteNombre:cNom,clienteTel:cTel,clienteDireccion:cDir,empleadaId:empId,
       items:items.map(it=>{if(it.custom)return{...it,label:it.lC||"Servicio personalizado",precio:parseFloat(it.pC)||0};const s=servicios.find(s=>s.id===it.servId);return{...it,label:s?.label,precio:s?.precio};}),
       pago:metodo,total,abonos:abs,pagada:tPago==="completo",notas,checkMsgRetiro:false,checkMsgEntrega:false,facturadoSRI:false,estado:"recibido"};
@@ -1012,24 +1012,35 @@ function GestionUsuarios(){
 
 function CierreCaja({ventas,empleadas,onLogout,onCierreListo,sesion}){
   const hoy=new Date().toISOString().split("T")[0];
-  const uid=sesion?.id||"admin";
-  const AK="ll_apertura_"+hoy+"_"+uid;
-  const CK="ll_cierre_"+hoy+"_"+uid;
+  const AK="ll_apertura_"+hoy+"_"+(sesion?.id||"admin");
+  const CK="ll_cierre_"+hoy+"_"+(sesion?.id||"admin");
   const [modo,setModo]=useState(()=>{try{return localStorage.getItem(AK)?"cierre":"apertura";}catch{return"apertura";}});
   const [ap,setAp]=useState(()=>{try{const a=localStorage.getItem(AK);return a?JSON.parse(a):null;}catch{return null;}});
   const [cg,setCg]=useState(()=>{try{const c=localStorage.getItem(CK);return c?JSON.parse(c):null;}catch{return null;}});
   const [aEmp,setAEmp]=useState(empleadas[0]?.id||null);const [fondo,setFondo]=useState("15.00");
-  const [empId,setEmpId]=useState(empleadas[0]?.id||null);
+  // empId ya no se usa — el cierre filtra por sesion.id automaticamente
   const [bills,setBills]=useState(()=>Object.fromEntries(BILLETES.map(b=>[b,""])));
   const [coins,setCoins]=useState(()=>Object.fromEntries(MONEDAS.map(m=>[m,""])));
   const [tPic,setTPic]=useState("");const [tJep,setTJep]=useState("");const [tTar,setTTar]=useState("");
   const [paso,setPaso]=useState(1);
-  const vHoy=ventas.filter(v=>v.fecha.startsWith(hoy)&&!v.anulada);
-  const vEmp=empId==="todos"?vHoy:vHoy.filter(v=>String(v.empleadaId)===String(empId));
-  const espEf=vEmp.flatMap(v=>(v.abonos||[]).filter(a=>a.metodo==="Efectivo")).reduce((a,ab)=>a+ab.monto,0);
-  const espTr=vEmp.flatMap(v=>(v.abonos||[]).filter(a=>esTr(a.metodo))).reduce((a,ab)=>a+ab.monto,0);
-  const espTa=vEmp.flatMap(v=>(v.abonos||[]).filter(a=>a.metodo==="Tarjeta")).reduce((a,ab)=>a+ab.monto,0);
+  // Filtra SOLO los abonos cobrados por este usuario (sesion.id)
+  const uid=sesion?.id;
+  const todosAbonos=ventas.filter(v=>!v.anulada).flatMap(v=>(v.abonos||[]).filter(ab=>{
+    // Si el abono tiene cobradoPorId, filtra por ese. Si no (datos viejos), filtra por empleadaId de la venta
+    const tieneId=ab.cobradoPorId!=null;
+    const mismoUsuario=tieneId
+      ? String(ab.cobradoPorId)===String(uid)
+      : String(v.empleadaId)===String(uid);
+    const esHoy=ab.fecha&&ab.fecha.startsWith(hoy);
+    return mismoUsuario&&esHoy;
+  }));
+  const espEf=todosAbonos.filter(a=>a.metodo==="Efectivo").reduce((a,ab)=>a+ab.monto,0);
+  const espTr=todosAbonos.filter(a=>esTr(a.metodo)).reduce((a,ab)=>a+ab.monto,0);
+  const espTa=todosAbonos.filter(a=>a.metodo==="Tarjeta").reduce((a,ab)=>a+ab.monto,0);
   const espTot=espEf+espTr+espTa;
+  // Para el resumen de ventas del dia (todas las ventas, no solo cobros)
+  const vHoy=ventas.filter(v=>v.fecha.startsWith(hoy)&&!v.anulada);
+  const vEmp=vHoy; // se mantiene para el conteo de ventas en ticket
   const totB=BILLETES.reduce((a,b)=>a+(parseFloat(bills[b])||0)*b,0);
   const totC=MONEDAS.reduce((a,m)=>a+(parseFloat(coins[m])||0)*m,0);
   const totEf=parseFloat((totB+totC).toFixed(2));
@@ -1060,7 +1071,7 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,sesion}){
     w.document.close();
   };
   const confirmar=()=>{
-    const d={fecha:new Date().toISOString(),emp:empleadas.find(e=>String(e.id)===String(empId))?.nombre||"Todas",bills,coins,totEf,fd,efN,tPic:parseFloat(tPic)||0,tJep:parseFloat(tJep)||0,totTr,totTa,dEf,dTr,dTa,dTot,espEf,espTr,espTa,espTot,nv:vEmp.length,tv:vEmp.reduce((a,v)=>a+v.total,0)};
+    const d={fecha:new Date().toISOString(),emp:sesion?.nombre||"",bills,coins,totEf,fd,efN,tPic:parseFloat(tPic)||0,tJep:parseFloat(tJep)||0,totTr,totTa,dEf,dTr,dTa,dTot,espEf,espTr,espTa,espTot,nv:todosAbonos.length,tv:todosAbonos.reduce((a,ab)=>a+ab.monto,0)};
     try{localStorage.setItem(CK,JSON.stringify(d));}catch{}
     setCg(d);if(onCierreListo)onCierreListo();imprimir(d);setTimeout(()=>{if(onLogout)onLogout();},3000);
   };
@@ -1093,7 +1104,10 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,sesion}){
       <button style={S.btnP} onClick={regAp}>🔓 Registrar apertura</button>
     </Card>)}
     {modo==="cierre"&&(<div>
-      {ap&&<div style={{background:"#e8f5fd",borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:13}}>🔓 <strong>{ap.empleadaNombre}</strong> · Fondo: <strong>${ap.fondo.toFixed(2)}</strong></div>}
+      {ap&&<div style={{background:"#e8f5fd",borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:13}}>
+        🔓 Apertura: <strong>{ap.empleadaNombre}</strong> · Fondo: <strong>${ap.fondo.toFixed(2)}</strong>
+        <div style={{fontSize:11,color:"#1565c0",marginTop:4}}>💡 El cierre incluye solo los cobros registrados por <strong>{sesion?.nombre}</strong> hoy.</div>
+      </div>}
       <div style={{display:"flex",gap:6,marginBottom:14,overflowX:"auto"}}>
         {[{n:1,l:"💵 Billetes"},{n:2,l:"🪙 Monedas"},{n:3,l:"🏦 Digital"},{n:4,l:"✅ Confirmar"}].map(p=>(
           <div key={p.n} style={{...S.badge,background:paso>=p.n?"#1a3c5e":"#e8f0f7",color:paso>=p.n?"#fff":"#888",padding:"6px 10px",fontSize:11,whiteSpace:"nowrap",cursor:paso>p.n?"pointer":"default"}} onClick={()=>{if(paso>p.n)setPaso(p.n);}}>{p.n}. {p.l}</div>
@@ -1177,7 +1191,7 @@ function AppContent({sesion,onLogout}){
   useEffect(()=>save(KEYS.servicios,servicios),[servicios]);
   useEffect(()=>save("ll_gastos",gastos),[gastos]);
   const esAdmin=sesion.rol==="Administrador";
-  const addAbono=(f,ab)=>setVentas(prev=>prev.map(v=>{if(v.folio!==f)return v;const abs=[...(v.abonos||[]),ab];return{...v,abonos:abs,pagada:saldo({...v,abonos:abs})<=0};}));
+  const addAbono=(f,ab)=>setVentas(prev=>prev.map(v=>{if(v.folio!==f)return v;const abono={...ab,cobradoPorId:sesion.id,cobradoPorNombre:sesion.nombre};const abs=[...(v.abonos||[]),abono];return{...v,abonos:abs,pagada:saldo({...v,abonos:abs})<=0};}));
   const exportarDatos=()=>{const d={ventas,clientes,empleadas,inventario,servicios,gastos};const blob=new Blob([JSON.stringify(d,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`respaldo-${hoy}.json`;a.click();};
   const importarDatos=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>{try{const d=JSON.parse(ev.target.result);if(d.ventas)setVentas(d.ventas);if(d.clientes)setClientes(d.clientes);if(d.empleadas)setEmpleadas(d.empleadas);if(d.inventario)setInventario(d.inventario);if(d.servicios)setServicios(d.servicios);if(d.gastos)setGastos(d.gastos);alert("✅ Datos importados");}catch{alert("❌ Error al importar");}};r.readAsText(f);};
   const pCount=ventas.filter(v=>(!pagada(v)&&!v.anulada)||(pagada(v)&&!v.anulada&&(v.estado||"recibido")!=="entregado")).length;
