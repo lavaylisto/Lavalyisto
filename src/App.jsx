@@ -59,6 +59,12 @@ const pagada=v=>saldo(v)<=0;
 const getEst=v=>ESTADOS.find(e=>e.id===(v.estado||"recibido"))||ESTADOS[0];
 const sigEst=actual=>{const i=ESTADOS.findIndex(e=>e.id===actual);return i<ESTADOS.length-1?ESTADOS[i+1]:null;};
 
+const esLavadoSeco = label => label && label.toUpperCase().includes("SECO");
+const calcGanancia = (items) => items.reduce((acc, it) => {
+  const subtotal = (it.precio||0) * (it.piezas||1);
+  return acc + (esLavadoSeco(it.label) ? subtotal * 0.20 : subtotal);
+}, 0);
+
 const expCSV=(ventas,titulo,empleadas)=>{
   const enc=["Folio","Fecha","Cliente","Servicios","Total","Pagado","Pendiente","Metodo","Estado","Notas"];
   const filas=ventas.map(v=>{
@@ -217,10 +223,11 @@ function LoginScreen({onLogin}){
 
 function AperturaObligatoria({sesion,onLogout,onAbierta,empleadas}){
   const hoy=new Date().toISOString().split("T")[0];
+  const AK="ll_apertura_"+hoy+"_"+sesion.id;
   const [fondo,setFondo]=useState("15.00");
   const abrir=()=>{
-    const d={empleadaNombre:sesion.nombre,fondo:parseFloat(fondo)||15,fecha:new Date().toISOString()};
-    try{localStorage.setItem("ll_apertura_"+hoy,JSON.stringify(d));}catch{}
+    const d={empleadaNombre:sesion.nombre,empleadaId:sesion.id,fondo:parseFloat(fondo)||15,fecha:new Date().toISOString()};
+    try{localStorage.setItem(AK,JSON.stringify(d));}catch{}
     onAbierta();
   };
   return(
@@ -264,8 +271,8 @@ function OrdenCard({v,setVentas,addAbono,setTicket}){
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:4}}>
           <div>
             <div style={{fontWeight:800,fontSize:18,color:"#1a3c5e"}}>${v.total.toFixed(2)}</div>
-            {!esPag&&<div style={{fontSize:12,color:"#e53935",fontWeight:700}}>⚠️ Debe ${pend.toFixed(2)}</div>}
-            {esPag&&<div style={{fontSize:12,color:"#2e7d32",fontWeight:600}}>✅ Pagado</div>}
+            {!esPag&&<div style={{background:"#c62828",color:"#fff",padding:"3px 10px",borderRadius:6,fontSize:12,fontWeight:800,marginTop:2}}>💸 DEBE ${pend.toFixed(2)}</div>}
+            {esPag&&<div style={{background:"#2e7d32",color:"#fff",padding:"3px 10px",borderRadius:6,fontSize:12,fontWeight:700,marginTop:2}}>✅ PAGADO</div>}
           </div>
           <div style={{fontSize:12,color:"#888"}}>📅 {fmtD(v.entrega)}</div>
         </div>
@@ -361,7 +368,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
               <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e"}}>💰 Caja</div>
               <button style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:"#888"}} onClick={()=>setShowCaja(false)}>✕</button>
             </div>
-            <CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={onCierreListo}/>
+            <CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={onCierreListo} sesion={sesion}/>
           </div>
         </div>
       )}
@@ -451,7 +458,12 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
           </div>
         ))}
         <button style={{background:"#e8f5fd",color:"#1a7dbf",border:"none",borderRadius:8,padding:"7px 14px",fontSize:13,fontWeight:600,cursor:"pointer"}} onClick={addIt}>+ Agregar servicio</button>
-        <div style={S.total}>Total: <strong>${total.toFixed(2)}</strong></div>
+        <div style={S.total}>
+          Total: <strong>${total.toFixed(2)}</strong>
+          {items.some(it=>{const lbl=it.custom?it.lC:(servicios.find(s=>s.id===it.servId)?.label||"");return esLavadoSeco(lbl);})&&
+            <div style={{fontSize:11,color:"#ff9800",marginTop:4}}>🧺 Incluye lavado en seco — solo cuenta el 20% como ganancia</div>
+          }
+        </div>
       </Card>
       <Card title="💳 Pago">
         <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
@@ -502,7 +514,7 @@ function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin}){
             <div style={{...S.badge,background:esPag?"#e8f5e9":"#fff3e0",color:esPag?"#2e7d32":"#e65100"}}>{esPag?"✅ Pagado":`⏳ $${pend.toFixed(2)}`}</div>
           </div>
         </div>
-        <div style={{fontSize:12,color:"#555",marginTop:6}}>{v.items.map((it,i)=><span key={i}>{it.label}{it.piezas>1?` x${it.piezas}`:""}{i<v.items.length-1?" · ":""}</span>)}</div>
+        <div style={{fontSize:12,color:"#555",marginTop:6}}>{v.items.map((it,i)=><span key={i}>{it.label}{it.piezas>1?` x${it.piezas}`:""}{esLavadoSeco(it.label)&&<span style={{color:"#ff9800",fontSize:10}}> (20%)</span>}{i<v.items.length-1?" · ":""}</span>)}</div>
         <div style={{fontSize:12,color:"#555",marginTop:2}}>📅 {fmtD(v.entrega)}</div>
         {v.anulada&&<div style={{background:"#ffebee",borderRadius:6,padding:"6px 10px",marginTop:6,fontSize:12,color:"#c62828"}}>❌ ANULADA — {v.motivoAnulacion}</div>}
         {abs.length>0&&<div style={{marginTop:8,background:"#f0faf4",borderRadius:8,padding:"8px 10px"}}>
@@ -572,8 +584,8 @@ function PendienteItem({v,empleadas,setTicket,addAbono,setVentas}){
     <div>
       <div style={{...S.vcard,borderLeft:`4px solid ${esPag?"#ff9800":"#e53935"}`}}>
         <div style={{display:"flex",gap:6,marginBottom:6}}>
-          {!esPag&&<div style={{...S.badge,background:"#ffebee",color:"#c62828"}}>💸 Pendiente cobro</div>}
-          {esPag&&(v.estado||"recibido")!=="entregado"&&<div style={{...S.badge,background:est.bg,color:est.color}}>{est.icon} {est.label}</div>}
+          {!esPag&&<div style={{background:"#c62828",color:"#fff",padding:"4px 12px",borderRadius:8,fontWeight:800,fontSize:13,display:"inline-block"}}>💸 PENDIENTE DE COBRO — ${saldo(v).toFixed(2)}</div>}
+          {esPag&&(v.estado||"recibido")!=="entregado"&&<div style={{background:"#e65100",color:"#fff",padding:"4px 12px",borderRadius:8,fontWeight:800,fontSize:13,display:"inline-block"}}>📦 PENDIENTE DE RETIRO</div>}
         </div>
         <div style={{display:"flex",justifyContent:"space-between"}}>
           <div>
@@ -615,11 +627,11 @@ function Pendientes({ventas,empleadas,setTicket,addAbono,setVentas}){
     <div style={S.panel}>
       <h2 style={S.ptitle}>⏳ Pendientes</h2>
       <div style={S.kgrid}>
-        <div style={{...S.kpi,borderLeft:"4px solid #e53935",cursor:"pointer"}} onClick={()=>setFiltro("cobrar")}>
-          <div style={{fontSize:22}}>💸</div><div><div style={{fontWeight:800,fontSize:18,color:"#e53935"}}>${totCob.toFixed(2)}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Por cobrar</div><div style={{fontSize:11,color:"#888"}}>{porCob.length} ordenes</div></div>
+        <div style={{background:"#c62828",borderRadius:12,padding:"14px",display:"flex",gap:12,alignItems:"center",cursor:"pointer",boxShadow:"0 2px 8px rgba(198,40,40,.3)"}} onClick={()=>setFiltro("cobrar")}>
+          <div style={{fontSize:28}}>💸</div><div><div style={{fontWeight:800,fontSize:22,color:"#fff"}}>${totCob.toFixed(2)}</div><div style={{fontSize:13,fontWeight:700,color:"rgba(255,255,255,.9)"}}>PENDIENTE DE COBRO</div><div style={{fontSize:12,color:"rgba(255,255,255,.7)"}}>{porCob.length} ordenes</div></div>
         </div>
-        <div style={{...S.kpi,borderLeft:"4px solid #ff9800",cursor:"pointer"}} onClick={()=>setFiltro("entregar")}>
-          <div style={{fontSize:22}}>📦</div><div><div style={{fontWeight:800,fontSize:18,color:"#ff9800"}}>{porEnt.length}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Por entregar</div></div>
+        <div style={{background:"#e65100",borderRadius:12,padding:"14px",display:"flex",gap:12,alignItems:"center",cursor:"pointer",boxShadow:"0 2px 8px rgba(230,81,0,.3)"}} onClick={()=>setFiltro("entregar")}>
+          <div style={{fontSize:28}}>📦</div><div><div style={{fontWeight:800,fontSize:22,color:"#fff"}}>{porEnt.length}</div><div style={{fontSize:13,fontWeight:700,color:"rgba(255,255,255,.9)"}}>PENDIENTE RETIRO</div><div style={{fontSize:12,color:"rgba(255,255,255,.7)"}}>Por entregar</div></div>
         </div>
       </div>
       <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
@@ -657,7 +669,7 @@ function Reportes({ventas,empleadas}){
     <div style={S.panel}>
       <h2 style={S.ptitle}>📊 Reportes</h2>
       <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
-        {[{id:"resumen",l:"📈 Resumen"},{id:"cuadre",l:"🧮 Cuadre"},{id:"ventas",l:"📋 Ventas"},{id:"excel",l:"📥 Excel"}].map(t=>(
+        {[{id:"resumen",l:"📈 Resumen"},{id:"depositos",l:"💵 Depositos"},{id:"cuadre",l:"🧮 Cuadre"},{id:"ventas",l:"📋 Ventas"},{id:"excel",l:"📥 Excel"}].map(t=>(
           <button key={t.id} style={{...S.pill,...(sub===t.id?S.pillA:{}),fontSize:12}} onClick={()=>setSub(t.id)}>{t.l}</button>
         ))}
       </div>
@@ -686,6 +698,45 @@ function Reportes({ventas,empleadas}){
           </div>);})}
         </Card>
       </div>)}
+      {sub==="depositos"&&(<div>
+        <Card title="💵 Resumen de depositos por dia">
+          <p style={{fontSize:13,color:"#555",marginBottom:12}}>Efectivo cobrado cada dia — esto es lo que debes depositar al banco.</p>
+          {(()=>{
+            const dias={};
+            ventas.filter(v=>!v.anulada).forEach(v=>{
+              const d=v.fecha.split("T")[0];
+              (v.abonos||[]).forEach(ab=>{
+                if(!dias[d])dias[d]={efectivo:0,pichincha:0,jep:0,tarjeta:0,total:0};
+                if(ab.metodo==="Efectivo")dias[d].efectivo+=ab.monto;
+                else if(ab.metodo==="Transferencia Pichincha")dias[d].pichincha+=ab.monto;
+                else if(ab.metodo==="Transferencia JEP")dias[d].jep+=ab.monto;
+                else if(ab.metodo==="Tarjeta")dias[d].tarjeta+=ab.monto;
+                dias[d].total+=ab.monto;
+              });
+            });
+            const sorted=Object.entries(dias).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,30);
+            if(sorted.length===0)return <div style={{color:"#aaa",textAlign:"center",padding:20}}>Sin datos aun</div>;
+            return sorted.map(([fecha,d])=>(
+              <div key={fecha} style={{borderBottom:"1px solid #f0f4f8",padding:"10px 0"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                  <div>
+                    <div style={{fontWeight:700,color:"#1a3c5e",fontSize:15}}>{new Date(fecha+"T12:00:00").toLocaleDateString("es-MX",{weekday:"long",day:"numeric",month:"long"})}</div>
+                    <div style={{fontSize:11,color:"#888"}}>{fecha}</div>
+                  </div>
+                  <div style={{background:"#1a3c5e",color:"#fff",padding:"4px 14px",borderRadius:8,fontWeight:800,fontSize:15}}>${d.total.toFixed(2)}</div>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+                  {d.efectivo>0&&<div style={{background:"#e8f5e9",borderRadius:8,padding:"8px 10px",display:"flex",justifyContent:"space-between"}}><span style={{fontSize:12,color:"#2e7d32",fontWeight:600}}>💵 Depositar banco</span><strong style={{color:"#2e7d32"}}>${d.efectivo.toFixed(2)}</strong></div>}
+                  {d.pichincha>0&&<div style={{background:"#e3f2fd",borderRadius:8,padding:"8px 10px",display:"flex",justifyContent:"space-between"}}><span style={{fontSize:12,color:"#1565c0",fontWeight:600}}>🏦 Pichincha</span><strong style={{color:"#1565c0"}}>${d.pichincha.toFixed(2)}</strong></div>}
+                  {d.jep>0&&<div style={{background:"#e3f2fd",borderRadius:8,padding:"8px 10px",display:"flex",justifyContent:"space-between"}}><span style={{fontSize:12,color:"#1565c0",fontWeight:600}}>🏦 JEP</span><strong style={{color:"#1565c0"}}>${d.jep.toFixed(2)}</strong></div>}
+                  {d.tarjeta>0&&<div style={{background:"#f3e8fd",borderRadius:8,padding:"8px 10px",display:"flex",justifyContent:"space-between"}}><span style={{fontSize:12,color:"#7c3aed",fontWeight:600}}>💳 Tarjeta</span><strong style={{color:"#7c3aed"}}>${d.tarjeta.toFixed(2)}</strong></div>}
+                </div>
+              </div>
+            ));
+          })()}
+        </Card>
+      </div>)}
+
       {sub==="cuadre"&&(<div>
         {!cuadre&&<div style={{background:"#ffebee",border:"2px solid #e53935",borderRadius:10,padding:"12px 16px",marginBottom:14}}><div style={{fontWeight:800,color:"#c62828",fontSize:15}}>⚠️ El cuadre no coincide</div><div style={{fontSize:13,color:"#c62828",marginTop:4}}>Total ${totV.toFixed(2)} ≠ Cobrado ${totCob.toFixed(2)} + Pendiente ${pendMes.toFixed(2)}</div></div>}
         {cuadre&&<div style={{background:"#e8f5e9",border:"2px solid #4caf50",borderRadius:10,padding:"12px 16px",marginBottom:14}}><div style={{fontWeight:800,color:"#2e7d32",fontSize:15}}>✅ Cuadre perfecto</div></div>}
@@ -959,9 +1010,11 @@ function GestionUsuarios(){
   </div>);
 }
 
-function CierreCaja({ventas,empleadas,onLogout,onCierreListo}){
+function CierreCaja({ventas,empleadas,onLogout,onCierreListo,sesion}){
   const hoy=new Date().toISOString().split("T")[0];
-  const AK="ll_apertura_"+hoy;const CK="ll_cierre_"+hoy;
+  const uid=sesion?.id||"admin";
+  const AK="ll_apertura_"+hoy+"_"+uid;
+  const CK="ll_cierre_"+hoy+"_"+uid;
   const [modo,setModo]=useState(()=>{try{return localStorage.getItem(AK)?"cierre":"apertura";}catch{return"apertura";}});
   const [ap,setAp]=useState(()=>{try{const a=localStorage.getItem(AK);return a?JSON.parse(a):null;}catch{return null;}});
   const [cg,setCg]=useState(()=>{try{const c=localStorage.getItem(CK);return c?JSON.parse(c):null;}catch{return null;}});
@@ -1105,7 +1158,8 @@ export default function LavaListo(){
 
 function AppContent({sesion,onLogout}){
   const hoy=new Date().toISOString().split("T")[0];
-  const AK="ll_apertura_"+hoy;const CK="ll_cierre_"+hoy;
+  const AK="ll_apertura_"+hoy+"_"+sesion.id;
+  const CK="ll_cierre_"+hoy+"_"+sesion.id;
   const [tab,setTab]=useState("ventas");
   const [ventas,setVentas]=useState(()=>load(KEYS.ventas,[]));
   const [clientes,setClientes]=useState(()=>load(KEYS.clientes,[]));
@@ -1157,7 +1211,7 @@ function AppContent({sesion,onLogout}){
       {tab==="gastos"&&<Gastos gastos={gastos} setGastos={setGastos} sesion={sesion}/>}
       {tab==="inventario"&&<Inventario inventario={inventario} setInventario={setInventario}/>}
       {tab==="equipo"&&<Equipo empleadas={empleadas} setEmpleadas={setEmpleadas} ventas={ventas} esAdmin={esAdmin}/>}
-      {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={()=>setCierreOk(true)}/>}
+      {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={()=>setCierreOk(true)} sesion={sesion}/>}
       {tab==="config"&&<Configuracion servicios={servicios} setServicios={setServicios} exportarDatos={exportarDatos} importarDatos={importarDatos}/>}
       {tab==="usuarios"&&<GestionUsuarios/>}
     </div>
