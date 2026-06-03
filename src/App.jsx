@@ -65,6 +65,25 @@ const calcGanancia = (items) => items.reduce((acc, it) => {
   return acc + (esLavadoSeco(it.label) ? subtotal * 0.20 : subtotal);
 }, 0);
 
+
+// ─── FECHA LOCAL ECUADOR (UTC-5) ──────────────────────────────────
+const fechaHoyLocal = () => {
+  const now = new Date();
+  const offset = now.getTimezoneOffset();
+  const local = new Date(now.getTime() - offset * 60000);
+  return local.toISOString().split("T")[0];
+};
+// Convierte cualquier fecha ISO (UTC) a fecha local para comparar
+const fechaLocal = (isoStr) => {
+  if (!isoStr) return "";
+  const dt = new Date(isoStr);
+  const offset = dt.getTimezoneOffset();
+  const local = new Date(dt.getTime() - offset * 60000);
+  return local.toISOString().split("T")[0];
+};
+const semISO_local = (isoStr) => semISO(new Date(isoStr));
+const mesK_local = (isoStr) => mesK(new Date(isoStr));
+
 const expCSV=(ventas,titulo,empleadas)=>{
   const enc=["Folio","Fecha","Cliente","Servicios","Total","Pagado","Pendiente","Metodo","Estado","Notas"];
   const filas=ventas.map(v=>{
@@ -74,7 +93,7 @@ const expCSV=(ventas,titulo,empleadas)=>{
   });
   const csv=[enc,...filas].map(f=>f.map(c=>'"'+String(c).replace(/"/g,'\\"')+'"').join(",")).join("\n");
   const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
-  const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=titulo+"-"+new Date().toISOString().split("T")[0]+".csv";a.click();
+  const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=titulo+"-"+fechaHoyLocal()+".csv";a.click();
 };
 
 const S={
@@ -222,7 +241,7 @@ function LoginScreen({onLogin}){
 }
 
 function AperturaObligatoria({sesion,onLogout,onAbierta,empleadas}){
-  const hoy=new Date().toISOString().split("T")[0];
+  const hoy=fechaHoyLocal();
   const AK="ll_apertura_"+hoy+"_"+sesion.id;
   const [fondo,setFondo]=useState("15.00");
   const abrir=()=>{
@@ -292,12 +311,12 @@ function OrdenCard({v,setVentas,addAbono,setTicket}){
 }
 
 function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,cierreListo,onCierreListo}){
-  const hoy=new Date().toISOString().split("T")[0];
+  const hoy=fechaHoyLocal();
   const [tab,setTab]=useState("hoy");const [busq,setBusq]=useState("");
   const [fecha,setFecha]=useState(hoy);const [showNueva,setShowNueva]=useState(false);
   const [showCaja,setShowCaja]=useState(false);const [ticket,setTicket]=useState(null);
-  const vFecha=ventas.filter(v=>v.fecha.startsWith(fecha)&&!v.anulada);
-  const vHoy=ventas.filter(v=>v.fecha.startsWith(hoy)&&!v.anulada);
+  const vFecha=ventas.filter(v=>fechaLocal(v.fecha)===fecha&&!v.anulada);
+  const vHoy=ventas.filter(v=>fechaLocal(v.fecha)===hoy&&!v.anulada);
   const porCob=ventas.filter(v=>!pagada(v)&&!v.anulada);
   const porEnt=ventas.filter(v=>pagada(v)&&!v.anulada&&(v.estado||"recibido")!=="entregado");
   const lista=tab==="cobrar"?porCob:tab==="entregar"?porEnt:vFecha;
@@ -385,7 +404,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
   const empDef=empleadas.find(e=>String(e.id)===String(sesion?.id))||empleadas[0];
   const [empId,setEmpId]=useState(empDef?.id||null);
   const [items,setItems]=useState([{servId:servicios[0]?.id,piezas:1,custom:false,lC:"",pC:""}]);
-  const [entrega,setEntrega]=useState(man.toISOString().split("T")[0]);
+  const [entrega,setEntrega]=useState((()=>{const off=man.getTimezoneOffset();const l=new Date(man.getTime()-off*60000);return l.toISOString().split("T")[0];})());
   const [notas,setNotas]=useState("");const [err,setErr]=useState("");
   const [tPago,setTPago]=useState("completo");const [metodo,setMetodo]=useState("Efectivo");const [abono,setAbono]=useState("");
   const cFilt=clientes.filter(c=>c.nombre.toLowerCase().includes(cQ.toLowerCase())||(c.tel&&c.tel.includes(cQ))).slice(0,5);
@@ -551,7 +570,7 @@ function Historial({ventas,setVentas,empleadas,setTicket,addAbono,esAdmin}){
     if(fE==="Pagadas"&&!pagada(v))return false;
     if(fE==="Pendientes"&&pagada(v))return false;
     if(fEmp!=="Todos"&&String(v.empleadaId)!==fEmp)return false;
-    if(fF&&!v.fecha.startsWith(fF))return false;
+    if(fF&&!fechaLocal(v.fecha).startsWith(fF))return false;
     if(busq&&!v.clienteNombre?.toLowerCase().includes(busq.toLowerCase())&&!v.folio.toLowerCase().includes(busq.toLowerCase()))return false;
     return true;
   });
@@ -645,14 +664,14 @@ function Pendientes({ventas,empleadas,setTicket,addAbono,setVentas}){
 }
 
 function Reportes({ventas,empleadas}){
-  const hoy=new Date().toISOString().split("T")[0];
+  const hoy=fechaHoyLocal();
   const sem=semISO(new Date());const mes=mesK(new Date());
   const [mesS,setMesS]=useState(mes);const [sub,setSub]=useState("resumen");
   const [desde,setDesde]=useState(mes+"-01");const [hasta,setHasta]=useState(hoy);
-  const vHoy=ventas.filter(v=>v.fecha.startsWith(hoy)&&!v.anulada);
+  const vHoy=ventas.filter(v=>fechaLocal(v.fecha)===hoy&&!v.anulada);
   const vSem=ventas.filter(v=>semISO(v.fecha)===sem&&!v.anulada);
   const vMes=ventas.filter(v=>mesK(v.fecha)===mesS&&!v.anulada);
-  const vRng=ventas.filter(v=>!v.anulada&&v.fecha.split("T")[0]>=desde&&v.fecha.split("T")[0]<=hasta);
+  const vRng=ventas.filter(v=>!v.anulada&&fechaLocal(v.fecha)>=desde&&fechaLocal(v.fecha)<=hasta);
   const sum=a=>a.reduce((x,v)=>x+v.total,0);
   const cob=a=>a.reduce((x,v)=>x+(v.abonos||[]).reduce((y,ab)=>y+ab.monto,0),0);
   const pend=a=>a.reduce((x,v)=>x+saldo(v),0);
@@ -704,7 +723,7 @@ function Reportes({ventas,empleadas}){
           {(()=>{
             const dias={};
             ventas.filter(v=>!v.anulada).forEach(v=>{
-              const d=v.fecha.split("T")[0];
+              const d=fechaLocal(v.fecha);
               (v.abonos||[]).forEach(ab=>{
                 if(!dias[d])dias[d]={efectivo:0,pichincha:0,jep:0,tarjeta:0,total:0};
                 if(ab.metodo==="Efectivo")dias[d].efectivo+=ab.monto;
@@ -862,11 +881,11 @@ function Equipo({empleadas,setEmpleadas,ventas,esAdmin}){
 
 const CATS=["Insumos/Suministros","Servicios","Arriendo","Sueldos","Mantenimiento","Publicidad","Equipos","Otros"];
 function Gastos({gastos,setGastos,sesion}){
-  const [nv,setNv]=useState({descripcion:"",categoria:"Insumos/Suministros",proveedor:"",numeroFactura:"",monto:"",fecha:new Date().toISOString().split("T")[0],metodoPago:"Efectivo",notas:""});
+  const [nv,setNv]=useState({descripcion:"",categoria:"Insumos/Suministros",proveedor:"",numeroFactura:"",monto:"",fecha:fechaHoyLocal(),metodoPago:"Efectivo",notas:""});
   const [fMes,setFMes]=useState(mesK(new Date()));const [fCat,setFCat]=useState("Todas");const [err,setErr]=useState("");
-  const add=()=>{if(!nv.descripcion.trim()||!nv.monto){setErr("Completa descripcion y monto");return;}setGastos(prev=>[{...nv,id:Date.now(),monto:parseFloat(nv.monto),registradoPor:sesion.nombre},...prev]);setNv({descripcion:"",categoria:"Insumos/Suministros",proveedor:"",numeroFactura:"",monto:"",fecha:new Date().toISOString().split("T")[0],metodoPago:"Efectivo",notas:""});setErr("");};
+  const add=()=>{if(!nv.descripcion.trim()||!nv.monto){setErr("Completa descripcion y monto");return;}setGastos(prev=>[{...nv,id:Date.now(),monto:parseFloat(nv.monto),registradoPor:sesion.nombre},...prev]);setNv({descripcion:"",categoria:"Insumos/Suministros",proveedor:"",numeroFactura:"",monto:"",fecha:fechaHoyLocal(),metodoPago:"Efectivo",notas:""});setErr("");};
   const del=id=>{if(!window.confirm("Eliminar?"))return;setGastos(prev=>prev.filter(g=>g.id!==id));};
-  const fil=gastos.filter(g=>(!fMes||g.fecha.startsWith(fMes))&&(fCat==="Todas"||g.categoria===fCat));
+  const fil=gastos.filter(g=>(!fMes||fechaLocal(g.fecha).startsWith(fMes))&&(fCat==="Todas"||g.categoria===fCat));
   const tot=fil.reduce((a,g)=>a+g.monto,0);
   return(<div style={S.panel}>
     <h2 style={S.ptitle}>🛒 Gastos & Facturas</h2>
@@ -1011,7 +1030,7 @@ function GestionUsuarios(){
 }
 
 function CierreCaja({ventas,empleadas,onLogout,onCierreListo,sesion}){
-  const hoy=new Date().toISOString().split("T")[0];
+  const hoy=fechaHoyLocal();
   const AK="ll_apertura_"+hoy+"_"+(sesion?.id||"admin");
   const CK="ll_cierre_"+hoy+"_"+(sesion?.id||"admin");
   const [modo,setModo]=useState(()=>{try{return localStorage.getItem(AK)?"cierre":"apertura";}catch{return"apertura";}});
@@ -1026,12 +1045,13 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,sesion}){
   // Filtra SOLO los abonos cobrados por este usuario (sesion.id)
   const uid=sesion?.id;
   const todosAbonos=ventas.filter(v=>!v.anulada).flatMap(v=>(v.abonos||[]).filter(ab=>{
-    // Si el abono tiene cobradoPorId, filtra por ese. Si no (datos viejos), filtra por empleadaId de la venta
     const tieneId=ab.cobradoPorId!=null;
     const mismoUsuario=tieneId
       ? String(ab.cobradoPorId)===String(uid)
       : String(v.empleadaId)===String(uid);
-    const esHoy=ab.fecha&&ab.fecha.startsWith(hoy);
+    // Comparar fecha LOCAL del abono (no UTC) con hoy local
+    const fechaLocalAbono=ab.fecha?(()=>{const dt=new Date(ab.fecha);const off=dt.getTimezoneOffset();const l=new Date(dt.getTime()-off*60000);return l.toISOString().split("T")[0];})():"";
+    const esHoy=fechaLocalAbono===hoy;
     return mismoUsuario&&esHoy;
   }));
   const espEf=todosAbonos.filter(a=>a.metodo==="Efectivo").reduce((a,ab)=>a+ab.monto,0);
@@ -1039,14 +1059,14 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,sesion}){
   const espTa=todosAbonos.filter(a=>a.metodo==="Tarjeta").reduce((a,ab)=>a+ab.monto,0);
   const espTot=espEf+espTr+espTa;
   // Para el resumen de ventas del dia (todas las ventas, no solo cobros)
-  const vHoy=ventas.filter(v=>v.fecha.startsWith(hoy)&&!v.anulada);
+  const vHoy=ventas.filter(v=>fechaLocal(v.fecha)===hoy&&!v.anulada);
   const vEmp=vHoy; // se mantiene para el conteo de ventas en ticket
   const totB=BILLETES.reduce((a,b)=>a+(parseFloat(bills[b])||0)*b,0);
   const totC=MONEDAS.reduce((a,m)=>a+(parseFloat(coins[m])||0)*m,0);
   const totEf=parseFloat((totB+totC).toFixed(2));
   const totTr=(parseFloat(tPic)||0)+(parseFloat(tJep)||0);
   const totTa=parseFloat(tTar)||0;
-  const fd=ap?.fondo||15;
+  const fd=ap?.fondo!=null?ap.fondo:15; // usa el fondo real de apertura
   const efN=parseFloat((totEf-fd).toFixed(2));
   const vR=parseFloat((efN+totTr+totTa).toFixed(2));
   const dEf=parseFloat((efN-espEf).toFixed(2));
@@ -1106,7 +1126,10 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,sesion}){
     {modo==="cierre"&&(<div>
       {ap&&<div style={{background:"#e8f5fd",borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:13}}>
         🔓 Apertura: <strong>{ap.empleadaNombre}</strong> · Fondo: <strong>${ap.fondo.toFixed(2)}</strong>
-        <div style={{fontSize:11,color:"#1565c0",marginTop:4}}>💡 El cierre incluye solo los cobros registrados por <strong>{sesion?.nombre}</strong> hoy.</div>
+        <div style={{fontSize:11,color:"#1565c0",marginTop:4}}>
+          💡 Solo tus cobros de hoy: <strong>Efectivo ${espEf.toFixed(2)} · Transferencias ${espTr.toFixed(2)} · Tarjeta ${espTa.toFixed(2)}</strong>
+          {espTot===0&&<span style={{color:"#2e7d32",fontWeight:700}}> — Sin cobros: si solo tienes el fondo, cuadrará en ✅</span>}
+        </div>
       </div>}
       <div style={{display:"flex",gap:6,marginBottom:14,overflowX:"auto"}}>
         {[{n:1,l:"💵 Billetes"},{n:2,l:"🪙 Monedas"},{n:3,l:"🏦 Digital"},{n:4,l:"✅ Confirmar"}].map(p=>(
@@ -1171,7 +1194,7 @@ export default function LavaListo(){
 }
 
 function AppContent({sesion,onLogout}){
-  const hoy=new Date().toISOString().split("T")[0];
+  const hoy=fechaHoyLocal();
   const AK="ll_apertura_"+hoy+"_"+sesion.id;
   const CK="ll_cierre_"+hoy+"_"+sesion.id;
   const [tab,setTab]=useState("ventas");
