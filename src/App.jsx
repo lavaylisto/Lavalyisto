@@ -145,14 +145,24 @@ function TicketModal({venta,empleadas,onClose}){
   const totAb=abs.reduce((a,ab)=>a+ab.monto,0);
   const est=getEst(venta);
   const print2=()=>{
-    const s=document.createElement("style");
-    s.innerHTML="@media print{body *{visibility:hidden}#tp,#tp *{visibility:visible}#tp{position:fixed;top:0;left:0;width:48%}#tc{visibility:visible;position:fixed;top:0;left:52%;width:48%;border-left:1px dashed #ccc}#tc *{visibility:visible}}";
-    document.head.appendChild(s);
-    const o=document.getElementById("tp");const c=o.cloneNode(true);c.id="tc";
-    const lc=document.createElement("div");lc.style.cssText="text-align:center;font-size:10px;color:#aaa;margin-bottom:8px;font-weight:bold";lc.innerText="— COPIA NEGOCIO —";c.insertBefore(lc,c.firstChild);
-    const lo=document.createElement("div");lo.style.cssText="text-align:center;font-size:10px;color:#aaa;margin-bottom:8px;font-weight:bold";lo.innerText="— COPIA CLIENTE —";o.insertBefore(lo,o.firstChild);
-    document.body.appendChild(c);window.print();
-    document.head.removeChild(s);document.body.removeChild(c);o.removeChild(lo);
+    const w=window.open("","_blank","width=400,height:800");
+    if(!w)return;
+    const orig=document.getElementById("tp");
+    if(!orig){window.print();return;}
+    const html=orig.innerHTML;
+    w.document.write(`<html><head><title>Comprobante</title>
+    <style>
+      body{font-family:sans-serif;padding:10px;max-width:340px;margin:0 auto}
+      .copy{border:1px solid #eee;border-radius:8px;padding:16px;margin-bottom:8px}
+      .copy-label{text-align:center;font-size:10px;color:#aaa;font-weight:bold;margin-bottom:8px;border-bottom:1px dashed #ccc;padding-bottom:6px}
+      @media print{body{margin:0;padding:5px}}
+    </style></head><body>
+    <div class="copy"><div class="copy-label">✂️ COPIA CLIENTE</div>${html}</div>
+    <div style="border-top:2px dashed #ccc;margin:10px 0;text-align:center;font-size:11px;color:#aaa">— doblar y cortar aquí —</div>
+    <div class="copy"><div class="copy-label">✂️ COPIA NEGOCIO</div>${html}</div>
+    <script>window.print();window.close();<\/script>
+    </body></html>`);
+    w.document.close();
   };
   return(
     <div style={S.ov}>
@@ -396,6 +406,41 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
   );
 }
 
+// ─── BUSCADOR DE SERVICIOS ─────────────────────────────────────────
+function ServicioBuscador({servId,piezas,servicios,onServChange,onPiezasChange}){
+  const selSrv=servicios.find(s=>s.id===servId)||servicios[0];
+  const [busq,setBusq]=useState("");
+  const [open,setOpen]=useState(false);
+  const filtrados=busq?servicios.filter(s=>s.label.toLowerCase().includes(busq.toLowerCase())).slice(0,8):servicios.slice(0,8);
+  return(
+    <div style={{display:"flex",gap:6,alignItems:"flex-start",position:"relative"}}>
+      <div style={{flex:1,position:"relative"}}>
+        <input
+          style={{...S.inp}}
+          placeholder="Escribir para buscar servicio..."
+          value={open?busq:(selSrv?`${selSrv.label} — $${selSrv.precio.toFixed(2)}`:"")}
+          onFocus={()=>{setOpen(true);setBusq("");}}
+          onChange={e=>{setBusq(e.target.value);setOpen(true);}}
+          onBlur={()=>setTimeout(()=>setOpen(false),200)}
+        />
+        {open&&(
+          <div style={{position:"absolute",top:"100%",left:0,right:0,background:"#fff",border:"1.5px solid #4db6e4",borderRadius:8,zIndex:50,boxShadow:"0 4px 16px rgba(0,0,0,.15)",maxHeight:220,overflowY:"auto"}}>
+            {filtrados.length===0?<div style={{padding:"10px 14px",color:"#aaa",fontSize:13}}>Sin resultados</div>
+              :filtrados.map(s=>(
+              <div key={s.id} style={{padding:"10px 14px",cursor:"pointer",borderBottom:"1px solid #f0f4f8",fontSize:13,background:s.id===servId?"#e8f5fd":"#fff"}}
+                onMouseDown={()=>{onServChange(s.id);setBusq("");setOpen(false);}}>
+                <div style={{fontWeight:600}}>{s.label}</div>
+                <div style={{color:"#4db6e4",fontWeight:700,fontSize:12}}>${s.precio.toFixed(2)}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <input type="number" min={1} style={{...S.inp,width:56,textAlign:"center"}} value={piezas} onChange={e=>onPiezasChange(e.target.value)}/>
+    </div>
+  );
+}
+
 function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,servicios,sesion}){
   const man=new Date();man.setDate(man.getDate()+1);
   const [cQ,setCQ]=useState("");const [cId,setCId]=useState(null);
@@ -467,12 +512,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
                 <input type="number" min={1} style={{...S.inp,width:56,textAlign:"center"}} value={it.piezas} onChange={e=>updIt(i,"piezas",parseInt(e.target.value)||1)}/>
               </div>
             ):(
-              <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                <select style={{...S.inp,flex:1}} value={it.servId} onChange={e=>updIt(i,"servId",e.target.value)}>
-                  {servicios.map(s=><option key={s.id} value={s.id}>{s.label} — ${s.precio.toFixed(2)}</option>)}
-                </select>
-                <input type="number" min={1} style={{...S.inp,width:56,textAlign:"center"}} value={it.piezas} onChange={e=>updIt(i,"piezas",parseInt(e.target.value)||1)}/>
-              </div>
+              <ServicioBuscador servId={it.servId} piezas={it.piezas} servicios={servicios} onServChange={v=>updIt(i,"servId",v)} onPiezasChange={v=>updIt(i,"piezas",parseInt(v)||1)}/>
             )}
           </div>
         ))}
@@ -1187,71 +1227,339 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,sesion}){
 
 export default function LavaListo(){
   const [ses,setSes]=useState(()=>{try{const s=sessionStorage.getItem("ll_ses");return s?JSON.parse(s):null;}catch{return null;}});
-  const login=u=>{try{sessionStorage.setItem("ll_ses",JSON.stringify(u));}catch{}setSes(u);};
+  const login=u=>{
+    // Al login borramos la apertura de sesion para obligar apertura nueva
+    try{sessionStorage.setItem("ll_ses",JSON.stringify(u));}catch{}
+    // Borrar flag de caja abierta en session (no en localStorage que guarda el registro)
+    try{sessionStorage.removeItem("ll_caja_abierta_"+u.id);}catch{}
+    setSes(u);
+  };
   const logout=()=>{try{sessionStorage.removeItem("ll_ses");}catch{}setSes(null);};
   if(!ses)return <LoginScreen onLogin={login}/>;
   return <AppContent sesion={ses} onLogout={logout}/>;
 }
 
-function AppContent({sesion,onLogout}){
+// ─── RESUMEN DEL DÍA (Admin) ───────────────────────────────────────
+function ResumenDia({ventas,empleadas}){
   const hoy=fechaHoyLocal();
-  const AK="ll_apertura_"+hoy+"_"+sesion.id;
-  const CK="ll_cierre_"+hoy+"_"+sesion.id;
-  const [tab,setTab]=useState("ventas");
-  const [ventas,setVentas]=useState(()=>load(KEYS.ventas,[]));
-  const [clientes,setClientes]=useState(()=>load(KEYS.clientes,[]));
-  const [empleadas,setEmpleadas]=useState(()=>load(KEYS.empleadas,EMPLEADAS_DEFAULT));
-  const [inventario,setInventario]=useState(()=>load(KEYS.inventario,INSUMOS_DEFAULT));
-  const [servicios,setServicios]=useState(()=>load(KEYS.servicios,SERVICIOS_DEFAULT));
-  const [gastos,setGastos]=useState(()=>load("ll_gastos",[]));
-  const [ticketV,setTicketV]=useState(null);
-  const [cajaOk,setCajaOk]=useState(!!load(AK,null));
-  const [cierreOk,setCierreOk]=useState(!!load(CK,null));
-  useEffect(()=>save(KEYS.ventas,ventas),[ventas]);
-  useEffect(()=>save(KEYS.clientes,clientes),[clientes]);
-  useEffect(()=>save(KEYS.empleadas,empleadas),[empleadas]);
-  useEffect(()=>save(KEYS.inventario,inventario),[inventario]);
-  useEffect(()=>save(KEYS.servicios,servicios),[servicios]);
-  useEffect(()=>save("ll_gastos",gastos),[gastos]);
-  const esAdmin=sesion.rol==="Administrador";
-  const addAbono=(f,ab)=>setVentas(prev=>prev.map(v=>{if(v.folio!==f)return v;const abono={...ab,cobradoPorId:sesion.id,cobradoPorNombre:sesion.nombre};const abs=[...(v.abonos||[]),abono];return{...v,abonos:abs,pagada:saldo({...v,abonos:abs})<=0};}));
-  const exportarDatos=()=>{const d={ventas,clientes,empleadas,inventario,servicios,gastos};const blob=new Blob([JSON.stringify(d,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`respaldo-${hoy}.json`;a.click();};
-  const importarDatos=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>{try{const d=JSON.parse(ev.target.result);if(d.ventas)setVentas(d.ventas);if(d.clientes)setClientes(d.clientes);if(d.empleadas)setEmpleadas(d.empleadas);if(d.inventario)setInventario(d.inventario);if(d.servicios)setServicios(d.servicios);if(d.gastos)setGastos(d.gastos);alert("✅ Datos importados");}catch{alert("❌ Error al importar");}};r.readAsText(f);};
-  const pCount=ventas.filter(v=>(!pagada(v)&&!v.anulada)||(pagada(v)&&!v.anulada&&(v.estado||"recibido")!=="entregado")).length;
-  if(!cajaOk)return <AperturaObligatoria sesion={sesion} onLogout={onLogout} onAbierta={()=>setCajaOk(true)} empleadas={empleadas}/>;
-  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={servicios} sesion={sesion} addAbono={addAbono} onLogout={onLogout} cierreListo={cierreOk} onCierreListo={()=>setCierreOk(true)}/>;
-  const tabs=[{id:"ventas",icon:"🧾",l:"Venta"},{id:"historial",icon:"📋",l:"Historial"},{id:"pendientes",icon:"⏳",l:"Pendientes",b:pCount},{id:"reportes",icon:"📊",l:"Reportes"},{id:"gastos",icon:"🛒",l:"Gastos"},{id:"inventario",icon:"📦",l:"Inventario"},{id:"equipo",icon:"👩",l:"Equipo"},{id:"caja",icon:"💰",l:"Caja"},{id:"config",icon:"⚙️",l:"Config"},{id:"usuarios",icon:"🔑",l:"Usuarios"}];
-  return(<div style={S.app}>
-    <style>{`@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=DM+Sans:wght@400;500;600;700&display=swap');*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:6px}::-webkit-scrollbar-thumb{background:#4db6e4;border-radius:3px}`}</style>
-    <div style={S.hdr}>
-      <div style={S.hdrI}>
-        <span style={S.logo}>🫧 Lava<span style={{color:"#4db6e4"}}>&</span>Listo</span>
-        <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <span style={{fontSize:12,color:"#a0c4da"}}>👑 {sesion.nombre}</span>
-          {cierreOk?<button onClick={onLogout} style={{background:"rgba(255,255,255,.15)",border:"none",borderRadius:6,color:"#fff",fontSize:11,padding:"4px 10px",cursor:"pointer"}}>Salir</button>:<button onClick={()=>alert("Debes hacer el cierre de caja antes de salir.")} style={{background:"rgba(255,80,80,.3)",border:"none",borderRadius:6,color:"#ffcccc",fontSize:11,padding:"4px 10px",cursor:"not-allowed"}}>🔒 Salir</button>}
+  const [cierresAceptados,setCierresAceptados]=useState(()=>load("ll_cierres_aceptados_"+hoy,{}));
+  useEffect(()=>save("ll_cierres_aceptados_"+hoy,cierresAceptados),[cierresAceptados]);
+
+  const vHoy=ventas.filter(v=>fechaLocal(v.fecha)===hoy&&!v.anulada);
+
+  // Cierres del día por usuario
+  const cierresHoy=[];
+  for(let i=0;i<localStorage.length;i++){
+    const k=localStorage.key(i);
+    if(k&&k.startsWith("ll_cierre_"+hoy+"_")){
+      try{const c=JSON.parse(localStorage.getItem(k));if(c)cierresHoy.push({...c,key:k});}catch{}
+    }
+  }
+
+  const aceptarCierre=(key)=>{
+    setCierresAceptados(prev=>({...prev,[key]:true}));
+  };
+
+  const todosAceptados=cierresHoy.length>0&&cierresHoy.every(c=>cierresAceptados[c.key]);
+
+  // Resumen global del día (solo de cierres aceptados)
+  const abHoy=ventas.filter(v=>!v.anulada).flatMap(v=>(v.abonos||[]).filter(ab=>fechaLocal(ab.fecha)===hoy));
+  const totEfectivo=abHoy.filter(a=>a.metodo==="Efectivo").reduce((a,ab)=>a+ab.monto,0);
+  const totPichincha=abHoy.filter(a=>a.metodo==="Transferencia Pichincha").reduce((a,ab)=>a+ab.monto,0);
+  const totJEP=abHoy.filter(a=>a.metodo==="Transferencia JEP").reduce((a,ab)=>a+ab.monto,0);
+  const totTarjeta=abHoy.filter(a=>a.metodo==="Tarjeta").reduce((a,ab)=>a+ab.monto,0);
+  const totCobrado=totEfectivo+totPichincha+totJEP+totTarjeta;
+  const totVentas=vHoy.reduce((a,v)=>a+v.total,0);
+  const totPendiente=vHoy.reduce((a,v)=>a+saldo(v),0);
+  const aDepositar=totEfectivo; // el efectivo es lo que se deposita al banco
+
+  const imprimirResumen=()=>{
+    const w=window.open("","_blank","width=450,height:700");
+    if(!w)return;
+    w.document.write(`<html><head><title>Resumen del Día</title>
+    <style>body{font-family:sans-serif;padding:20px;max-width:400px;margin:0 auto}
+    h2{text-align:center;color:#1a3c5e}.divider{border-top:1px dashed #ccc;margin:12px 0}
+    .row{display:flex;justify-content:space-between;margin:5px 0;font-size:14px}
+    .big{font-size:20px;font-weight:800;color:#1a3c5e}
+    .depositar{background:#e8f5e9;border-radius:8px;padding:12px;text-align:center;margin:12px 0}
+    .emp{background:#f0f4f8;border-radius:8px;padding:10px;margin:6px 0}
+    </style></head><body>
+    <div style="text-align:center;font-size:32px">🫧</div>
+    <h2>Lava&Listo</h2>
+    <p style="text-align:center;color:#888">Resumen del día ${hoy}</p>
+    <div class="divider"></div>
+    <div class="row"><span>Total ventas</span><strong>$${totVentas.toFixed(2)}</strong></div>
+    <div class="row"><span>Total cobrado</span><strong style="color:#2e7d32">$${totCobrado.toFixed(2)}</strong></div>
+    <div class="row"><span>Pendiente por cobrar</span><span style="color:#e65100">$${totPendiente.toFixed(2)}</span></div>
+    <div class="divider"></div>
+    <div class="row"><span>💵 Efectivo</span><strong>$${totEfectivo.toFixed(2)}</strong></div>
+    <div class="row"><span>🏦 Pichincha</span><strong>$${totPichincha.toFixed(2)}</strong></div>
+    <div class="row"><span>🏦 JEP</span><strong>$${totJEP.toFixed(2)}</strong></div>
+    <div class="row"><span>💳 Tarjeta</span><strong>$${totTarjeta.toFixed(2)}</strong></div>
+    <div class="divider"></div>
+    <div class="depositar">
+      <p style="font-size:13px;color:#555">💰 VALOR A DEPOSITAR AL BANCO HOY</p>
+      <div class="big">$${aDepositar.toFixed(2)}</div>
+    </div>
+    <p style="text-align:center;font-size:10px;color:#aaa">Lava&Listo · ${new Date().toLocaleString("es-MX")}</p>
+    <script>window.print();window.close();<\/script>
+    </body></html>`);
+    w.document.close();
+  };
+
+  return(
+    <div style={S.panel}>
+      <h2 style={S.ptitle}>📈 Resumen del Día</h2>
+      <div style={{fontSize:13,color:"#888",marginBottom:14}}>📅 {new Date().toLocaleDateString("es-MX",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</div>
+
+      {/* CIERRES DE EMPLEADAS */}
+      <Card title="✅ Cierres de empleadas — debes aceptar cada uno">
+        {cierresHoy.length===0
+          ?<div style={S.empty}>No hay cierres registrados hoy todavía</div>
+          :cierresHoy.map(c=>{
+            const aceptado=!!cierresAceptados[c.key];
+            return(
+              <div key={c.key} style={{...S.vcard,borderLeft:`4px solid ${aceptado?"#4caf50":"#ff9800"}`}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                  <div>
+                    <div style={{fontWeight:700,color:"#1a3c5e",fontSize:15}}>👩 {c.emp}</div>
+                    <div style={{fontSize:11,color:"#888"}}>{new Date(c.fecha).toLocaleString("es-MX")}</div>
+                    <div style={{fontSize:12,color:"#555",marginTop:4}}>
+                      💵 Efectivo neto: <strong>${(c.efN||0).toFixed(2)}</strong>
+                      {" · "} 🏦 Transfer: <strong>${(c.totTr||0).toFixed(2)}</strong>
+                      {" · "} 💳 Tarjeta: <strong>${(c.totTa||0).toFixed(2)}</strong>
+                    </div>
+                    <div style={{fontSize:13,marginTop:4,color:c.dTot===0?"#2e7d32":c.dTot>0?"#1565c0":"#c62828",fontWeight:700}}>
+                      {c.dTot===0?"✅ Cuadró perfectamente":c.dTot>0?`📈 Sobró $${c.dTot.toFixed(2)}`:`⚠️ Faltó $${Math.abs(c.dTot).toFixed(2)}`}
+                    </div>
+                  </div>
+                  <div>
+                    {aceptado
+                      ?<div style={{...S.badge,background:"#e8f5e9",color:"#2e7d32",fontWeight:700,padding:"6px 12px"}}>✅ Aceptado</div>
+                      :<button style={{...S.btnP,padding:"8px 16px",fontSize:13,background:"linear-gradient(135deg,#2e7d32,#388e3c)"}}
+                        onClick={()=>aceptarCierre(c.key)}>Aceptar cierre</button>
+                    }
+                  </div>
+                </div>
+              </div>
+            );
+          })
+        }
+      </Card>
+
+      {/* RESUMEN TOTAL — visible siempre pero destacado cuando todo aceptado */}
+      <div style={{opacity:todosAceptados?1:0.6}}>
+        {!todosAceptados&&cierresHoy.length>0&&<div style={{background:"#fff3e0",borderRadius:8,padding:"10px 14px",marginBottom:10,fontSize:13,color:"#e65100",fontWeight:600}}>⚠️ Acepta todos los cierres para confirmar el resumen total</div>}
+
+        <div style={S.kgrid}>
+          <div style={{...S.kpi,borderLeft:"4px solid #1a3c5e"}}><div style={{fontSize:22}}>🧾</div><div><div style={{fontWeight:800,fontSize:18,color:"#1a3c5e"}}>{vHoy.length}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Ventas hoy</div></div></div>
+          <div style={{...S.kpi,borderLeft:"4px solid #4caf50"}}><div style={{fontSize:22}}>💰</div><div><div style={{fontWeight:800,fontSize:18,color:"#4caf50"}}>${totCobrado.toFixed(2)}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Total cobrado</div></div></div>
+          <div style={{...S.kpi,borderLeft:"4px solid #e65100"}}><div style={{fontSize:22}}>⏳</div><div><div style={{fontWeight:800,fontSize:18,color:"#e65100"}}>${totPendiente.toFixed(2)}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Por cobrar</div></div></div>
+          <div style={{...S.kpi,borderLeft:"4px solid #1a3c5e",background:"#1a3c5e"}}><div style={{fontSize:22}}>🏦</div><div><div style={{fontWeight:800,fontSize:20,color:"#fff"}}>${aDepositar.toFixed(2)}</div><div style={{fontSize:12,fontWeight:700,color:"#a0c4da"}}>A depositar hoy</div></div></div>
         </div>
+
+        <Card title="💳 Desglose por método">
+          {[{icon:"💵",label:"Efectivo (a depositar)",val:totEfectivo,color:"#2e7d32",bg:"#e8f5e9"},
+            {icon:"🏦",label:"Transferencia Pichincha",val:totPichincha,color:"#1565c0",bg:"#e3f2fd"},
+            {icon:"🏦",label:"Transferencia JEP",val:totJEP,color:"#1565c0",bg:"#e3f2fd"},
+            {icon:"💳",label:"Tarjeta",val:totTarjeta,color:"#7c3aed",bg:"#f3e8fd"},
+          ].map(m=>(
+            <div key={m.label} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:"1px solid #f0f4f8"}}>
+              <span style={{fontSize:14}}>{m.icon} {m.label}</span>
+              <div style={{background:m.bg,color:m.color,padding:"4px 14px",borderRadius:8,fontWeight:800,fontSize:16}}>${m.val.toFixed(2)}</div>
+            </div>
+          ))}
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 0",borderTop:"2px solid #1a3c5e",marginTop:4}}>
+            <span style={{fontWeight:700,fontSize:15}}>TOTAL COBRADO</span>
+            <div style={{background:"#1a3c5e",color:"#fff",padding:"6px 18px",borderRadius:8,fontWeight:800,fontSize:18}}>${totCobrado.toFixed(2)}</div>
+          </div>
+        </Card>
+
+        <Card title="👩 Por empleada">
+          {empleadas.map(emp=>{
+            const vEmp=vHoy.filter(v=>v.empleadaId===emp.id);
+            const cobEmp=vEmp.flatMap(v=>v.abonos||[]).reduce((a,ab)=>a+ab.monto,0);
+            const efEmp=vEmp.flatMap(v=>(v.abonos||[]).filter(a=>a.metodo==="Efectivo")).reduce((a,ab)=>a+ab.monto,0);
+            const trEmp=vEmp.flatMap(v=>(v.abonos||[]).filter(a=>esTr(a.metodo))).reduce((a,ab)=>a+ab.monto,0);
+            if(vEmp.length===0)return null;
+            return(
+              <div key={emp.id} style={{...S.vcard,borderLeft:"4px solid #4db6e4"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div><div style={{fontWeight:700,fontSize:15}}>{emp.nombre}</div><div style={{fontSize:12,color:"#888"}}>{vEmp.length} ventas</div></div>
+                  <div style={{fontWeight:800,fontSize:18,color:"#1a3c5e"}}>${cobEmp.toFixed(2)}</div>
+                </div>
+                <div style={{display:"flex",gap:8,marginTop:6,flexWrap:"wrap"}}>
+                  {efEmp>0&&<div style={{background:"#e8f5e9",color:"#2e7d32",padding:"3px 10px",borderRadius:6,fontSize:12,fontWeight:600}}>💵 ${efEmp.toFixed(2)}</div>}
+                  {trEmp>0&&<div style={{background:"#e3f2fd",color:"#1565c0",padding:"3px 10px",borderRadius:6,fontSize:12,fontWeight:600}}>🏦 ${trEmp.toFixed(2)}</div>}
+                </div>
+              </div>
+            );
+          })}
+        </Card>
+
+        <button style={{...S.btnP,background:"linear-gradient(135deg,#2e7d32,#388e3c)"}} onClick={imprimirResumen}>
+          🖨️ Imprimir resumen del día
+        </button>
       </div>
     </div>
-    <div style={S.tabBar}>
-      {tabs.map(t=>(
-        <button key={t.id} style={{...S.tabBtn,...(tab===t.id?S.tabAct:{})}} onClick={()=>setTab(t.id)}>
-          <span style={{position:"relative"}}>{t.icon}{t.b>0&&<span style={{position:"absolute",top:-4,right:-8,background:"#e53935",color:"#fff",borderRadius:10,fontSize:9,fontWeight:800,padding:"1px 4px"}}>{t.b}</span>}</span>
-          <span>{t.l}</span>
-        </button>
-      ))}
-    </div>
-    <div style={S.content}>
-      {tab==="ventas"&&<NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={setTicketV} servicios={servicios} sesion={sesion}/>}
-      {tab==="historial"&&<Historial ventas={ventas} setVentas={setVentas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} esAdmin={esAdmin}/>}
-      {tab==="pendientes"&&<Pendientes ventas={ventas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} setVentas={setVentas}/>}
-      {tab==="reportes"&&<Reportes ventas={ventas} empleadas={empleadas}/>}
-      {tab==="gastos"&&<Gastos gastos={gastos} setGastos={setGastos} sesion={sesion}/>}
-      {tab==="inventario"&&<Inventario inventario={inventario} setInventario={setInventario}/>}
-      {tab==="equipo"&&<Equipo empleadas={empleadas} setEmpleadas={setEmpleadas} ventas={ventas} esAdmin={esAdmin}/>}
-      {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={()=>setCierreOk(true)} sesion={sesion}/>}
-      {tab==="config"&&<Configuracion servicios={servicios} setServicios={setServicios} exportarDatos={exportarDatos} importarDatos={importarDatos}/>}
-      {tab==="usuarios"&&<GestionUsuarios/>}
-    </div>
-    {ticketV&&<TicketModal venta={ticketV} empleadas={empleadas} onClose={()=>setTicketV(null)}/>}
-  </div>);
+  );
 }
+
+// ─── DEPÓSITOS ─────────────────────────────────────────────────────
+function Depositos({depositos,setDepositos,ventas}){
+  const hoy=fechaHoyLocal();
+  const [mesVer,setMesVer]=useState(mesK(new Date()));
+  const [formDia,setFormDia]=useState(null); // dia seleccionado para ingresar deposito
+  const [formData,setFormData]=useState({banco:"Pichincha",monto:"",comprobante:"",notas:""});
+  const BANCOS=["Pichincha","JEP","Guayaquil","Pacífico","Produbanco","Otro"];
+
+  // Obtener todos los días del mes que tienen ventas cobradas en efectivo
+  const diasConVentas=(()=>{
+    const map={};
+    ventas.filter(v=>!v.anulada).forEach(v=>{
+      (v.abonos||[]).forEach(ab=>{
+        const diaAb=fechaLocal(ab.fecha);
+        if(!diaAb.startsWith(mesVer))return;
+        if(!map[diaAb])map[diaAb]={efectivo:0,pichincha:0,jep:0,tarjeta:0,ventas:[]};
+        if(ab.metodo==="Efectivo")map[diaAb].efectivo+=ab.monto;
+        else if(ab.metodo==="Transferencia Pichincha")map[diaAb].pichincha+=ab.monto;
+        else if(ab.metodo==="Transferencia JEP")map[diaAb].jep+=ab.monto;
+        else if(ab.metodo==="Tarjeta")map[diaAb].tarjeta+=ab.monto;
+        if(!map[diaAb].ventas.find(f=>f===v.folio))map[diaAb].ventas.push(v.folio);
+      });
+    });
+    return Object.entries(map).sort((a,b)=>b[0].localeCompare(a[0]));
+  })();
+
+  const depPorDia=dia=>depositos.filter(d=>d.fecha===dia);
+
+  const guardarDeposito=()=>{
+    if(!formData.monto||!formData.comprobante.trim()){alert("Ingresa monto y número de comprobante");return;}
+    setDepositos(prev=>[{...formData,id:Date.now(),fecha:formDia,monto:parseFloat(formData.monto),creadoEn:new Date().toISOString()},...prev]);
+    setFormDia(null);setFormData({banco:"Pichincha",monto:"",comprobante:"",notas:""});
+  };
+  const eliminar=id=>{if(!window.confirm("¿Eliminar?"))return;setDepositos(prev=>prev.filter(d=>d.id!==id));};
+
+  const totDepMes=depositos.filter(d=>d.fecha.startsWith(mesVer)).reduce((a,d)=>a+d.monto,0);
+  const totEfMes=diasConVentas.reduce((a,[,d])=>a+d.efectivo,0);
+  const diasPendientes=diasConVentas.filter(([dia,d])=>d.efectivo>0&&depPorDia(dia).reduce((a,dd)=>a+dd.monto,0)<d.efectivo-0.01).length;
+
+  return(
+    <div style={S.panel}>
+      <h2 style={S.ptitle}>🏦 Cuadres de Caja Diarios</h2>
+      <p style={{fontSize:13,color:"#555",marginBottom:14}}>Registra el comprobante de depósito de cada día para cerrar el cuadre de caja.</p>
+
+      {/* RESUMEN DEL MES */}
+      <div style={S.kgrid}>
+        <div style={{...S.kpi,borderLeft:"4px solid #1a3c5e"}}>
+          <div style={{fontSize:22}}>💵</div>
+          <div><div style={{fontWeight:800,fontSize:18,color:"#1a3c5e"}}>${totEfMes.toFixed(2)}</div><div style={{fontSize:12,color:"#888"}}>Efectivo cobrado {mesVer}</div></div>
+        </div>
+        <div style={{...S.kpi,borderLeft:`4px solid ${diasPendientes>0?"#e53935":"#4caf50"}`}}>
+          <div style={{fontSize:22}}>{diasPendientes>0?"⚠️":"✅"}</div>
+          <div><div style={{fontWeight:800,fontSize:18,color:diasPendientes>0?"#e53935":"#4caf50"}}>{diasPendientes>0?`${diasPendientes} días`:"Al día"}</div><div style={{fontSize:12,color:"#888"}}>Pendiente depósito</div></div>
+        </div>
+      </div>
+
+      <div style={{marginBottom:14}}><label style={S.lbl}>Ver mes</label><input type="month" style={S.inp} value={mesVer} onChange={e=>setMesVer(e.target.value)}/></div>
+
+      {diasConVentas.length===0
+        ?<div style={S.empty}>No hay ventas cobradas en {mesVer}</div>
+        :diasConVentas.map(([dia,datos])=>{
+          const deps=depPorDia(dia);
+          const totDep=deps.reduce((a,d)=>a+d.monto,0);
+          const efDia=datos.efectivo;
+          const diferencia=parseFloat((totDep-efDia).toFixed(2));
+          const cuadrado=Math.abs(diferencia)<0.01;
+          const pendiente=efDia>0&&totDep<efDia-0.01;
+          const nombreDia=new Date(dia+"T12:00:00").toLocaleDateString("es-MX",{weekday:"long",day:"numeric",month:"long"});
+          const esHoy=dia===hoy;
+
+          return(
+            <div key={dia} style={{borderRadius:14,border:`2px solid ${cuadrado?"#4caf50":pendiente?"#e53935":"#ff9800"}`,background:"#fff",marginBottom:14,overflow:"hidden"}}>
+              {/* CABECERA DEL DÍA */}
+              <div style={{background:cuadrado?"#e8f5e9":pendiente?"#ffebee":"#fff3e0",padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div>
+                  <div style={{fontWeight:800,fontSize:15,color:cuadrado?"#2e7d32":pendiente?"#c62828":"#e65100",textTransform:"capitalize"}}>
+                    {cuadrado?"✅":"⚠️"} {nombreDia}{esHoy?" (HOY)":""}
+                  </div>
+                  <div style={{fontSize:11,color:"#888"}}>{dia}</div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontWeight:800,fontSize:18,color:"#1a3c5e"}}>💵 ${efDia.toFixed(2)}</div>
+                  <div style={{fontSize:11,color:"#888"}}>a depositar</div>
+                </div>
+              </div>
+
+              <div style={{padding:"12px 16px"}}>
+                {/* COBROS DEL DÍA */}
+                <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
+                  {datos.efectivo>0&&<div style={{background:"#e8f5e9",color:"#2e7d32",padding:"4px 10px",borderRadius:8,fontSize:12,fontWeight:600}}>💵 Efectivo: ${datos.efectivo.toFixed(2)}</div>}
+                  {datos.pichincha>0&&<div style={{background:"#e3f2fd",color:"#1565c0",padding:"4px 10px",borderRadius:8,fontSize:12,fontWeight:600}}>🏦 Pichincha: ${datos.pichincha.toFixed(2)}</div>}
+                  {datos.jep>0&&<div style={{background:"#e3f2fd",color:"#1565c0",padding:"4px 10px",borderRadius:8,fontSize:12,fontWeight:600}}>🏦 JEP: ${datos.jep.toFixed(2)}</div>}
+                  {datos.tarjeta>0&&<div style={{background:"#f3e8fd",color:"#7c3aed",padding:"4px 10px",borderRadius:8,fontSize:12,fontWeight:600}}>💳 Tarjeta: ${datos.tarjeta.toFixed(2)}</div>}
+                  <div style={{background:"#f0f4f8",color:"#888",padding:"4px 10px",borderRadius:8,fontSize:12}}>{datos.ventas.length} venta{datos.ventas.length!==1?"s":""}</div>
+                </div>
+
+                {/* DEPÓSITOS REGISTRADOS */}
+                {deps.length>0&&(
+                  <div style={{marginBottom:10}}>
+                    <div style={{fontSize:12,color:"#888",fontWeight:600,marginBottom:6}}>DEPÓSITOS REGISTRADOS:</div>
+                    {deps.map(d=>(
+                      <div key={d.id} style={{background:"#f8fbfd",borderRadius:8,padding:"8px 12px",marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center",border:"1px solid #e8f0f7"}}>
+                        <div>
+                          <div style={{fontWeight:700,fontSize:13}}>🏦 {d.banco} — ${d.monto.toFixed(2)}</div>
+                          <div style={{fontSize:11,color:"#4db6e4"}}>Comprobante: <strong>{d.comprobante}</strong></div>
+                          {d.notas&&<div style={{fontSize:11,color:"#888"}}>{d.notas}</div>}
+                        </div>
+                        <button style={S.btnR} onClick={()=>eliminar(d.id)}>✕</button>
+                      </div>
+                    ))}
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:13,fontWeight:700,padding:"6px 0",borderTop:"1px solid #e8f0f7"}}>
+                      <span>Total depositado</span>
+                      <span style={{color:cuadrado?"#2e7d32":"#e65100"}}>${totDep.toFixed(2)} / ${efDia.toFixed(2)}</span>
+                    </div>
+                    {!cuadrado&&efDia>0&&<div style={{background:"#ffebee",borderRadius:6,padding:"6px 10px",fontSize:12,color:"#c62828",fontWeight:700,marginTop:4}}>
+                      ⚠️ Faltan ${Math.abs(diferencia).toFixed(2)} por depositar
+                    </div>}
+                    {cuadrado&&<div style={{background:"#e8f5e9",borderRadius:6,padding:"6px 10px",fontSize:12,color:"#2e7d32",fontWeight:700,marginTop:4}}>
+                      ✅ Cuadre completo — día cerrado
+                    </div>}
+                  </div>
+                )}
+
+                {/* FORMULARIO AGREGAR DEPÓSITO */}
+                {formDia===dia?(
+                  <div style={{background:"#f0f4f8",borderRadius:10,padding:12}}>
+                    <div style={{fontWeight:700,color:"#1a3c5e",marginBottom:10}}>💾 Ingresar comprobante de depósito</div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+                      <div><label style={S.lbl}>Banco</label>
+                        <select style={S.inp} value={formData.banco} onChange={e=>setFormData({...formData,banco:e.target.value})}>
+                          {BANCOS.map(b=><option key={b}>{b}</option>)}
+                        </select>
+                      </div>
+                      <div><label style={S.lbl}>Monto depositado *</label><input type="number" style={S.inp} placeholder={`$${efDia.toFixed(2)}`} value={formData.monto} onChange={e=>setFormData({...formData,monto:e.target.value})}/></div>
+                      <div style={{gridColumn:"1/-1"}}><label style={S.lbl}>N° Comprobante *</label><input style={S.inp} placeholder="Número de referencia del banco" value={formData.comprobante} onChange={e=>setFormData({...formData,comprobante:e.target.value})}/></div>
+                      <div style={{gridColumn:"1/-1"}}><label style={S.lbl}>Notas</label><input style={S.inp} placeholder="Observaciones..." value={formData.notas} onChange={e=>setFormData({...formData,notas:e.target.value})}/></div>
+                    </div>
+                    <div style={{display:"flex",gap:8}}>
+                      <button style={{...S.btnP,flex:2}} onClick={guardarDeposito}>✅ Guardar depósito</button>
+                      <button style={{...S.btnC,flex:1}} onClick={()=>setFormDia(null)}>Cancelar</button>
+                    </div>
+                  </div>
+                ):(
+                  <button
+                    style={{...S.btnP,background:cuadrado?"#e8f5e9":"linear-gradient(135deg,#1a3c5e,#2563a8)",color:cuadrado?"#2e7d32":"#fff",border:cuadrado?"2px solid #4caf50":"none",fontSize:13,padding:"10px"}}
+                    onClick={()=>{setFormDia(dia);setFormData({banco:"Pichincha",monto:efDia>0?efDia.toFixed(2):"",comprobante:"",notas:""});}}>
+                    {cuadrado?"➕ Agregar otro depósito":"💾 Ingresar comprobante de depósito"}
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })
+      }
+    </div>
+  );
+}
+
