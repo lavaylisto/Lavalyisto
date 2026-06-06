@@ -145,23 +145,19 @@ function TicketModal({venta,empleadas,onClose}){
   const totAb=abs.reduce((a,ab)=>a+ab.monto,0);
   const est=getEst(venta);
   const print2=()=>{
-    const w=window.open("","_blank","width=400,height:800");
-    if(!w)return;
     const orig=document.getElementById("tp");
     if(!orig){window.print();return;}
     const html=orig.innerHTML;
-    w.document.write(`<html><head><title>Comprobante</title>
-    <style>
-      body{font-family:sans-serif;padding:10px;max-width:340px;margin:0 auto}
-      .copy{border:1px solid #eee;border-radius:8px;padding:16px;margin-bottom:8px}
-      .copy-label{text-align:center;font-size:10px;color:#aaa;font-weight:bold;margin-bottom:8px;border-bottom:1px dashed #ccc;padding-bottom:6px}
-      @media print{body{margin:0;padding:5px}}
-    </style></head><body>
-    <div class="copy"><div class="copy-label">✂️ COPIA CLIENTE</div>${html}</div>
-    <div style="border-top:2px dashed #ccc;margin:10px 0;text-align:center;font-size:11px;color:#aaa">— doblar y cortar aquí —</div>
-    <div class="copy"><div class="copy-label">✂️ COPIA NEGOCIO</div>${html}</div>
-    <script>window.print();window.close();<\/script>
-    </body></html>`);
+    const w=window.open("","_blank","width=400,height=800");
+    if(!w)return;
+    const thtml="<html><head><title>Comprobante</title>"
+      +"<style>body{font-family:sans-serif;padding:10px;max-width:340px;margin:0 auto}.copy{border:1px solid #eee;border-radius:8px;padding:16px;margin-bottom:8px}.lbl{text-align:center;font-size:10px;color:#aaa;font-weight:bold;margin-bottom:8px;border-bottom:1px dashed #ccc;padding-bottom:6px}@media print{body{margin:0;padding:5px}}</style>"
+      +"</head><body>"
+      +"<div class='copy'><div class='lbl'>✂️ COPIA CLIENTE</div>"+html+"</div>"
+      +"<div style='border-top:2px dashed #ccc;margin:10px 0;text-align:center;font-size:11px;color:#aaa'>— cortar aquí —</div>"
+      +"<div class='copy'><div class='lbl'>✂️ COPIA NEGOCIO</div>"+html+"</div>"
+      +"<scr"+"ipt>window.print();window.close();</"+"script></body></html>";
+    w.document.write(thtml);
     w.document.close();
   };
   return(
@@ -1127,7 +1123,29 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,sesion}){
   );
   const imprimir=d=>{
     const w=window.open("","_blank","width=420,height=700");if(!w)return;
-    w.document.write(`<html><head><title>Cierre</title><style>body{font-family:sans-serif;padding:16px;max-width:360px;margin:0 auto}h2{text-align:center;color:#1a3c5e}.row{display:flex;justify-content:space-between;margin:4px 0;font-size:13px}.div{border-top:1px dashed #ccc;margin:10px 0}.res{text-align:center;font-size:20px;font-weight:800;padding:12px;border-radius:8px;margin:12px 0}.ok{color:#2e7d32;background:#e8f5e9}.bad{color:#c62828;background:#ffebee}.info{color:#1565c0;background:#e3f2fd}</style></head><body><div style="text-align:center;font-size:32px">🫧</div><h2>Lava&Listo — CIERRE</h2><div class="div"></div><div class="row"><span>Fecha</span><span>${new Date(d.fecha).toLocaleString("es-MX")}</span></div><div class="row"><span>Empleada</span><span>${d.emp}</span></div><div class="row"><span>Ventas</span><span>${d.nv} ordenes · $${d.tv.toFixed(2)}</span></div><div class="div"></div><strong>💵 Efectivo</strong>${BILLETES.filter(b=>(parseFloat(d.bills[b])||0)>0).map(b=>`<div class="row"><span>$${b}×${d.bills[b]}</span><span>$${(b*d.bills[b]).toFixed(2)}</span></div>`).join("")}${MONEDAS.filter(m=>(parseFloat(d.coins[m])||0)>0).map(m=>`<div class="row"><span>$${m}×${d.coins[m]}</span><span>$${(m*d.coins[m]).toFixed(2)}</span></div>`).join("")}<div class="row"><strong>Total efectivo</strong><strong>$${d.totEf.toFixed(2)}</strong></div><div class="row" style="color:#e65100"><span>— Fondo caja</span><span>-$${d.fd.toFixed(2)}</span></div><div class="row"><strong>Efectivo neto</strong><strong>$${d.efN.toFixed(2)}</strong></div><div class="div"></div><div class="row"><span>Pichincha</span><span>$${d.tPic.toFixed(2)}</span></div><div class="row"><span>JEP</span><span>$${d.tJep.toFixed(2)}</span></div><div class="row"><span>Tarjeta</span><span>$${d.totTa.toFixed(2)}</span></div><div class="div"></div><div class="${d.dTot===0?"res ok":d.dTot>0?"res info":"res bad"}">${d.dTot===0?"✅ CAJA CUADRADA":d.dTot>0?`📈 SOBRA $${d.dTot.toFixed(2)}`:`⚠️ FALTA $${Math.abs(d.dTot).toFixed(2)}`}</div><p style="text-align:center;font-size:10px;color:#aaa">Lava&Listo · ${new Date().toLocaleString("es-MX")}</p><script>window.print();window.close();<\/script></body></html>`);
+    const rowB=BILLETES.filter(b=>(parseFloat(d.bills[b])||0)>0).map(b=>'<div class="row"><span>$'+b+"×"+d.bills[b]+"</span><span>$"+(b*d.bills[b]).toFixed(2)+"</span></div>").join("");
+    const rowM=MONEDAS.filter(m=>(parseFloat(d.coins[m])||0)>0).map(m=>'<div class="row"><span>$'+m+"×"+d.coins[m]+"</span><span>$"+(m*d.coins[m]).toFixed(2)+"</span></div>").join("");
+    const resClass=d.dTot===0?"res ok":d.dTot>0?"res info":"res bad";
+    const resText=d.dTot===0?"CAJA CUADRADA":d.dTot>0?"SOBRA $"+d.dTot.toFixed(2):"FALTA $"+Math.abs(d.dTot).toFixed(2);
+    const html="<html><head><title>Cierre</title><style>body{font-family:sans-serif;padding:16px;max-width:360px;margin:0 auto}h2{text-align:center;color:#1a3c5e}.row{display:flex;justify-content:space-between;margin:4px 0;font-size:13px}.div{border-top:1px dashed #ccc;margin:10px 0}.res{text-align:center;font-size:20px;font-weight:800;padding:12px;border-radius:8px;margin:12px 0}.ok{color:#2e7d32;background:#e8f5e9}.bad{color:#c62828;background:#ffebee}.info{color:#1565c0;background:#e3f2fd}</style></head><body>"
+      +"<div style='text-align:center;font-size:32px'>🫧</div><h2>Lava&amp;Listo — CIERRE</h2>"
+      +"<div class='div'></div>"
+      +"<div class='row'><span>Fecha</span><span>"+new Date(d.fecha).toLocaleString("es-MX")+"</span></div>"
+      +"<div class='row'><span>Empleada</span><span>"+d.emp+"</span></div>"
+      +"<div class='row'><span>Cobros</span><span>"+d.nv+" · $"+d.tv.toFixed(2)+"</span></div>"
+      +"<div class='div'></div><strong>💵 Efectivo</strong>"+rowB+rowM
+      +"<div class='row'><strong>Total efectivo</strong><strong>$"+d.totEf.toFixed(2)+"</strong></div>"
+      +"<div class='row' style='color:#e65100'><span>— Fondo caja</span><span>-$"+d.fd.toFixed(2)+"</span></div>"
+      +"<div class='row'><strong>Efectivo neto</strong><strong>$"+d.efN.toFixed(2)+"</strong></div>"
+      +"<div class='div'></div>"
+      +"<div class='row'><span>Pichincha</span><span>$"+d.tPic.toFixed(2)+"</span></div>"
+      +"<div class='row'><span>JEP</span><span>$"+d.tJep.toFixed(2)+"</span></div>"
+      +"<div class='row'><span>Tarjeta</span><span>$"+d.totTa.toFixed(2)+"</span></div>"
+      +"<div class='div'></div>"
+      +"<div class='"+resClass+"'>"+resText+"</div>"
+      +"<p style='text-align:center;font-size:10px;color:#aaa'>Lava&amp;Listo · "+new Date().toLocaleString("es-MX")+"</p>"
+      +"<scr"+"ipt>window.print();window.close();</"+"script></body></html>";
+    w.document.write(html);
     w.document.close();
   };
   const confirmar=()=>{
@@ -1228,15 +1246,84 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,sesion}){
 export default function LavaListo(){
   const [ses,setSes]=useState(()=>{try{const s=sessionStorage.getItem("ll_ses");return s?JSON.parse(s):null;}catch{return null;}});
   const login=u=>{
-    // Al login borramos la apertura de sesion para obligar apertura nueva
     try{sessionStorage.setItem("ll_ses",JSON.stringify(u));}catch{}
-    // Borrar flag de caja abierta en session (no en localStorage que guarda el registro)
     try{sessionStorage.removeItem("ll_caja_abierta_"+u.id);}catch{}
     setSes(u);
   };
   const logout=()=>{try{sessionStorage.removeItem("ll_ses");}catch{}setSes(null);};
   if(!ses)return <LoginScreen onLogin={login}/>;
   return <AppContent sesion={ses} onLogout={logout}/>;
+}
+
+function AppContent({sesion,onLogout}){
+  const hoy=fechaHoyLocal();
+  const AK="ll_apertura_"+hoy+"_"+sesion.id;
+  const CK="ll_cierre_"+hoy+"_"+sesion.id;
+  const SESSION_CAJA_KEY="ll_caja_abierta_"+sesion.id;
+  const [cajaOk,setCajaOk]=useState(()=>{try{return !!sessionStorage.getItem(SESSION_CAJA_KEY);}catch{return false;}});
+  const [cierreOk,setCierreOk]=useState(!!load(CK,null));
+  const [tab,setTab]=useState("ventas");
+  const [ventas,setVentas]=useState(()=>load(KEYS.ventas,[]));
+  const [clientes,setClientes]=useState(()=>load(KEYS.clientes,[]));
+  const [empleadas,setEmpleadas]=useState(()=>load(KEYS.empleadas,EMPLEADAS_DEFAULT));
+  const [inventario,setInventario]=useState(()=>load(KEYS.inventario,INSUMOS_DEFAULT));
+  const [servicios,setServicios]=useState(()=>load(KEYS.servicios,SERVICIOS_DEFAULT));
+  const [gastos,setGastos]=useState(()=>load("ll_gastos",[]));
+  const [depositos,setDepositos]=useState(()=>load("ll_depositos",[]));
+  const [ticketV,setTicketV]=useState(null);
+  useEffect(()=>save(KEYS.ventas,ventas),[ventas]);
+  useEffect(()=>save(KEYS.clientes,clientes),[clientes]);
+  useEffect(()=>save(KEYS.empleadas,empleadas),[empleadas]);
+  useEffect(()=>save(KEYS.inventario,inventario),[inventario]);
+  useEffect(()=>save(KEYS.servicios,servicios),[servicios]);
+  useEffect(()=>save("ll_gastos",gastos),[gastos]);
+  useEffect(()=>save("ll_depositos",depositos),[depositos]);
+  const esAdmin=sesion.rol==="Administrador";
+  const addAbono=(f,ab)=>setVentas(prev=>prev.map(v=>{if(v.folio!==f)return v;const abono={...ab,cobradoPorId:sesion.id,cobradoPorNombre:sesion.nombre};const abs=[...(v.abonos||[]),abono];return{...v,abonos:abs,pagada:saldo({...v,abonos:abs})<=0};}));
+  const exportarDatos=()=>{const d={ventas,clientes,empleadas,inventario,servicios,gastos,depositos};const blob=new Blob([JSON.stringify(d,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="respaldo-"+hoy+".json";a.click();};
+  const importarDatos=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>{try{const d=JSON.parse(ev.target.result);if(d.ventas)setVentas(d.ventas);if(d.clientes)setClientes(d.clientes);if(d.empleadas)setEmpleadas(d.empleadas);if(d.inventario)setInventario(d.inventario);if(d.servicios)setServicios(d.servicios);if(d.gastos)setGastos(d.gastos);if(d.depositos)setDepositos(d.depositos);alert("✅ Datos importados");}catch{alert("❌ Error al importar");}};r.readAsText(f);};
+  const pCount=ventas.filter(v=>(!pagada(v)&&!v.anulada)||(pagada(v)&&!v.anulada&&(v.estado||"recibido")!=="entregado")).length;
+  if(!cajaOk)return <AperturaObligatoria sesion={sesion} onLogout={onLogout} onAbierta={()=>{try{sessionStorage.setItem(SESSION_CAJA_KEY,"1");}catch{}setCajaOk(true);}} empleadas={empleadas}/>;
+  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={servicios} sesion={sesion} addAbono={addAbono} onLogout={onLogout} cierreListo={cierreOk} onCierreListo={()=>setCierreOk(true)}/>;
+  const tabs=[
+    {id:"ventas",icon:"🧾",l:"Venta"},{id:"historial",icon:"📋",l:"Historial"},
+    {id:"pendientes",icon:"⏳",l:"Pendientes",b:pCount},{id:"resumen",icon:"📈",l:"Resumen día"},
+    {id:"reportes",icon:"📊",l:"Reportes"},{id:"depositos",icon:"🏦",l:"Depósitos"},
+    {id:"gastos",icon:"🛒",l:"Gastos"},{id:"inventario",icon:"📦",l:"Inventario"},
+    {id:"equipo",icon:"👩",l:"Equipo"},{id:"caja",icon:"💰",l:"Caja"},
+    {id:"config",icon:"⚙️",l:"Config"},{id:"usuarios",icon:"🔑",l:"Usuarios"},
+  ];
+  return(<div style={S.app}>
+    <style>{`@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=DM+Sans:wght@400;500;600;700&display=swap');*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:6px}::-webkit-scrollbar-thumb{background:#4db6e4;border-radius:3px}`}</style>
+    <div style={S.hdr}><div style={S.hdrI}>
+      <span style={S.logo}>🫧 Lava<span style={{color:"#4db6e4"}}>&</span>Listo</span>
+      <div style={{display:"flex",alignItems:"center",gap:10}}>
+        <span style={{fontSize:12,color:"#a0c4da"}}>👑 {sesion.nombre}</span>
+        {cierreOk?<button onClick={onLogout} style={{background:"rgba(255,255,255,.15)",border:"none",borderRadius:6,color:"#fff",fontSize:11,padding:"4px 10px",cursor:"pointer"}}>Salir</button>:<button onClick={()=>alert("Debes hacer el cierre de caja antes de salir.")} style={{background:"rgba(255,80,80,.3)",border:"none",borderRadius:6,color:"#ffcccc",fontSize:11,padding:"4px 10px",cursor:"not-allowed"}}>🔒 Salir</button>}
+      </div>
+    </div></div>
+    <div style={S.tabBar}>
+      {tabs.map(t=>(<button key={t.id} style={{...S.tabBtn,...(tab===t.id?S.tabAct:{})}} onClick={()=>setTab(t.id)}>
+        <span style={{position:"relative"}}>{t.icon}{t.b>0&&<span style={{position:"absolute",top:-4,right:-8,background:"#e53935",color:"#fff",borderRadius:10,fontSize:9,fontWeight:800,padding:"1px 4px"}}>{t.b}</span>}</span>
+        <span>{t.l}</span>
+      </button>))}
+    </div>
+    <div style={S.content}>
+      {tab==="ventas"&&<NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={setTicketV} servicios={servicios} sesion={sesion}/>}
+      {tab==="historial"&&<Historial ventas={ventas} setVentas={setVentas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} esAdmin={esAdmin}/>}
+      {tab==="pendientes"&&<Pendientes ventas={ventas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} setVentas={setVentas}/>}
+      {tab==="resumen"&&<ResumenDia ventas={ventas} empleadas={empleadas}/>}
+      {tab==="reportes"&&<Reportes ventas={ventas} empleadas={empleadas}/>}
+      {tab==="depositos"&&<Depositos depositos={depositos} setDepositos={setDepositos} ventas={ventas}/>}
+      {tab==="gastos"&&<Gastos gastos={gastos} setGastos={setGastos} sesion={sesion}/>}
+      {tab==="inventario"&&<Inventario inventario={inventario} setInventario={setInventario}/>}
+      {tab==="equipo"&&<Equipo empleadas={empleadas} setEmpleadas={setEmpleadas} ventas={ventas} esAdmin={esAdmin}/>}
+      {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={()=>setCierreOk(true)} sesion={sesion}/>}
+      {tab==="config"&&<Configuracion servicios={servicios} setServicios={setServicios} exportarDatos={exportarDatos} importarDatos={importarDatos}/>}
+      {tab==="usuarios"&&<GestionUsuarios/>}
+    </div>
+    {ticketV&&<TicketModal venta={ticketV} empleadas={empleadas} onClose={()=>setTicketV(null)}/>}
+  </div>);
 }
 
 // ─── RESUMEN DEL DÍA (Admin) ───────────────────────────────────────
@@ -1276,34 +1363,24 @@ function ResumenDia({ventas,empleadas}){
   const imprimirResumen=()=>{
     const w=window.open("","_blank","width=450,height:700");
     if(!w)return;
-    w.document.write(`<html><head><title>Resumen del Día</title>
-    <style>body{font-family:sans-serif;padding:20px;max-width:400px;margin:0 auto}
-    h2{text-align:center;color:#1a3c5e}.divider{border-top:1px dashed #ccc;margin:12px 0}
-    .row{display:flex;justify-content:space-between;margin:5px 0;font-size:14px}
-    .big{font-size:20px;font-weight:800;color:#1a3c5e}
-    .depositar{background:#e8f5e9;border-radius:8px;padding:12px;text-align:center;margin:12px 0}
-    .emp{background:#f0f4f8;border-radius:8px;padding:10px;margin:6px 0}
-    </style></head><body>
-    <div style="text-align:center;font-size:32px">🫧</div>
-    <h2>Lava&Listo</h2>
-    <p style="text-align:center;color:#888">Resumen del día ${hoy}</p>
-    <div class="divider"></div>
-    <div class="row"><span>Total ventas</span><strong>$${totVentas.toFixed(2)}</strong></div>
-    <div class="row"><span>Total cobrado</span><strong style="color:#2e7d32">$${totCobrado.toFixed(2)}</strong></div>
-    <div class="row"><span>Pendiente por cobrar</span><span style="color:#e65100">$${totPendiente.toFixed(2)}</span></div>
-    <div class="divider"></div>
-    <div class="row"><span>💵 Efectivo</span><strong>$${totEfectivo.toFixed(2)}</strong></div>
-    <div class="row"><span>🏦 Pichincha</span><strong>$${totPichincha.toFixed(2)}</strong></div>
-    <div class="row"><span>🏦 JEP</span><strong>$${totJEP.toFixed(2)}</strong></div>
-    <div class="row"><span>💳 Tarjeta</span><strong>$${totTarjeta.toFixed(2)}</strong></div>
-    <div class="divider"></div>
-    <div class="depositar">
-      <p style="font-size:13px;color:#555">💰 VALOR A DEPOSITAR AL BANCO HOY</p>
-      <div class="big">$${aDepositar.toFixed(2)}</div>
-    </div>
-    <p style="text-align:center;font-size:10px;color:#aaa">Lava&Listo · ${new Date().toLocaleString("es-MX")}</p>
-    <script>window.print();window.close();<\/script>
-    </body></html>`);
+    const rhtml="<html><head><title>Resumen</title>"
+      +"<style>body{font-family:sans-serif;padding:20px;max-width:400px;margin:0 auto}h2{text-align:center;color:#1a3c5e}.divider{border-top:1px dashed #ccc;margin:12px 0}.row{display:flex;justify-content:space-between;margin:5px 0;font-size:14px}.big{font-size:20px;font-weight:800;color:#1a3c5e}.dep{background:#e8f5e9;border-radius:8px;padding:12px;text-align:center;margin:12px 0}</style></head><body>"
+      +"<div style='text-align:center;font-size:32px'>🫧</div><h2>Lava&amp;Listo</h2>"
+      +"<p style='text-align:center;color:#888'>Resumen del día "+hoy+"</p>"
+      +"<div class='divider'></div>"
+      +"<div class='row'><span>Total ventas</span><strong>$"+totVentas.toFixed(2)+"</strong></div>"
+      +"<div class='row'><span>Total cobrado</span><strong style='color:#2e7d32'>$"+totCobrado.toFixed(2)+"</strong></div>"
+      +"<div class='row'><span>Pendiente</span><span style='color:#e65100'>$"+totPendiente.toFixed(2)+"</span></div>"
+      +"<div class='divider'></div>"
+      +"<div class='row'><span>💵 Efectivo</span><strong>$"+totEfectivo.toFixed(2)+"</strong></div>"
+      +"<div class='row'><span>🏦 Pichincha</span><strong>$"+totPichincha.toFixed(2)+"</strong></div>"
+      +"<div class='row'><span>🏦 JEP</span><strong>$"+totJEP.toFixed(2)+"</strong></div>"
+      +"<div class='row'><span>💳 Tarjeta</span><strong>$"+totTarjeta.toFixed(2)+"</strong></div>"
+      +"<div class='divider'></div>"
+      +"<div class='dep'><p style='font-size:13px;color:#555'>💰 A DEPOSITAR HOY</p><div class='big'>$"+aDepositar.toFixed(2)+"</div></div>"
+      +"<p style='text-align:center;font-size:10px;color:#aaa'>Lava&amp;Listo · "+new Date().toLocaleString("es-MX")+"</p>"
+      +"<scr"+"ipt>window.print();window.close();</"+"script></body></html>";
+    w.document.write(rhtml);
     w.document.close();
   };
 
