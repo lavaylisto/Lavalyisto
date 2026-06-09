@@ -316,12 +316,11 @@ function OrdenCard({v,setVentas,addAbono,setTicket}){
   );
 }
 
-function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,cierreListo,onCierreListo}){
+function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,cierreListo,onCierreListo,salidasCaja,setSalidasCaja}){
   const hoy=fechaHoyLocal();
   const [tab,setTab]=useState("hoy");const [busq,setBusq]=useState("");
   const [fecha,setFecha]=useState(hoy);const [showNueva,setShowNueva]=useState(false);
-  const [showCaja,setShowCaja]=useState(false);const [ticket,setTicket]=useState(null);
-  const vFecha=ventas.filter(v=>fechaLocal(v.fecha)===fecha&&!v.anulada);
+  const [showCaja,setShowCaja]=useState(false);const [ticket,setTicket]=useState(null);const [showSalidaEmp,setShowSalidaEmp]=useState(false);  const vFecha=ventas.filter(v=>fechaLocal(v.fecha)===fecha&&!v.anulada);
   const vHoy=ventas.filter(v=>fechaLocal(v.fecha)===hoy&&!v.anulada);
   const porCob=ventas.filter(v=>!pagada(v)&&!v.anulada);
   const porEnt=ventas.filter(v=>pagada(v)&&!v.anulada&&(v.estado||"recibido")!=="entregado");
@@ -338,6 +337,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
           </div>
           <div style={{display:"flex",gap:8}}>
             <button onClick={()=>setShowCaja(true)} style={{background:"rgba(255,255,255,.2)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 12px",cursor:"pointer",fontWeight:600}}>💰 Caja</button>
+            <button onClick={()=>setShowSalidaEmp(true)} style={{background:"rgba(220,50,50,.35)",border:"none",borderRadius:8,color:"#ffcccc",fontSize:12,padding:"6px 12px",cursor:"pointer",fontWeight:600}}>💸 Salida</button>
             {cierreListo
               ?<button onClick={onLogout} style={{background:"rgba(255,255,255,.15)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 12px",cursor:"pointer"}}>Salir</button>
               :<button onClick={()=>alert("Debes hacer el cierre de caja antes de salir.")} style={{background:"rgba(255,80,80,.3)",border:"none",borderRadius:8,color:"#ffcccc",fontSize:12,padding:"6px 12px",cursor:"not-allowed"}}>🔒 Salir</button>
@@ -398,6 +398,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         </div>
       )}
       {ticket&&<TicketModal venta={ticket} empleadas={empleadas} onClose={()=>setTicket(null)}/>}
+      {showSalidaEmp&&<SalidaCaja sesion={sesion} salidasCaja={salidasCaja||[]} setSalidasCaja={setSalidasCaja} onClose={()=>setShowSalidaEmp(false)}/>}
     </div>
   );
 }
@@ -1065,6 +1066,66 @@ function GestionUsuarios(){
   </div>);
 }
 
+// ─── SALIDA DE CAJA ────────────────────────────────────────────────
+function SalidaCaja({sesion,salidasCaja,setSalidasCaja,onClose}){
+  const [monto,setMonto]=useState("");
+  const [motivo,setMotivo]=useState("");
+  const hoy=fechaHoyLocal();
+  const salidasHoy=(salidasCaja||[]).filter(s=>s.fecha===hoy);
+  const totHoy=salidasHoy.reduce((a,s)=>a+s.monto,0);
+
+  const registrar=()=>{
+    const m=parseFloat(monto);
+    if(!m||m<=0){alert("Ingresa un monto válido");return;}
+    if(!motivo.trim()){alert("Ingresa el motivo");return;}
+    const salida={
+      id:Date.now(),fecha:hoy,
+      hora:new Date().toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"}),
+      monto:m,motivo:motivo.trim(),
+      quien:sesion.nombre,quienId:sesion.id,
+    };
+    setSalidasCaja(prev=>[salida,...prev]);
+    setMonto("");setMotivo("");
+  };
+
+  const eliminar=id=>setSalidasCaja(prev=>prev.filter(s=>s.id!==id));
+
+  return(
+    <div style={S.ov}>
+      <div style={{...S.tbox,maxWidth:400}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e"}}>💸 Salida de Caja</div>
+          <button style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:"#888"}} onClick={onClose}>✕</button>
+        </div>
+        <div style={{background:"#ffebee",borderRadius:8,padding:"8px 12px",marginBottom:12,display:"flex",justifyContent:"space-between"}}>
+          <span style={{fontSize:13,color:"#c62828",fontWeight:600}}>Total salidas hoy</span>
+          <strong style={{color:"#c62828"}}>${totHoy.toFixed(2)}</strong>
+        </div>
+        <label style={S.lbl}>Monto de la salida *</label>
+        <input type="number" style={{...S.inp,marginBottom:10,fontSize:18,fontWeight:700}} placeholder="$0.00" value={monto} onChange={e=>setMonto(e.target.value)}/>
+        <label style={S.lbl}>Motivo *</label>
+        <input style={{...S.inp,marginBottom:14}} placeholder="Ej: Compra detergente, pago servicio..." value={motivo} onChange={e=>setMotivo(e.target.value)} onKeyDown={e=>e.key==="Enter"&&registrar()}/>
+        <button style={{...S.btnP,background:"linear-gradient(135deg,#c62828,#e53935)",marginBottom:14}} onClick={registrar}>💸 Registrar salida</button>
+        {salidasHoy.length>0&&(
+          <div>
+            <div style={{fontSize:12,color:"#888",fontWeight:700,marginBottom:6}}>SALIDAS DEL DÍA:</div>
+            {salidasHoy.map(s=>(
+              <div key={s.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #f0f4f8"}}>
+                <div>
+                  <div style={{fontSize:13,fontWeight:600,color:"#c62828"}}>-${s.monto.toFixed(2)} <span style={{color:"#555",fontWeight:400}}>{s.motivo}</span></div>
+                  <div style={{fontSize:11,color:"#888"}}>{s.hora} · {s.quien}</div>
+                </div>
+                <button style={S.btnR} onClick={()=>eliminar(s.id)}>✕</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
 function CierreCaja({ventas,empleadas,onLogout,onCierreListo,sesion}){
   const hoy=fechaHoyLocal();
   const AK="ll_apertura_"+hoy+"_"+(sesion?.id||"admin");
@@ -1270,6 +1331,8 @@ function AppContent({sesion,onLogout}){
   const [servicios,setServicios]=useState(()=>load(KEYS.servicios,SERVICIOS_DEFAULT));
   const [gastos,setGastos]=useState(()=>load("ll_gastos",[]));
   const [depositos,setDepositos]=useState(()=>load("ll_depositos",[]));
+  const [salidasCaja,setSalidasCaja]=useState(()=>load("ll_salidas_caja",[]));
+  const [showSalida,setShowSalida]=useState(false);
   const [ticketV,setTicketV]=useState(null);
   useEffect(()=>save(KEYS.ventas,ventas),[ventas]);
   useEffect(()=>save(KEYS.clientes,clientes),[clientes]);
@@ -1278,13 +1341,14 @@ function AppContent({sesion,onLogout}){
   useEffect(()=>save(KEYS.servicios,servicios),[servicios]);
   useEffect(()=>save("ll_gastos",gastos),[gastos]);
   useEffect(()=>save("ll_depositos",depositos),[depositos]);
+  useEffect(()=>save("ll_salidas_caja",salidasCaja),[salidasCaja]);
   const esAdmin=sesion.rol==="Administrador";
   const addAbono=(f,ab)=>setVentas(prev=>prev.map(v=>{if(v.folio!==f)return v;const abono={...ab,cobradoPorId:sesion.id,cobradoPorNombre:sesion.nombre};const abs=[...(v.abonos||[]),abono];return{...v,abonos:abs,pagada:saldo({...v,abonos:abs})<=0};}));
   const exportarDatos=()=>{const d={ventas,clientes,empleadas,inventario,servicios,gastos,depositos};const blob=new Blob([JSON.stringify(d,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="respaldo-"+hoy+".json";a.click();};
   const importarDatos=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>{try{const d=JSON.parse(ev.target.result);if(d.ventas)setVentas(d.ventas);if(d.clientes)setClientes(d.clientes);if(d.empleadas)setEmpleadas(d.empleadas);if(d.inventario)setInventario(d.inventario);if(d.servicios)setServicios(d.servicios);if(d.gastos)setGastos(d.gastos);if(d.depositos)setDepositos(d.depositos);alert("✅ Datos importados");}catch{alert("❌ Error al importar");}};r.readAsText(f);};
   const pCount=ventas.filter(v=>(!pagada(v)&&!v.anulada)||(pagada(v)&&!v.anulada&&(v.estado||"recibido")!=="entregado")).length;
   if(!cajaOk)return <AperturaObligatoria sesion={sesion} onLogout={onLogout} onAbierta={()=>{try{sessionStorage.setItem(SESSION_CAJA_KEY,"1");}catch{}setCajaOk(true);}} empleadas={empleadas}/>;
-  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={servicios} sesion={sesion} addAbono={addAbono} onLogout={onLogout} cierreListo={cierreOk} onCierreListo={()=>setCierreOk(true)}/>;
+  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={servicios} sesion={sesion} addAbono={addAbono} onLogout={onLogout} cierreListo={cierreOk} onCierreListo={()=>setCierreOk(true)} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja}/>;
   const tabs=[
     {id:"ventas",icon:"🧾",l:"Venta"},{id:"historial",icon:"📋",l:"Historial"},
     {id:"pendientes",icon:"⏳",l:"Pendientes",b:pCount},{id:"resumen",icon:"📈",l:"Resumen día"},
@@ -1299,6 +1363,7 @@ function AppContent({sesion,onLogout}){
       <span style={S.logo}>🫧 Lava<span style={{color:"#4db6e4"}}>&</span>Listo</span>
       <div style={{display:"flex",alignItems:"center",gap:10}}>
         <span style={{fontSize:12,color:"#a0c4da"}}>👑 {sesion.nombre}</span>
+        <button onClick={()=>setShowSalida(true)} style={{background:"rgba(220,50,50,.3)",border:"none",borderRadius:6,color:"#ffcccc",fontSize:11,padding:"4px 10px",cursor:"pointer",fontWeight:600}}>💸 Salida</button>
         {cierreOk?<button onClick={onLogout} style={{background:"rgba(255,255,255,.15)",border:"none",borderRadius:6,color:"#fff",fontSize:11,padding:"4px 10px",cursor:"pointer"}}>Salir</button>:<button onClick={()=>alert("Debes hacer el cierre de caja antes de salir.")} style={{background:"rgba(255,80,80,.3)",border:"none",borderRadius:6,color:"#ffcccc",fontSize:11,padding:"4px 10px",cursor:"not-allowed"}}>🔒 Salir</button>}
       </div>
     </div></div>
@@ -1312,7 +1377,7 @@ function AppContent({sesion,onLogout}){
       {tab==="ventas"&&<NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={setTicketV} servicios={servicios} sesion={sesion}/>}
       {tab==="historial"&&<Historial ventas={ventas} setVentas={setVentas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} esAdmin={esAdmin}/>}
       {tab==="pendientes"&&<Pendientes ventas={ventas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} setVentas={setVentas}/>}
-      {tab==="resumen"&&<ResumenDia ventas={ventas} empleadas={empleadas}/>}
+      {tab==="resumen"&&<ResumenDia ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja}/>}
       {tab==="reportes"&&<Reportes ventas={ventas} empleadas={empleadas}/>}
       {tab==="depositos"&&<Depositos depositos={depositos} setDepositos={setDepositos} ventas={ventas}/>}
       {tab==="gastos"&&<Gastos gastos={gastos} setGastos={setGastos} sesion={sesion}/>}
@@ -1323,164 +1388,232 @@ function AppContent({sesion,onLogout}){
       {tab==="usuarios"&&<GestionUsuarios/>}
     </div>
     {ticketV&&<TicketModal venta={ticketV} empleadas={empleadas} onClose={()=>setTicketV(null)}/>}
+    {showSalida&&<SalidaCaja sesion={sesion} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} onClose={()=>setShowSalida(false)}/>}
   </div>);
 }
 
 // ─── RESUMEN DEL DÍA (Admin) ───────────────────────────────────────
-function ResumenDia({ventas,empleadas}){
+// ─── RESUMEN DEL DÍA ──────────────────────────────────────────────
+function ResumenDia({ventas,empleadas,salidasCaja}){
   const hoy=fechaHoyLocal();
-  const [cierresAceptados,setCierresAceptados]=useState(()=>load("ll_cierres_aceptados_"+hoy,{}));
-  useEffect(()=>save("ll_cierres_aceptados_"+hoy,cierresAceptados),[cierresAceptados]);
+  const [fechaSel,setFechaSel]=useState(hoy);
+  const [cierresAceptados,setCierresAceptados]=useState(()=>load("ll_cierres_aceptados_"+fechaSel,{}));
+  useEffect(()=>{setCierresAceptados(load("ll_cierres_aceptados_"+fechaSel,{}));},[fechaSel]);
+  useEffect(()=>save("ll_cierres_aceptados_"+fechaSel,cierresAceptados),[cierresAceptados]);
 
-  const vHoy=ventas.filter(v=>fechaLocal(v.fecha)===hoy&&!v.anulada);
+  const vDia=ventas.filter(v=>fechaLocal(v.fecha)===fechaSel&&!v.anulada);
+  const salidasDia=(salidasCaja||[]).filter(s=>s.fecha===fechaSel);
 
   // Cierres del día por usuario
   const cierresHoy=[];
   for(let i=0;i<localStorage.length;i++){
     const k=localStorage.key(i);
-    if(k&&k.startsWith("ll_cierre_"+hoy+"_")){
+    if(k&&k.startsWith("ll_cierre_"+fechaSel+"_")){
       try{const c=JSON.parse(localStorage.getItem(k));if(c)cierresHoy.push({...c,key:k});}catch{}
     }
   }
 
-  const aceptarCierre=(key)=>{
-    setCierresAceptados(prev=>({...prev,[key]:true}));
-  };
-
+  const aceptarCierre=key=>setCierresAceptados(prev=>({...prev,[key]:true}));
   const todosAceptados=cierresHoy.length>0&&cierresHoy.every(c=>cierresAceptados[c.key]);
 
-  // Resumen global del día (solo de cierres aceptados)
-  const abHoy=ventas.filter(v=>!v.anulada).flatMap(v=>(v.abonos||[]).filter(ab=>fechaLocal(ab.fecha)===hoy));
-  const totEfectivo=abHoy.filter(a=>a.metodo==="Efectivo").reduce((a,ab)=>a+ab.monto,0);
-  const totPichincha=abHoy.filter(a=>a.metodo==="Transferencia Pichincha").reduce((a,ab)=>a+ab.monto,0);
-  const totJEP=abHoy.filter(a=>a.metodo==="Transferencia JEP").reduce((a,ab)=>a+ab.monto,0);
-  const totTarjeta=abHoy.filter(a=>a.metodo==="Tarjeta").reduce((a,ab)=>a+ab.monto,0);
-  const totCobrado=totEfectivo+totPichincha+totJEP+totTarjeta;
-  const totVentas=vHoy.reduce((a,v)=>a+v.total,0);
-  const totPendiente=vHoy.reduce((a,v)=>a+saldo(v),0);
-  const aDepositar=totEfectivo; // el efectivo es lo que se deposita al banco
+  // FACTURACIÓN: lo que el sistema registra como cobrado
+  const facturacionEmp=emp=>{
+    const abs=vDia.filter(v=>v.empleadaId===emp.id).flatMap(v=>v.abonos||[]).filter(ab=>fechaLocal(ab.fecha)===fechaSel);
+    return{
+      efe:abs.filter(a=>a.metodo==="Efectivo").reduce((a,b)=>a+b.monto,0),
+      transf:abs.filter(a=>esTr(a.metodo)).reduce((a,b)=>a+b.monto,0),
+      tarjeta:abs.filter(a=>a.metodo==="Tarjeta").reduce((a,b)=>a+b.monto,0),
+    };
+  };
+  const facturacionTotal={
+    efe:vDia.flatMap(v=>v.abonos||[]).filter(ab=>ab.metodo==="Efectivo"&&fechaLocal(ab.fecha)===fechaSel).reduce((a,b)=>a+b.monto,0),
+    transf:vDia.flatMap(v=>v.abonos||[]).filter(ab=>esTr(ab.metodo)&&fechaLocal(ab.fecha)===fechaSel).reduce((a,b)=>a+b.monto,0),
+    tarjeta:vDia.flatMap(v=>v.abonos||[]).filter(ab=>ab.metodo==="Tarjeta"&&fechaLocal(ab.fecha)===fechaSel).reduce((a,b)=>a+b.monto,0),
+  };
+
+  // AVANCES: lo que cada empleada entregó (cierre contado - fondo)
+  const avanceEmp=emp=>{
+    const c=cierresHoy.find(c=>String(c.key).endsWith("_"+emp.id));
+    if(!c)return{efe:0,transf:0,tarjeta:0};
+    return{efe:c.efN||0,transf:c.totTr||0,tarjeta:c.totTa||0};
+  };
+  const avanceTotal={
+    efe:cierresHoy.reduce((a,c)=>a+(c.efN||0),0),
+    transf:cierresHoy.reduce((a,c)=>a+(c.totTr||0),0),
+    tarjeta:cierresHoy.reduce((a,c)=>a+(c.totTa||0),0),
+  };
+
+  // DIFERENCIAS: avance - facturación
+  const difEmp=emp=>{
+    const f=facturacionEmp(emp);const av=avanceEmp(emp);
+    return{efe:parseFloat((av.efe-f.efe).toFixed(2)),transf:parseFloat((av.transf-f.transf).toFixed(2)),tarjeta:parseFloat((av.tarjeta-f.tarjeta).toFixed(2))};
+  };
+  const difTotal={
+    efe:parseFloat((avanceTotal.efe-facturacionTotal.efe).toFixed(2)),
+    transf:parseFloat((avanceTotal.transf-facturacionTotal.transf).toFixed(2)),
+    tarjeta:parseFloat((avanceTotal.tarjeta-facturacionTotal.tarjeta).toFixed(2)),
+  };
+
+  // Salidas de caja del día
+  const totSalidas=salidasDia.reduce((a,s)=>a+s.monto,0);
+
+  const empActivos=empleadas.filter(e=>e.activa);
+  const fmtNum=n=>n===0?"0.00":(n<0?"-$"+Math.abs(n).toFixed(2):"$"+n.toFixed(2));
+  const colorNum=n=>n===0?"#555":n>0?"#1565c0":"#c62828";
+
+  // Estilos tabla
+  const th={padding:"8px 10px",background:"#1a3c5e",color:"#fff",fontSize:12,fontWeight:700,textAlign:"center",whiteSpace:"nowrap"};
+  const td=(align="right")=>({padding:"7px 10px",fontSize:13,textAlign:align,borderBottom:"1px solid #e8f0f7",whiteSpace:"nowrap"});
+  const rowBg=(i)=>i%2===0?"#f8fbfd":"#fff";
+  const sectionHdr={padding:"7px 10px",fontSize:12,fontWeight:800,background:"#e8f5fd",color:"#1a3c5e",borderBottom:"1px solid #d0dce8"};
 
   const imprimirResumen=()=>{
-    const w=window.open("","_blank","width=450,height:700");
+    const rows=[
+      ["FACTURACIÓN","EFE",facturacionTotal.efe,...empActivos.map(e=>facturacionEmp(e).efe)],
+      ["FACTURACIÓN","TRANSF",facturacionTotal.transf,...empActivos.map(e=>facturacionEmp(e).transf)],
+      ["FACTURACIÓN","TARJETA",facturacionTotal.tarjeta,...empActivos.map(e=>facturacionEmp(e).tarjeta)],
+      ["AVANCES","EFE",avanceTotal.efe,...empActivos.map(e=>avanceEmp(e).efe)],
+      ["AVANCES","TRANSF",avanceTotal.transf,...empActivos.map(e=>avanceEmp(e).transf)],
+      ["DIFERENCIAS","EFE",difTotal.efe,...empActivos.map(e=>difEmp(e).efe)],
+      ["DIFERENCIAS","TRANSF",difTotal.transf,...empActivos.map(e=>difEmp(e).transf)],
+    ];
+    const hdrs=["MOVIMIENTOS","FORMA PAGO","TOTAL",...empActivos.map(e=>e.nombre.toUpperCase())];
+    const tableHtml="<table border='1' cellpadding='6' cellspacing='0' style='border-collapse:collapse;width:100%;font-size:12px'>"
+      +"<tr>"+hdrs.map(h=>"<th style='background:#1a3c5e;color:#fff;padding:6px'>"+h+"</th>").join("")+"</tr>"
+      +rows.map(r=>"<tr>"+r.map((c,i)=>"<td style='text-align:"+(i<2?"left":"right")+";color:"+(typeof c==="number"&&c<0?"#c62828":"inherit")+";padding:5px'>"+( typeof c==="number"?fmtNum(c):c)+"</td>").join("")+"</tr>").join("")
+      +"</table>";
+    const w=window.open("","_blank","width=700,height=500");
     if(!w)return;
-    const rhtml="<html><head><title>Resumen</title>"
-      +"<style>body{font-family:sans-serif;padding:20px;max-width:400px;margin:0 auto}h2{text-align:center;color:#1a3c5e}.divider{border-top:1px dashed #ccc;margin:12px 0}.row{display:flex;justify-content:space-between;margin:5px 0;font-size:14px}.big{font-size:20px;font-weight:800;color:#1a3c5e}.dep{background:#e8f5e9;border-radius:8px;padding:12px;text-align:center;margin:12px 0}</style></head><body>"
-      +"<div style='text-align:center;font-size:32px'>🫧</div><h2>Lava&amp;Listo</h2>"
-      +"<p style='text-align:center;color:#888'>Resumen del día "+hoy+"</p>"
-      +"<div class='divider'></div>"
-      +"<div class='row'><span>Total ventas</span><strong>$"+totVentas.toFixed(2)+"</strong></div>"
-      +"<div class='row'><span>Total cobrado</span><strong style='color:#2e7d32'>$"+totCobrado.toFixed(2)+"</strong></div>"
-      +"<div class='row'><span>Pendiente</span><span style='color:#e65100'>$"+totPendiente.toFixed(2)+"</span></div>"
-      +"<div class='divider'></div>"
-      +"<div class='row'><span>💵 Efectivo</span><strong>$"+totEfectivo.toFixed(2)+"</strong></div>"
-      +"<div class='row'><span>🏦 Pichincha</span><strong>$"+totPichincha.toFixed(2)+"</strong></div>"
-      +"<div class='row'><span>🏦 JEP</span><strong>$"+totJEP.toFixed(2)+"</strong></div>"
-      +"<div class='row'><span>💳 Tarjeta</span><strong>$"+totTarjeta.toFixed(2)+"</strong></div>"
-      +"<div class='divider'></div>"
-      +"<div class='dep'><p style='font-size:13px;color:#555'>💰 A DEPOSITAR HOY</p><div class='big'>$"+aDepositar.toFixed(2)+"</div></div>"
-      +"<p style='text-align:center;font-size:10px;color:#aaa'>Lava&amp;Listo · "+new Date().toLocaleString("es-MX")+"</p>"
+    const html="<html><head><title>Resumen del Día</title><style>body{font-family:sans-serif;padding:20px}h2{color:#1a3c5e;text-align:center}</style></head><body>"
+      +"<h2>🫧 Lava&Listo — Resumen del Día "+fechaSel+"</h2>"
+      +tableHtml
+      +(totSalidas>0?"<p style='margin-top:12px;color:#c62828'><strong>Salidas de caja: $"+totSalidas.toFixed(2)+"</strong></p>":"")
+      +"<p style='font-size:10px;color:#aaa;text-align:center'>Impreso: "+new Date().toLocaleString("es-MX")+"</p>"
       +"<scr"+"ipt>window.print();window.close();</"+"script></body></html>";
-    w.document.write(rhtml);
-    w.document.close();
+    w.document.write(html);w.document.close();
   };
 
   return(
     <div style={S.panel}>
       <h2 style={S.ptitle}>📈 Resumen del Día</h2>
-      <div style={{fontSize:13,color:"#888",marginBottom:14}}>📅 {new Date().toLocaleDateString("es-MX",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</div>
 
-      {/* CIERRES DE EMPLEADAS */}
-      <Card title="✅ Cierres de empleadas — debes aceptar cada uno">
-        {cierresHoy.length===0
-          ?<div style={S.empty}>No hay cierres registrados hoy todavía</div>
-          :cierresHoy.map(c=>{
-            const aceptado=!!cierresAceptados[c.key];
+      <div style={{marginBottom:14,display:"flex",gap:8,alignItems:"flex-end"}}>
+        <div style={{flex:1}}><label style={S.lbl}>Fecha</label><input type="date" style={S.inp} value={fechaSel} onChange={e=>setFechaSel(e.target.value)}/></div>
+        <button style={{...S.btnP,width:"auto",padding:"9px 16px",fontSize:13}} onClick={imprimirResumen}>🖨️ Imprimir</button>
+      </div>
+
+      {/* ACEPTAR CIERRES */}
+      {cierresHoy.length>0&&(
+        <Card title="✅ Aceptar cierres de empleadas">
+          {cierresHoy.map(c=>{
+            const ac=!!cierresAceptados[c.key];
             return(
-              <div key={c.key} style={{...S.vcard,borderLeft:`4px solid ${aceptado?"#4caf50":"#ff9800"}`}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-                  <div>
-                    <div style={{fontWeight:700,color:"#1a3c5e",fontSize:15}}>👩 {c.emp}</div>
-                    <div style={{fontSize:11,color:"#888"}}>{new Date(c.fecha).toLocaleString("es-MX")}</div>
-                    <div style={{fontSize:12,color:"#555",marginTop:4}}>
-                      💵 Efectivo neto: <strong>${(c.efN||0).toFixed(2)}</strong>
-                      {" · "} 🏦 Transfer: <strong>${(c.totTr||0).toFixed(2)}</strong>
-                      {" · "} 💳 Tarjeta: <strong>${(c.totTa||0).toFixed(2)}</strong>
-                    </div>
-                    <div style={{fontSize:13,marginTop:4,color:c.dTot===0?"#2e7d32":c.dTot>0?"#1565c0":"#c62828",fontWeight:700}}>
-                      {c.dTot===0?"✅ Cuadró perfectamente":c.dTot>0?`📈 Sobró $${c.dTot.toFixed(2)}`:`⚠️ Faltó $${Math.abs(c.dTot).toFixed(2)}`}
-                    </div>
-                  </div>
-                  <div>
-                    {aceptado
-                      ?<div style={{...S.badge,background:"#e8f5e9",color:"#2e7d32",fontWeight:700,padding:"6px 12px"}}>✅ Aceptado</div>
-                      :<button style={{...S.btnP,padding:"8px 16px",fontSize:13,background:"linear-gradient(135deg,#2e7d32,#388e3c)"}}
-                        onClick={()=>aceptarCierre(c.key)}>Aceptar cierre</button>
-                    }
-                  </div>
-                </div>
-              </div>
-            );
-          })
-        }
-      </Card>
-
-      {/* RESUMEN TOTAL — visible siempre pero destacado cuando todo aceptado */}
-      <div style={{opacity:todosAceptados?1:0.6}}>
-        {!todosAceptados&&cierresHoy.length>0&&<div style={{background:"#fff3e0",borderRadius:8,padding:"10px 14px",marginBottom:10,fontSize:13,color:"#e65100",fontWeight:600}}>⚠️ Acepta todos los cierres para confirmar el resumen total</div>}
-
-        <div style={S.kgrid}>
-          <div style={{...S.kpi,borderLeft:"4px solid #1a3c5e"}}><div style={{fontSize:22}}>🧾</div><div><div style={{fontWeight:800,fontSize:18,color:"#1a3c5e"}}>{vHoy.length}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Ventas hoy</div></div></div>
-          <div style={{...S.kpi,borderLeft:"4px solid #4caf50"}}><div style={{fontSize:22}}>💰</div><div><div style={{fontWeight:800,fontSize:18,color:"#4caf50"}}>${totCobrado.toFixed(2)}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Total cobrado</div></div></div>
-          <div style={{...S.kpi,borderLeft:"4px solid #e65100"}}><div style={{fontSize:22}}>⏳</div><div><div style={{fontWeight:800,fontSize:18,color:"#e65100"}}>${totPendiente.toFixed(2)}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Por cobrar</div></div></div>
-          <div style={{...S.kpi,borderLeft:"4px solid #1a3c5e",background:"#1a3c5e"}}><div style={{fontSize:22}}>🏦</div><div><div style={{fontWeight:800,fontSize:20,color:"#fff"}}>${aDepositar.toFixed(2)}</div><div style={{fontSize:12,fontWeight:700,color:"#a0c4da"}}>A depositar hoy</div></div></div>
-        </div>
-
-        <Card title="💳 Desglose por método">
-          {[{icon:"💵",label:"Efectivo (a depositar)",val:totEfectivo,color:"#2e7d32",bg:"#e8f5e9"},
-            {icon:"🏦",label:"Transferencia Pichincha",val:totPichincha,color:"#1565c0",bg:"#e3f2fd"},
-            {icon:"🏦",label:"Transferencia JEP",val:totJEP,color:"#1565c0",bg:"#e3f2fd"},
-            {icon:"💳",label:"Tarjeta",val:totTarjeta,color:"#7c3aed",bg:"#f3e8fd"},
-          ].map(m=>(
-            <div key={m.label} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:"1px solid #f0f4f8"}}>
-              <span style={{fontSize:14}}>{m.icon} {m.label}</span>
-              <div style={{background:m.bg,color:m.color,padding:"4px 14px",borderRadius:8,fontWeight:800,fontSize:16}}>${m.val.toFixed(2)}</div>
-            </div>
-          ))}
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 0",borderTop:"2px solid #1a3c5e",marginTop:4}}>
-            <span style={{fontWeight:700,fontSize:15}}>TOTAL COBRADO</span>
-            <div style={{background:"#1a3c5e",color:"#fff",padding:"6px 18px",borderRadius:8,fontWeight:800,fontSize:18}}>${totCobrado.toFixed(2)}</div>
-          </div>
-        </Card>
-
-        <Card title="👩 Por empleada">
-          {empleadas.map(emp=>{
-            const vEmp=vHoy.filter(v=>v.empleadaId===emp.id);
-            const cobEmp=vEmp.flatMap(v=>v.abonos||[]).reduce((a,ab)=>a+ab.monto,0);
-            const efEmp=vEmp.flatMap(v=>(v.abonos||[]).filter(a=>a.metodo==="Efectivo")).reduce((a,ab)=>a+ab.monto,0);
-            const trEmp=vEmp.flatMap(v=>(v.abonos||[]).filter(a=>esTr(a.metodo))).reduce((a,ab)=>a+ab.monto,0);
-            if(vEmp.length===0)return null;
-            return(
-              <div key={emp.id} style={{...S.vcard,borderLeft:"4px solid #4db6e4"}}>
+              <div key={c.key} style={{...S.vcard,borderLeft:"4px solid "+(ac?"#4caf50":"#ff9800"),padding:"10px 14px"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <div><div style={{fontWeight:700,fontSize:15}}>{emp.nombre}</div><div style={{fontSize:12,color:"#888"}}>{vEmp.length} ventas</div></div>
-                  <div style={{fontWeight:800,fontSize:18,color:"#1a3c5e"}}>${cobEmp.toFixed(2)}</div>
-                </div>
-                <div style={{display:"flex",gap:8,marginTop:6,flexWrap:"wrap"}}>
-                  {efEmp>0&&<div style={{background:"#e8f5e9",color:"#2e7d32",padding:"3px 10px",borderRadius:6,fontSize:12,fontWeight:600}}>💵 ${efEmp.toFixed(2)}</div>}
-                  {trEmp>0&&<div style={{background:"#e3f2fd",color:"#1565c0",padding:"3px 10px",borderRadius:6,fontSize:12,fontWeight:600}}>🏦 ${trEmp.toFixed(2)}</div>}
+                  <div>
+                    <div style={{fontWeight:700}}>👩 {c.emp}</div>
+                    <div style={{fontSize:12,color:"#555"}}>💵 Ef: ${(c.efN||0).toFixed(2)} · 🏦 Tr: ${(c.totTr||0).toFixed(2)} · 💳 Ta: ${(c.totTa||0).toFixed(2)}</div>
+                    <div style={{fontSize:12,fontWeight:700,color:c.dTot===0?"#2e7d32":c.dTot>0?"#1565c0":"#c62828",marginTop:2}}>
+                      {c.dTot===0?"✅ Cuadró":"⚠️ Diferencia: $"+(c.dTot||0).toFixed(2)}
+                    </div>
+                  </div>
+                  {ac?<div style={{...S.badge,background:"#e8f5e9",color:"#2e7d32",fontWeight:700,padding:"6px 12px"}}>✅ Aceptado</div>
+                    :<button style={{...S.btnP,width:"auto",padding:"8px 14px",fontSize:12,background:"linear-gradient(135deg,#2e7d32,#388e3c)"}} onClick={()=>aceptarCierre(c.key)}>Aceptar</button>}
                 </div>
               </div>
             );
           })}
+          {!todosAceptados&&<div style={{...S.alrt,marginTop:8}}>⚠️ Acepta todos los cierres para confirmar el resumen</div>}
+          {todosAceptados&&<div style={{background:"#e8f5e9",color:"#2e7d32",padding:"10px 14px",borderRadius:8,marginTop:8,fontWeight:700}}>✅ Todos los cierres aceptados</div>}
         </Card>
+      )}
 
-        <button style={{...S.btnP,background:"linear-gradient(135deg,#2e7d32,#388e3c)"}} onClick={imprimirResumen}>
-          🖨️ Imprimir resumen del día
-        </button>
+      {/* TABLA RESUMEN */}
+      <div style={{overflowX:"auto",marginBottom:14}}>
+        <table style={{width:"100%",borderCollapse:"collapse",minWidth:400}}>
+          <thead>
+            <tr>
+              <th style={{...th,textAlign:"left"}}>MOVIMIENTOS</th>
+              <th style={th}>FORMA</th>
+              <th style={{...th,background:"#2563a8"}}>TOTAL</th>
+              {empActivos.map(e=><th key={e.id} style={{...th,background:"#1a5276"}}>{e.nombre.split(" ")[0].toUpperCase()}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {/* FACTURACIÓN */}
+            {[
+              {label:"FACTURACIÓN",forma:"EFE",tot:facturacionTotal.efe,vals:empActivos.map(e=>facturacionEmp(e).efe),bg:"#e8f5fd"},
+              {label:"FACTURACIÓN",forma:"TRANSF",tot:facturacionTotal.transf,vals:empActivos.map(e=>facturacionEmp(e).transf),bg:"#e8f5fd"},
+              {label:"FACTURACIÓN",forma:"TARJETA",tot:facturacionTotal.tarjeta,vals:empActivos.map(e=>facturacionEmp(e).tarjeta),bg:"#e8f5fd"},
+            ].map((r,i)=>(
+              <tr key={"f"+i} style={{background:rowBg(i)}}>
+                <td style={{...td("left"),fontWeight:700,color:"#1a3c5e",background:"#e8f5fd"}}>{r.label}</td>
+                <td style={{...td("center"),background:"#e8f5fd"}}><span style={{background:"#1a3c5e",color:"#fff",borderRadius:4,padding:"2px 6px",fontSize:11,fontWeight:700}}>{r.forma}</span></td>
+                <td style={{...td(),fontWeight:800,color:"#1a3c5e"}}>{fmtNum(r.tot)}</td>
+                {r.vals.map((v,j)=><td key={j} style={td()}>{fmtNum(v)}</td>)}
+              </tr>
+            ))}
+            {/* SALDO SISTEMA = FACTURACIÓN (mismos valores) */}
+            {[
+              {label:"SALDO SISTEMA",forma:"EFE",tot:facturacionTotal.efe,vals:empActivos.map(e=>facturacionEmp(e).efe)},
+              {label:"SALDO SISTEMA",forma:"TRANSF",tot:facturacionTotal.transf,vals:empActivos.map(e=>facturacionEmp(e).transf)},
+            ].map((r,i)=>(
+              <tr key={"s"+i} style={{background:"#f0f4f8"}}>
+                <td style={{...td("left"),fontWeight:700,color:"#555"}}>{r.label}</td>
+                <td style={{...td("center")}}><span style={{background:"#555",color:"#fff",borderRadius:4,padding:"2px 6px",fontSize:11,fontWeight:700}}>{r.forma}</span></td>
+                <td style={{...td(),fontWeight:800,color:"#555"}}>{fmtNum(r.tot)}</td>
+                {r.vals.map((v,j)=><td key={j} style={{...td(),color:"#555"}}>{fmtNum(v)}</td>)}
+              </tr>
+            ))}
+            {/* AVANCES */}
+            {[
+              {label:"AVANCES",forma:"EFE",tot:avanceTotal.efe,vals:empActivos.map(e=>avanceEmp(e).efe)},
+              {label:"AVANCES",forma:"TRANSF",tot:avanceTotal.transf,vals:empActivos.map(e=>avanceEmp(e).transf)},
+            ].map((r,i)=>(
+              <tr key={"a"+i} style={{background:i%2===0?"#fff8e1":"#fffde7"}}>
+                <td style={{...td("left"),fontWeight:700,color:"#e65100",background:i%2===0?"#fff8e1":"#fffde7"}}>{r.label}</td>
+                <td style={{...td("center"),background:i%2===0?"#fff8e1":"#fffde7"}}><span style={{background:"#e65100",color:"#fff",borderRadius:4,padding:"2px 6px",fontSize:11,fontWeight:700}}>{r.forma}</span></td>
+                <td style={{...td(),fontWeight:800,color:"#e65100"}}>{fmtNum(r.tot)}</td>
+                {r.vals.map((v,j)=><td key={j} style={{...td(),color:"#e65100"}}>{fmtNum(v)}</td>)}
+              </tr>
+            ))}
+            {/* DIFERENCIAS */}
+            {[
+              {label:"DIFERENCIAS",forma:"EFE",tot:difTotal.efe,vals:empActivos.map(e=>difEmp(e).efe)},
+              {label:"DIFERENCIAS",forma:"TRANSF",tot:difTotal.transf,vals:empActivos.map(e=>difEmp(e).transf)},
+            ].map((r,i)=>(
+              <tr key={"d"+i} style={{background:i%2===0?"#ffebee":"#fce4ec"}}>
+                <td style={{...td("left"),fontWeight:700,color:"#c62828",background:i%2===0?"#ffebee":"#fce4ec"}}>{r.label}</td>
+                <td style={{...td("center"),background:i%2===0?"#ffebee":"#fce4ec"}}><span style={{background:"#c62828",color:"#fff",borderRadius:4,padding:"2px 6px",fontSize:11,fontWeight:700}}>{r.forma}</span></td>
+                <td style={{...td(),fontWeight:800,color:colorNum(r.tot)}}>{fmtNum(r.tot)}</td>
+                {r.vals.map((v,j)=><td key={j} style={{...td(),color:colorNum(v),fontWeight:700}}>{fmtNum(v)}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* SALIDAS DE CAJA DEL DÍA */}
+      {salidasDia.length>0&&(
+        <Card title={"💸 Salidas de caja — Total: $"+totSalidas.toFixed(2)}>
+          {salidasDia.map(s=>(
+            <div key={s.id} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f0f4f8",fontSize:13}}>
+              <div><span style={{color:"#c62828",fontWeight:700}}>-${s.monto.toFixed(2)}</span> {s.motivo} <span style={{color:"#888",fontSize:11}}>({s.quien})</span></div>
+              <span style={{color:"#888",fontSize:11}}>{s.hora}</span>
+            </div>
+          ))}
+        </Card>
+      )}
+
+      {/* KPIs TOTALES */}
+      <div style={S.kgrid}>
+        <div style={{...S.kpi,borderLeft:"4px solid #4caf50"}}><div style={{fontSize:22}}>💵</div><div><div style={{fontWeight:800,fontSize:18,color:"#4caf50"}}>${facturacionTotal.efe.toFixed(2)}</div><div style={{fontSize:12,color:"#888"}}>Efectivo facturado</div></div></div>
+        <div style={{...S.kpi,borderLeft:"4px solid #1a3c5e"}}><div style={{fontSize:22}}>🏦</div><div><div style={{fontWeight:800,fontSize:18,color:"#1a3c5e"}}>${(facturacionTotal.efe-totSalidas).toFixed(2)}</div><div style={{fontSize:12,color:"#888"}}>A depositar (neto)</div></div></div>
       </div>
     </div>
   );
 }
+
 
 // ─── DEPÓSITOS ─────────────────────────────────────────────────────
 function Depositos({depositos,setDepositos,ventas}){
