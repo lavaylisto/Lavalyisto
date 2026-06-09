@@ -393,7 +393,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
               <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e"}}>💰 Caja</div>
               <button style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:"#888"}} onClick={()=>setShowCaja(false)}>✕</button>
             </div>
-            <CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={onCierreListo} sesion={sesion}/>
+            <CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={onCierreListo} sesion={sesion} salidasCaja={salidasCaja}/>
           </div>
         </div>
       )}
@@ -1126,7 +1126,7 @@ function SalidaCaja({sesion,salidasCaja,setSalidasCaja,onClose}){
 }
 
 
-function CierreCaja({ventas,empleadas,onLogout,onCierreListo,sesion}){
+function CierreCaja({ventas,empleadas,onLogout,onCierreListo,sesion,salidasCaja}){
   const hoy=fechaHoyLocal();
   const AK="ll_apertura_"+hoy+"_"+(sesion?.id||"admin");
   const CK="ll_cierre_"+hoy+"_"+(sesion?.id||"admin");
@@ -1151,10 +1151,15 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,sesion}){
     const esHoy=fechaLocalAbono===hoy;
     return mismoUsuario&&esHoy;
   }));
-  const espEf=todosAbonos.filter(a=>a.metodo==="Efectivo").reduce((a,ab)=>a+ab.monto,0);
+  // Cobros del usuario
+  const espEfBruto=todosAbonos.filter(a=>a.metodo==="Efectivo").reduce((a,ab)=>a+ab.monto,0);
   const espTr=todosAbonos.filter(a=>esTr(a.metodo)).reduce((a,ab)=>a+ab.monto,0);
   const espTa=todosAbonos.filter(a=>a.metodo==="Tarjeta").reduce((a,ab)=>a+ab.monto,0);
-  const espTot=espEf+espTr+espTa;
+  // Salidas de caja de este usuario hoy — se descuentan del efectivo esperado
+  const misSalidas=(salidasCaja||[]).filter(s=>String(s.quienId)===String(uid)&&s.fecha===hoy);
+  const totMisSalidas=parseFloat(misSalidas.reduce((a,s)=>a+s.monto,0).toFixed(2));
+  const espEf=parseFloat((espEfBruto-totMisSalidas).toFixed(2)); // efectivo esperado neto
+  const espTot=parseFloat((espEf+espTr+espTa).toFixed(2));
   // Para el resumen de ventas del dia (todas las ventas, no solo cobros)
   const vHoy=ventas.filter(v=>fechaLocal(v.fecha)===hoy&&!v.anulada);
   const vEmp=vHoy; // se mantiene para el conteo de ventas en ticket
@@ -1198,6 +1203,7 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,sesion}){
       +"<div class='row'><strong>Total efectivo</strong><strong>$"+d.totEf.toFixed(2)+"</strong></div>"
       +"<div class='row' style='color:#e65100'><span>— Fondo caja</span><span>-$"+d.fd.toFixed(2)+"</span></div>"
       +"<div class='row'><strong>Efectivo neto</strong><strong>$"+d.efN.toFixed(2)+"</strong></div>"
+      +(d.totMisSalidas>0?"<div class='row' style='color:#c62828'><span>💸 Salidas de caja</span><span>-$"+d.totMisSalidas.toFixed(2)+"</span></div><div class='row' style='color:#c62828'><strong>Efectivo esperado (neto)</strong><strong>$"+d.espEf.toFixed(2)+"</strong></div>":"")
       +"<div class='div'></div>"
       +"<div class='row'><span>Pichincha</span><span>$"+d.tPic.toFixed(2)+"</span></div>"
       +"<div class='row'><span>JEP</span><span>$"+d.tJep.toFixed(2)+"</span></div>"
@@ -1210,7 +1216,7 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,sesion}){
     w.document.close();
   };
   const confirmar=()=>{
-    const d={fecha:new Date().toISOString(),emp:sesion?.nombre||"",bills,coins,totEf,fd,efN,tPic:parseFloat(tPic)||0,tJep:parseFloat(tJep)||0,totTr,totTa,dEf,dTr,dTa,dTot,espEf,espTr,espTa,espTot,nv:todosAbonos.length,tv:todosAbonos.reduce((a,ab)=>a+ab.monto,0)};
+    const d={fecha:new Date().toISOString(),emp:sesion?.nombre||"",bills,coins,totEf,fd,efN,tPic:parseFloat(tPic)||0,tJep:parseFloat(tJep)||0,totTr,totTa,dEf,dTr,dTa,dTot,espEf,espEfBruto,espTr,espTa,espTot,totMisSalidas,misSalidas,nv:todosAbonos.length,tv:todosAbonos.reduce((a,ab)=>a+ab.monto,0)};
     try{localStorage.setItem(CK,JSON.stringify(d));}catch{}
     setCg(d);if(onCierreListo)onCierreListo();imprimir(d);setTimeout(()=>{if(onLogout)onLogout();},3000);
   };
@@ -1244,11 +1250,16 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,sesion}){
     </Card>)}
     {modo==="cierre"&&(<div>
       {ap&&<div style={{background:"#e8f5fd",borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:13}}>
-        🔓 Apertura: <strong>{ap.empleadaNombre}</strong> · Fondo: <strong>${ap.fondo.toFixed(2)}</strong>
+        🔓 <strong>{ap.empleadaNombre}</strong> · Fondo: <strong>${ap.fondo.toFixed(2)}</strong>
         <div style={{fontSize:11,color:"#1565c0",marginTop:4}}>
-          💡 Solo tus cobros de hoy: <strong>Efectivo ${espEf.toFixed(2)} · Transferencias ${espTr.toFixed(2)} · Tarjeta ${espTa.toFixed(2)}</strong>
-          {espTot===0&&<span style={{color:"#2e7d32",fontWeight:700}}> — Sin cobros: si solo tienes el fondo, cuadrará en ✅</span>}
+          💡 Cobros de hoy: 💵 ${espEfBruto.toFixed(2)} · 🏦 ${espTr.toFixed(2)} · 💳 ${espTa.toFixed(2)}
         </div>
+        {totMisSalidas>0&&<div style={{fontSize:12,color:"#c62828",fontWeight:700,marginTop:4,background:"#ffebee",borderRadius:6,padding:"4px 8px"}}>
+          💸 Salidas de caja: -${totMisSalidas.toFixed(2)}
+          {misSalidas.map(s=><span key={s.id} style={{display:"block",fontWeight:400,fontSize:11}}>• {s.motivo}: ${s.monto.toFixed(2)}</span>)}
+          → Efectivo neto esperado: <strong>${espEf.toFixed(2)}</strong>
+        </div>}
+        {espTot===0&&totMisSalidas===0&&<div style={{fontSize:11,color:"#2e7d32",fontWeight:700,marginTop:4}}>Sin cobros — si solo tienes el fondo cuadrará en ✅</div>}
       </div>}
       <div style={{display:"flex",gap:6,marginBottom:14,overflowX:"auto"}}>
         {[{n:1,l:"💵 Billetes"},{n:2,l:"🪙 Monedas"},{n:3,l:"🏦 Digital"},{n:4,l:"✅ Confirmar"}].map(p=>(
@@ -1383,7 +1394,7 @@ function AppContent({sesion,onLogout}){
       {tab==="gastos"&&<Gastos gastos={gastos} setGastos={setGastos} sesion={sesion}/>}
       {tab==="inventario"&&<Inventario inventario={inventario} setInventario={setInventario}/>}
       {tab==="equipo"&&<Equipo empleadas={empleadas} setEmpleadas={setEmpleadas} ventas={ventas} esAdmin={esAdmin}/>}
-      {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={()=>setCierreOk(true)} sesion={sesion}/>}
+      {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={()=>setCierreOk(true)} sesion={sesion} salidasCaja={salidasCaja}/>}
       {tab==="config"&&<Configuracion servicios={servicios} setServicios={setServicios} exportarDatos={exportarDatos} importarDatos={importarDatos}/>}
       {tab==="usuarios"&&<GestionUsuarios/>}
     </div>
