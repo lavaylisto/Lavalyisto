@@ -1128,10 +1128,27 @@ function SalidaCaja({sesion,salidasCaja,setSalidasCaja,onClose}){
 
 function CierreCaja({ventas,empleadas,onLogout,onCierreListo,sesion,salidasCaja}){
   const hoy=fechaHoyLocal();
-  const AK="ll_apertura_"+hoy+"_"+(sesion?.id||"admin");
-  const CK="ll_cierre_"+hoy+"_"+(sesion?.id||"admin");
+  const uid=sesion?.id||"admin";
+  // AK: apertura de esta sesion especifica (sessionStorage = se borra al cerrar sesion)
+  const AK="ll_apertura_"+hoy+"_"+uid;
+  // CK de sesion: clave unica por sesion (incluye timestamp de login)
+  // Timestamp de sesion - unico por cada login
+  const sesionTs=(()=>{try{return sessionStorage.getItem("ll_ses_ts")||"0";}catch{return"0";}})();
+  const CK="ll_cierre_"+hoy+"_"+uid+"_"+sesionTs;
+  // Lista de todos los cierres del dia para este usuario
+  const getAllCierres=()=>{
+    const list=[];
+    try{for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i);
+      if(k&&k.startsWith("ll_cierre_"+hoy+"_"+uid)){
+        try{const c=JSON.parse(localStorage.getItem(k));if(c)list.push(c);}catch{}
+      }
+    }}catch{}
+    return list;
+  };
   const [modo,setModo]=useState(()=>{try{return localStorage.getItem(AK)?"cierre":"apertura";}catch{return"apertura";}});
   const [ap,setAp]=useState(()=>{try{const a=localStorage.getItem(AK);return a?JSON.parse(a):null;}catch{return null;}});
+  // cg: cierre de ESTA sesion (no del dia completo)
   const [cg,setCg]=useState(()=>{try{const c=localStorage.getItem(CK);return c?JSON.parse(c):null;}catch{return null;}});
   const [aEmp,setAEmp]=useState(empleadas[0]?.id||null);const [fondo,setFondo]=useState("15.00");
   // empId ya no se usa — el cierre filtra por sesion.id automaticamente
@@ -1320,6 +1337,8 @@ export default function LavaListo(){
   const login=u=>{
     try{sessionStorage.setItem("ll_ses",JSON.stringify(u));}catch{}
     try{sessionStorage.removeItem("ll_caja_abierta_"+u.id);}catch{}
+    // Timestamp unico de esta sesion para clave de cierre
+    try{sessionStorage.setItem("ll_ses_ts",Date.now().toString());}catch{}
     setSes(u);
   };
   const logout=()=>{try{sessionStorage.removeItem("ll_ses");}catch{}setSes(null);};
@@ -1330,10 +1349,13 @@ export default function LavaListo(){
 function AppContent({sesion,onLogout}){
   const hoy=fechaHoyLocal();
   const AK="ll_apertura_"+hoy+"_"+sesion.id;
-  const CK="ll_cierre_"+hoy+"_"+sesion.id;
+  // CK por sesion — cada vez que entra y cierra es un cierre independiente
+  const sesTs=(()=>{try{return sessionStorage.getItem("ll_ses_ts")||"0";}catch{return"0";}})();
+  const CK="ll_cierre_"+hoy+"_"+sesion.id+"_"+sesTs;
   const SESSION_CAJA_KEY="ll_caja_abierta_"+sesion.id;
   const [cajaOk,setCajaOk]=useState(()=>{try{return !!sessionStorage.getItem(SESSION_CAJA_KEY);}catch{return false;}});
-  const [cierreOk,setCierreOk]=useState(!!load(CK,null));
+  // cierreOk: por sesion (se resetea al volver a entrar)
+  const [cierreOk,setCierreOk]=useState(()=>{try{return !!sessionStorage.getItem("ll_cierre_ok_"+sesion.id);}catch{return false;}});
   const [tab,setTab]=useState("ventas");
   const [ventas,setVentas]=useState(()=>load(KEYS.ventas,[]));
   const [clientes,setClientes]=useState(()=>load(KEYS.clientes,[]));
@@ -1355,11 +1377,15 @@ function AppContent({sesion,onLogout}){
   useEffect(()=>save("ll_salidas_caja",salidasCaja),[salidasCaja]);
   const esAdmin=sesion.rol==="Administrador";
   const addAbono=(f,ab)=>setVentas(prev=>prev.map(v=>{if(v.folio!==f)return v;const abono={...ab,cobradoPorId:sesion.id,cobradoPorNombre:sesion.nombre};const abs=[...(v.abonos||[]),abono];return{...v,abonos:abs,pagada:saldo({...v,abonos:abs})<=0};}));
+  const handleCierreListo=()=>{
+    try{sessionStorage.setItem("ll_cierre_ok_"+sesion.id,"1");}catch{}
+    setCierreOk(true);
+  };
   const exportarDatos=()=>{const d={ventas,clientes,empleadas,inventario,servicios,gastos,depositos};const blob=new Blob([JSON.stringify(d,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="respaldo-"+hoy+".json";a.click();};
   const importarDatos=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>{try{const d=JSON.parse(ev.target.result);if(d.ventas)setVentas(d.ventas);if(d.clientes)setClientes(d.clientes);if(d.empleadas)setEmpleadas(d.empleadas);if(d.inventario)setInventario(d.inventario);if(d.servicios)setServicios(d.servicios);if(d.gastos)setGastos(d.gastos);if(d.depositos)setDepositos(d.depositos);alert("✅ Datos importados");}catch{alert("❌ Error al importar");}};r.readAsText(f);};
   const pCount=ventas.filter(v=>(!pagada(v)&&!v.anulada)||(pagada(v)&&!v.anulada&&(v.estado||"recibido")!=="entregado")).length;
   if(!cajaOk)return <AperturaObligatoria sesion={sesion} onLogout={onLogout} onAbierta={()=>{try{sessionStorage.setItem(SESSION_CAJA_KEY,"1");}catch{}setCajaOk(true);}} empleadas={empleadas}/>;
-  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={servicios} sesion={sesion} addAbono={addAbono} onLogout={onLogout} cierreListo={cierreOk} onCierreListo={()=>setCierreOk(true)} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja}/>;
+  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={servicios} sesion={sesion} addAbono={addAbono} onLogout={onLogout} cierreListo={cierreOk} onCierreListo={handleCierreListo} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja}/>;
   const tabs=[
     {id:"ventas",icon:"🧾",l:"Venta"},{id:"historial",icon:"📋",l:"Historial"},
     {id:"pendientes",icon:"⏳",l:"Pendientes",b:pCount},{id:"resumen",icon:"📈",l:"Resumen día"},
@@ -1394,7 +1420,7 @@ function AppContent({sesion,onLogout}){
       {tab==="gastos"&&<Gastos gastos={gastos} setGastos={setGastos} sesion={sesion}/>}
       {tab==="inventario"&&<Inventario inventario={inventario} setInventario={setInventario}/>}
       {tab==="equipo"&&<Equipo empleadas={empleadas} setEmpleadas={setEmpleadas} ventas={ventas} esAdmin={esAdmin}/>}
-      {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={()=>setCierreOk(true)} sesion={sesion} salidasCaja={salidasCaja}/>}
+      {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={handleCierreListo} sesion={sesion} salidasCaja={salidasCaja}/>}
       {tab==="config"&&<Configuracion servicios={servicios} setServicios={setServicios} exportarDatos={exportarDatos} importarDatos={importarDatos}/>}
       {tab==="usuarios"&&<GestionUsuarios/>}
     </div>
@@ -1442,16 +1468,21 @@ function ResumenDia({ventas,empleadas,salidasCaja}){
     tarjeta:vDia.flatMap(v=>v.abonos||[]).filter(ab=>ab.metodo==="Tarjeta"&&fechaLocal(ab.fecha)===fechaSel).reduce((a,b)=>a+b.monto,0),
   };
 
-  // AVANCES: lo que cada empleada entregó (cierre contado - fondo)
+  // AVANCES: suma TODOS los cierres del dia para cada empleada (puede haber varios por sesion)
   const avanceEmp=emp=>{
-    const c=cierresHoy.find(c=>String(c.key).endsWith("_"+emp.id));
-    if(!c)return{efe:0,transf:0,tarjeta:0};
-    return{efe:c.efN||0,transf:c.totTr||0,tarjeta:c.totTa||0};
+    // Cierres de esta empleada = claves que contienen _EMPID_
+    const misCierres=cierresHoy.filter(c=>c.key.includes("_"+fechaSel+"_"+emp.id+"_"));
+    if(misCierres.length===0)return{efe:0,transf:0,tarjeta:0};
+    return{
+      efe:parseFloat(misCierres.reduce((a,c)=>a+(c.efN||0),0).toFixed(2)),
+      transf:parseFloat(misCierres.reduce((a,c)=>a+(c.totTr||0),0).toFixed(2)),
+      tarjeta:parseFloat(misCierres.reduce((a,c)=>a+(c.totTa||0),0).toFixed(2)),
+    };
   };
   const avanceTotal={
-    efe:cierresHoy.reduce((a,c)=>a+(c.efN||0),0),
-    transf:cierresHoy.reduce((a,c)=>a+(c.totTr||0),0),
-    tarjeta:cierresHoy.reduce((a,c)=>a+(c.totTa||0),0),
+    efe:parseFloat(cierresHoy.reduce((a,c)=>a+(c.efN||0),0).toFixed(2)),
+    transf:parseFloat(cierresHoy.reduce((a,c)=>a+(c.totTr||0),0).toFixed(2)),
+    tarjeta:parseFloat(cierresHoy.reduce((a,c)=>a+(c.totTa||0),0).toFixed(2)),
   };
 
   // DIFERENCIAS: avance - facturación
@@ -1515,25 +1546,38 @@ function ResumenDia({ventas,empleadas,salidasCaja}){
 
       {/* ACEPTAR CIERRES */}
       {cierresHoy.length>0&&(
-        <Card title="✅ Aceptar cierres de empleadas">
-          {cierresHoy.map(c=>{
+        <Card title={"✅ Cierres del día ("+cierresHoy.length+" cierre"+(cierresHoy.length!==1?"s":"")+")"}>
+          {cierresHoy.map((c,i)=>{
             const ac=!!cierresAceptados[c.key];
+            const hora=c.fecha?new Date(c.fecha).toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"}):"";
             return(
               <div key={c.key} style={{...S.vcard,borderLeft:"4px solid "+(ac?"#4caf50":"#ff9800"),padding:"10px 14px"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <div>
-                    <div style={{fontWeight:700}}>👩 {c.emp}</div>
-                    <div style={{fontSize:12,color:"#555"}}>💵 Ef: ${(c.efN||0).toFixed(2)} · 🏦 Tr: ${(c.totTr||0).toFixed(2)} · 💳 Ta: ${(c.totTa||0).toFixed(2)}</div>
+                    <div style={{fontWeight:700}}>👩 {c.emp} <span style={{fontSize:11,color:"#888",fontWeight:400}}>• {hora}</span></div>
+                    <div style={{fontSize:12,color:"#555",marginTop:2}}>
+                      💵 Ef neto: <strong>${(c.efN||0).toFixed(2)}</strong>
+                      {(c.totMisSalidas||0)>0&&<span style={{color:"#c62828"}}> (inc. salidas -${(c.totMisSalidas||0).toFixed(2)})</span>}
+                      {" · "}🏦 <strong>${(c.totTr||0).toFixed(2)}</strong>
+                      {" · "}💳 <strong>${(c.totTa||0).toFixed(2)}</strong>
+                    </div>
                     <div style={{fontSize:12,fontWeight:700,color:c.dTot===0?"#2e7d32":c.dTot>0?"#1565c0":"#c62828",marginTop:2}}>
-                      {c.dTot===0?"✅ Cuadró":"⚠️ Diferencia: $"+(c.dTot||0).toFixed(2)}
+                      {c.dTot===0?"✅ Cuadró perfectamente":c.dTot>0?"📈 Sobró $"+(c.dTot||0).toFixed(2):"⚠️ Faltó $"+Math.abs(c.dTot||0).toFixed(2)}
                     </div>
                   </div>
-                  {ac?<div style={{...S.badge,background:"#e8f5e9",color:"#2e7d32",fontWeight:700,padding:"6px 12px"}}>✅ Aceptado</div>
-                    :<button style={{...S.btnP,width:"auto",padding:"8px 14px",fontSize:12,background:"linear-gradient(135deg,#2e7d32,#388e3c)"}} onClick={()=>aceptarCierre(c.key)}>Aceptar</button>}
+                  {ac
+                    ?<div style={{...S.badge,background:"#e8f5e9",color:"#2e7d32",fontWeight:700,padding:"6px 12px"}}>✅ Aceptado</div>
+                    :<button style={{...S.btnP,width:"auto",padding:"8px 14px",fontSize:12,background:"linear-gradient(135deg,#2e7d32,#388e3c)"}} onClick={()=>aceptarCierre(c.key)}>Aceptar</button>
+                  }
                 </div>
               </div>
             );
           })}
+          <div style={{borderTop:"1px solid #e8f0f7",paddingTop:8,marginTop:4}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#1a3c5e"}}>
+              Total acumulado: 💵 ${avanceTotal.efe.toFixed(2)} · 🏦 ${avanceTotal.transf.toFixed(2)} · 💳 ${avanceTotal.tarjeta.toFixed(2)}
+            </div>
+          </div>
           {!todosAceptados&&<div style={{...S.alrt,marginTop:8}}>⚠️ Acepta todos los cierres para confirmar el resumen</div>}
           {todosAceptados&&<div style={{background:"#e8f5e9",color:"#2e7d32",padding:"10px 14px",borderRadius:8,marginTop:8,fontWeight:700}}>✅ Todos los cierres aceptados</div>}
         </Card>
