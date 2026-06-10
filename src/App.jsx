@@ -1132,8 +1132,14 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,sesion,salidasCaja}
   // AK: apertura de esta sesion especifica (sessionStorage = se borra al cerrar sesion)
   const AK="ll_apertura_"+hoy+"_"+uid;
   // CK de sesion: clave unica por sesion (incluye timestamp de login)
-  // Timestamp de sesion - unico por cada login
-  const sesionTs=(()=>{try{return sessionStorage.getItem("ll_ses_ts")||"0";}catch{return"0";}})();
+  // Timestamp unico de esta sesion (siempre nuevo al hacer login)
+  const sesionTs=(()=>{
+    try{
+      let ts=sessionStorage.getItem("ll_ses_ts");
+      if(!ts){ts=Date.now().toString();sessionStorage.setItem("ll_ses_ts",ts);}
+      return ts;
+    }catch{return"0";}
+  })();
   const CK="ll_cierre_"+hoy+"_"+uid+"_"+sesionTs;
   // Lista de todos los cierres del dia para este usuario
   const getAllCierres=()=>{
@@ -1337,11 +1343,27 @@ export default function LavaListo(){
   const login=u=>{
     try{sessionStorage.setItem("ll_ses",JSON.stringify(u));}catch{}
     try{sessionStorage.removeItem("ll_caja_abierta_"+u.id);}catch{}
-    // Timestamp unico de esta sesion para clave de cierre
-    try{sessionStorage.setItem("ll_ses_ts",Date.now().toString());}catch{}
+    // Timestamp SIEMPRE nuevo al hacer login - garantiza cierre fresco
+    const newTs = Date.now().toString();
+    try{
+      sessionStorage.setItem("ll_ses_ts", newTs);
+      sessionStorage.removeItem("ll_cierre_ok_"+u.id);
+      sessionStorage.removeItem("ll_caja_abierta_"+u.id);
+    }catch{}
     setSes(u);
   };
-  const logout=()=>{try{sessionStorage.removeItem("ll_ses");}catch{}setSes(null);};
+  const logout=()=>{
+    try{
+      const uid=ses?.id;
+      sessionStorage.removeItem("ll_ses");
+      sessionStorage.removeItem("ll_ses_ts");
+      if(uid){
+        sessionStorage.removeItem("ll_caja_abierta_"+uid);
+        sessionStorage.removeItem("ll_cierre_ok_"+uid);
+      }
+    }catch{}
+    setSes(null);
+  };
   if(!ses)return <LoginScreen onLogin={login}/>;
   return <AppContent sesion={ses} onLogout={logout}/>;
 }
@@ -1349,13 +1371,21 @@ export default function LavaListo(){
 function AppContent({sesion,onLogout}){
   const hoy=fechaHoyLocal();
   const AK="ll_apertura_"+hoy+"_"+sesion.id;
-  // CK por sesion — cada vez que entra y cierra es un cierre independiente
-  const sesTs=(()=>{try{return sessionStorage.getItem("ll_ses_ts")||"0";}catch{return"0";}})();
+  // CK unico por sesion - garantiza cierre nuevo cada vez que entra
+  const sesTs=(()=>{
+    try{
+      let ts=sessionStorage.getItem("ll_ses_ts");
+      if(!ts){ts=Date.now().toString();sessionStorage.setItem("ll_ses_ts",ts);}
+      return ts;
+    }catch{return"0";}
+  })();
   const CK="ll_cierre_"+hoy+"_"+sesion.id+"_"+sesTs;
   const SESSION_CAJA_KEY="ll_caja_abierta_"+sesion.id;
   const [cajaOk,setCajaOk]=useState(()=>{try{return !!sessionStorage.getItem(SESSION_CAJA_KEY);}catch{return false;}});
   // cierreOk: por sesion (se resetea al volver a entrar)
-  const [cierreOk,setCierreOk]=useState(()=>{try{return !!sessionStorage.getItem("ll_cierre_ok_"+sesion.id);}catch{return false;}});
+  // cierreOk: SIEMPRE false al iniciar sesion nueva
+  // sesTs es nuevo cada login, entonces CK es nuevo, y no hay cierre guardado
+  const [cierreOk,setCierreOk]=useState(false);
   const [tab,setTab]=useState("ventas");
   const [ventas,setVentas]=useState(()=>load(KEYS.ventas,[]));
   const [clientes,setClientes]=useState(()=>load(KEYS.clientes,[]));
