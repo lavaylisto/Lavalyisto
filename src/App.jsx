@@ -1,4 +1,39 @@
 import { useState, useEffect } from "react";
+import { initializeApp } from "firebase/app";
+import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection } from "firebase/firestore";
+
+// ─── FIREBASE CONFIG ───────────────────────────────────────────────
+const firebaseConfig = {
+  apiKey: "AIzaSyBEFp1LHDPv91eaUdracgOJp8p0N3ka8I0",
+  authDomain: "lavaylisto.firebaseapp.com",
+  projectId: "lavaylisto",
+  storageBucket: "lavaylisto.firebasestorage.app",
+  messagingSenderId: "168982655903",
+  appId: "1:168982655903:web:ccc97933ad2c29540903aa"
+};
+const firebaseApp = initializeApp(firebaseConfig);
+const db = getFirestore(firebaseApp);
+
+// ─── FIREBASE HELPERS ──────────────────────────────────────────────
+// Guardar coleccion en Firestore
+const fbSave = async (coleccion, datos) => {
+  try {
+    await setDoc(doc(db, "lavalisto", coleccion), { datos: JSON.stringify(datos) });
+  } catch(e) { console.error("Firebase save error:", e); }
+};
+
+// Cargar coleccion desde Firestore (con fallback a localStorage)
+const fbLoad = async (coleccion, def) => {
+  try {
+    const snap = await getDoc(doc(db, "lavalisto", coleccion));
+    if (snap.exists()) {
+      const d = JSON.parse(snap.data().datos);
+      return d;
+    }
+  } catch(e) { console.error("Firebase load error:", e); }
+  return def;
+};
+
 
 const KEYS = { ventas:"ll_ventas", clientes:"ll_clientes", empleadas:"ll_empleadas", inventario:"ll_inventario", servicios:"ll_servicios" };
 const load = (k,d) => { try { const v=localStorage.getItem(k); return v?JSON.parse(v):d; } catch { return d; } };
@@ -1132,15 +1167,9 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,sesion,salidasCaja}
   // AK: apertura de esta sesion especifica (sessionStorage = se borra al cerrar sesion)
   const AK="ll_apertura_"+hoy+"_"+uid;
   // CK de sesion: clave unica por sesion (incluye timestamp de login)
-  // Timestamp unico de esta sesion (siempre nuevo al hacer login)
-  const sesionTs=(()=>{
-    try{
-      let ts=sessionStorage.getItem("ll_ses_ts");
-      if(!ts){ts=Date.now().toString();sessionStorage.setItem("ll_ses_ts",ts);}
-      return ts;
-    }catch{return"0";}
-  })();
-  const CK="ll_cierre_"+hoy+"_"+uid+"_"+sesionTs;
+  // CK unico por sesion usando contador (incrementa en cada login)
+  const sesCount=sesion?._sesCount||"0";
+  const CK="ll_cierre_"+hoy+"_"+uid+"_"+sesCount;
   // Lista de todos los cierres del dia para este usuario
   const getAllCierres=()=>{
     const list=[];
@@ -1341,27 +1370,17 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,sesion,salidasCaja}
 export default function LavaListo(){
   const [ses,setSes]=useState(()=>{try{const s=sessionStorage.getItem("ll_ses");return s?JSON.parse(s):null;}catch{return null;}});
   const login=u=>{
-    try{sessionStorage.setItem("ll_ses",JSON.stringify(u));}catch{}
-    try{sessionStorage.removeItem("ll_caja_abierta_"+u.id);}catch{}
-    // Timestamp SIEMPRE nuevo al hacer login - garantiza cierre fresco
-    const newTs = Date.now().toString();
-    try{
-      sessionStorage.setItem("ll_ses_ts", newTs);
-      sessionStorage.removeItem("ll_cierre_ok_"+u.id);
-      sessionStorage.removeItem("ll_caja_abierta_"+u.id);
-    }catch{}
-    setSes(u);
+    // Incrementar contador de sesion en localStorage - SIEMPRE nuevo al entrar
+    const sesKey="ll_ses_count_"+u.id;
+    const count=(parseInt(localStorage.getItem(sesKey)||"0")+1).toString();
+    localStorage.setItem(sesKey, count);
+    // Guardar sesion con el contador incluido
+    const sesData={...u, _sesCount: count};
+    try{sessionStorage.setItem("ll_ses",JSON.stringify(sesData));}catch{}
+    setSes(sesData);
   };
   const logout=()=>{
-    try{
-      const uid=ses?.id;
-      sessionStorage.removeItem("ll_ses");
-      sessionStorage.removeItem("ll_ses_ts");
-      if(uid){
-        sessionStorage.removeItem("ll_caja_abierta_"+uid);
-        sessionStorage.removeItem("ll_cierre_ok_"+uid);
-      }
-    }catch{}
+    try{sessionStorage.removeItem("ll_ses");}catch{}
     setSes(null);
   };
   if(!ses)return <LoginScreen onLogin={login}/>;
@@ -1371,15 +1390,9 @@ export default function LavaListo(){
 function AppContent({sesion,onLogout}){
   const hoy=fechaHoyLocal();
   const AK="ll_apertura_"+hoy+"_"+sesion.id;
-  // CK unico por sesion - garantiza cierre nuevo cada vez que entra
-  const sesTs=(()=>{
-    try{
-      let ts=sessionStorage.getItem("ll_ses_ts");
-      if(!ts){ts=Date.now().toString();sessionStorage.setItem("ll_ses_ts",ts);}
-      return ts;
-    }catch{return"0";}
-  })();
-  const CK="ll_cierre_"+hoy+"_"+sesion.id+"_"+sesTs;
+  // CK unico por sesion - usa contador de sesion (incrementa en cada login)
+  const sesCount=sesion._sesCount||"0";
+  const CK="ll_cierre_"+hoy+"_"+sesion.id+"_"+sesCount;
   const SESSION_CAJA_KEY="ll_caja_abierta_"+sesion.id;
   const [cajaOk,setCajaOk]=useState(()=>{try{return !!sessionStorage.getItem(SESSION_CAJA_KEY);}catch{return false;}});
   // cierreOk: por sesion (se resetea al volver a entrar)
@@ -1397,14 +1410,39 @@ function AppContent({sesion,onLogout}){
   const [salidasCaja,setSalidasCaja]=useState(()=>load("ll_salidas_caja",[]));
   const [showSalida,setShowSalida]=useState(false);
   const [ticketV,setTicketV]=useState(null);
-  useEffect(()=>save(KEYS.ventas,ventas),[ventas]);
-  useEffect(()=>save(KEYS.clientes,clientes),[clientes]);
-  useEffect(()=>save(KEYS.empleadas,empleadas),[empleadas]);
-  useEffect(()=>save(KEYS.inventario,inventario),[inventario]);
-  useEffect(()=>save(KEYS.servicios,servicios),[servicios]);
-  useEffect(()=>save("ll_gastos",gastos),[gastos]);
-  useEffect(()=>save("ll_depositos",depositos),[depositos]);
-  useEffect(()=>save("ll_salidas_caja",salidasCaja),[salidasCaja]);
+  const [fbListo,setFbListo]=useState(false);
+
+  // ─── CARGAR DATOS DESDE FIREBASE AL INICIAR ───────────────────────
+  useEffect(()=>{
+    const cargar=async()=>{
+      try{
+        const[v,cl,em,inv,srv,gs,dep,sal]=await Promise.all([
+          fbLoad("ventas",[]),fbLoad("clientes",[]),
+          fbLoad("empleadas",EMPLEADAS_DEFAULT),fbLoad("inventario",INSUMOS_DEFAULT),
+          fbLoad("servicios",SERVICIOS_DEFAULT),fbLoad("gastos",[]),
+          fbLoad("depositos",[]),fbLoad("salidasCaja",[]),
+        ]);
+        setVentas(v);setClientes(cl);setEmpleadas(em);setInventario(inv);
+        setServicios(srv);setGastos(gs);setDepositos(dep);setSalidasCaja(sal);
+        // Tambien guardar en localStorage como cache
+        save(KEYS.ventas,v);save(KEYS.clientes,cl);save(KEYS.empleadas,em);
+        save(KEYS.inventario,inv);save(KEYS.servicios,srv);
+        save("ll_gastos",gs);save("ll_depositos",dep);save("ll_salidas_caja",sal);
+      }catch(e){console.error("Error cargando Firebase:",e);}
+      setFbListo(true);
+    };
+    cargar();
+  },[]);
+
+  // ─── GUARDAR EN FIREBASE Y LOCALSTORAGE ───────────────────────────
+  useEffect(()=>{if(!fbListo)return;save(KEYS.ventas,ventas);fbSave("ventas",ventas);},[ventas,fbListo]);
+  useEffect(()=>{if(!fbListo)return;save(KEYS.clientes,clientes);fbSave("clientes",clientes);},[clientes,fbListo]);
+  useEffect(()=>{if(!fbListo)return;save(KEYS.empleadas,empleadas);fbSave("empleadas",empleadas);},[empleadas,fbListo]);
+  useEffect(()=>{if(!fbListo)return;save(KEYS.inventario,inventario);fbSave("inventario",inventario);},[inventario,fbListo]);
+  useEffect(()=>{if(!fbListo)return;save(KEYS.servicios,servicios);fbSave("servicios",servicios);},[servicios,fbListo]);
+  useEffect(()=>{if(!fbListo)return;save("ll_gastos",gastos);fbSave("gastos",gastos);},[gastos,fbListo]);
+  useEffect(()=>{if(!fbListo)return;save("ll_depositos",depositos);fbSave("depositos",depositos);},[depositos,fbListo]);
+  useEffect(()=>{if(!fbListo)return;save("ll_salidas_caja",salidasCaja);fbSave("salidasCaja",salidasCaja);},[salidasCaja,fbListo]);
   const esAdmin=sesion.rol==="Administrador";
   const addAbono=(f,ab)=>setVentas(prev=>prev.map(v=>{if(v.folio!==f)return v;const abono={...ab,cobradoPorId:sesion.id,cobradoPorNombre:sesion.nombre};const abs=[...(v.abonos||[]),abono];return{...v,abonos:abs,pagada:saldo({...v,abonos:abs})<=0};}));
   const handleCierreListo=()=>{
@@ -1414,7 +1452,18 @@ function AppContent({sesion,onLogout}){
   const exportarDatos=()=>{const d={ventas,clientes,empleadas,inventario,servicios,gastos,depositos};const blob=new Blob([JSON.stringify(d,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="respaldo-"+hoy+".json";a.click();};
   const importarDatos=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>{try{const d=JSON.parse(ev.target.result);if(d.ventas)setVentas(d.ventas);if(d.clientes)setClientes(d.clientes);if(d.empleadas)setEmpleadas(d.empleadas);if(d.inventario)setInventario(d.inventario);if(d.servicios)setServicios(d.servicios);if(d.gastos)setGastos(d.gastos);if(d.depositos)setDepositos(d.depositos);alert("✅ Datos importados");}catch{alert("❌ Error al importar");}};r.readAsText(f);};
   const pCount=ventas.filter(v=>(!pagada(v)&&!v.anulada)||(pagada(v)&&!v.anulada&&(v.estado||"recibido")!=="entregado")).length;
-  if(!cajaOk)return <AperturaObligatoria sesion={sesion} onLogout={onLogout} onAbierta={()=>{try{sessionStorage.setItem(SESSION_CAJA_KEY,"1");}catch{}setCajaOk(true);}} empleadas={empleadas}/>;
+  // Pantalla de carga mientras Firebase sincroniza
+  if(!fbListo)return(
+    <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#1a3c5e,#2563a8)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",fontFamily:"'DM Sans',sans-serif"}}>
+      <div style={{fontSize:48,marginBottom:16}}>🫧</div>
+      <div style={{fontFamily:"'Playfair Display',serif",fontSize:24,color:"#fff",fontWeight:700,marginBottom:8}}>Lava<span style={{color:"#4db6e4"}}>&</span>Listo</div>
+      <div style={{color:"#a0c4da",fontSize:14}}>Sincronizando datos...</div>
+      <div style={{marginTop:20,width:40,height:40,border:"3px solid rgba(255,255,255,.2)",borderTop:"3px solid #4db6e4",borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    </div>
+  );
+
+  if(!cajaOk)return <AperturaObligatoria sesion={sesion} onLogout={onLogout} onAbierta={()=>{try{localStorage.setItem(SESSION_CAJA_KEY,"1");}catch{}setCajaOk(true);}} empleadas={empleadas}/>;
   if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={servicios} sesion={sesion} addAbono={addAbono} onLogout={onLogout} cierreListo={cierreOk} onCierreListo={handleCierreListo} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja}/>;
   const tabs=[
     {id:"ventas",icon:"🧾",l:"Venta"},{id:"historial",icon:"📋",l:"Historial"},
