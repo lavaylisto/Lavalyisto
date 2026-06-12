@@ -1,38 +1,4 @@
 import { useState, useEffect } from "react";
-import { initializeApp } from "firebase/app";
-import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection } from "firebase/firestore";
-
-// ─── FIREBASE CONFIG ───────────────────────────────────────────────
-const firebaseConfig = {
-  apiKey: "AIzaSyBEFp1LHDPv91eaUdracgOJp8p0N3ka8I0",
-  authDomain: "lavaylisto.firebaseapp.com",
-  projectId: "lavaylisto",
-  storageBucket: "lavaylisto.firebasestorage.app",
-  messagingSenderId: "168982655903",
-  appId: "1:168982655903:web:ccc97933ad2c29540903aa"
-};
-const firebaseApp = initializeApp(firebaseConfig);
-const db = getFirestore(firebaseApp);
-
-// ─── FIREBASE HELPERS ──────────────────────────────────────────────
-// Guardar coleccion en Firestore
-const fbSave = async (coleccion, datos) => {
-  try {
-    await setDoc(doc(db, "lavalisto", coleccion), { datos: JSON.stringify(datos) });
-  } catch(e) { console.error("Firebase save error:", e); }
-};
-
-// Cargar coleccion desde Firestore (con fallback a localStorage)
-const fbLoad = async (coleccion, def) => {
-  try {
-    const snap = await getDoc(doc(db, "lavalisto", coleccion));
-    if (snap.exists()) {
-      const d = JSON.parse(snap.data().datos);
-      return d;
-    }
-  } catch(e) { console.error("Firebase load error:", e); }
-  return def;
-};
 
 
 const KEYS = { ventas:"ll_ventas", clientes:"ll_clientes", empleadas:"ll_empleadas", inventario:"ll_inventario", servicios:"ll_servicios" };
@@ -1430,39 +1396,15 @@ function AppContent({sesion,onLogout}){
   const [salidasCaja,setSalidasCaja]=useState(()=>load("ll_salidas_caja",[]));
   const [showSalida,setShowSalida]=useState(false);
   const [ticketV,setTicketV]=useState(null);
-  const [fbListo,setFbListo]=useState(false);
-
-  // ─── CARGAR DATOS DESDE FIREBASE AL INICIAR ───────────────────────
-  useEffect(()=>{
-    const cargar=async()=>{
-      try{
-        const[v,cl,em,inv,srv,gs,dep,sal]=await Promise.all([
-          fbLoad("ventas",[]),fbLoad("clientes",[]),
-          fbLoad("empleadas",EMPLEADAS_DEFAULT),fbLoad("inventario",INSUMOS_DEFAULT),
-          fbLoad("servicios",SERVICIOS_DEFAULT),fbLoad("gastos",[]),
-          fbLoad("depositos",[]),fbLoad("salidasCaja",[]),
-        ]);
-        setVentas(v);setClientes(cl);setEmpleadas(em);setInventario(inv);
-        setServicios(srv);setGastos(gs);setDepositos(dep);setSalidasCaja(sal);
-        // Tambien guardar en localStorage como cache
-        save(KEYS.ventas,v);save(KEYS.clientes,cl);save(KEYS.empleadas,em);
-        save(KEYS.inventario,inv);save(KEYS.servicios,srv);
-        save("ll_gastos",gs);save("ll_depositos",dep);save("ll_salidas_caja",sal);
-      }catch(e){console.error("Error cargando Firebase:",e);}
-      setFbListo(true);
-    };
-    cargar();
-  },[]);
-
-  // ─── GUARDAR EN FIREBASE Y LOCALSTORAGE ───────────────────────────
-  useEffect(()=>{if(!fbListo)return;save(KEYS.ventas,ventas);fbSave("ventas",ventas);},[ventas,fbListo]);
-  useEffect(()=>{if(!fbListo)return;save(KEYS.clientes,clientes);fbSave("clientes",clientes);},[clientes,fbListo]);
-  useEffect(()=>{if(!fbListo)return;save(KEYS.empleadas,empleadas);fbSave("empleadas",empleadas);},[empleadas,fbListo]);
-  useEffect(()=>{if(!fbListo)return;save(KEYS.inventario,inventario);fbSave("inventario",inventario);},[inventario,fbListo]);
-  useEffect(()=>{if(!fbListo)return;save(KEYS.servicios,servicios);fbSave("servicios",servicios);},[servicios,fbListo]);
-  useEffect(()=>{if(!fbListo)return;save("ll_gastos",gastos);fbSave("gastos",gastos);},[gastos,fbListo]);
-  useEffect(()=>{if(!fbListo)return;save("ll_depositos",depositos);fbSave("depositos",depositos);},[depositos,fbListo]);
-  useEffect(()=>{if(!fbListo)return;save("ll_salidas_caja",salidasCaja);fbSave("salidasCaja",salidasCaja);},[salidasCaja,fbListo]);
+  // ─── GUARDAR EN LOCALSTORAGE ──────────────────────────────────────
+  useEffect(()=>save(KEYS.ventas,ventas),[ventas]);
+  useEffect(()=>save(KEYS.clientes,clientes),[clientes]);
+  useEffect(()=>save(KEYS.empleadas,empleadas),[empleadas]);
+  useEffect(()=>save(KEYS.inventario,inventario),[inventario]);
+  useEffect(()=>save(KEYS.servicios,servicios),[servicios]);
+  useEffect(()=>save("ll_gastos",gastos),[gastos]);
+  useEffect(()=>save("ll_depositos",depositos),[depositos]);
+  useEffect(()=>save("ll_salidas_caja",salidasCaja),[salidasCaja]);
   const esAdmin=sesion.rol==="Administrador";
   const addAbono=(f,ab)=>setVentas(prev=>prev.map(v=>{if(v.folio!==f)return v;const abono={...ab,cobradoPorId:sesion.id,cobradoPorNombre:sesion.nombre};const abs=[...(v.abonos||[]),abono];return{...v,abonos:abs,pagada:saldo({...v,abonos:abs})<=0};}));
   const handleCierreListo=()=>{
@@ -1473,16 +1415,6 @@ function AppContent({sesion,onLogout}){
   const exportarDatos=()=>{const d={ventas,clientes,empleadas,inventario,servicios,gastos,depositos};const blob=new Blob([JSON.stringify(d,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="respaldo-"+hoy+".json";a.click();};
   const importarDatos=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>{try{const d=JSON.parse(ev.target.result);if(d.ventas)setVentas(d.ventas);if(d.clientes)setClientes(d.clientes);if(d.empleadas)setEmpleadas(d.empleadas);if(d.inventario)setInventario(d.inventario);if(d.servicios)setServicios(d.servicios);if(d.gastos)setGastos(d.gastos);if(d.depositos)setDepositos(d.depositos);alert("✅ Datos importados");}catch{alert("❌ Error al importar");}};r.readAsText(f);};
   const pCount=ventas.filter(v=>(!pagada(v)&&!v.anulada)||(pagada(v)&&!v.anulada&&(v.estado||"recibido")!=="entregado")).length;
-  // Pantalla de carga mientras Firebase sincroniza
-  if(!fbListo)return(
-    <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#1a3c5e,#2563a8)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",fontFamily:"'DM Sans',sans-serif"}}>
-      <div style={{fontSize:48,marginBottom:16}}>🫧</div>
-      <div style={{fontFamily:"'Playfair Display',serif",fontSize:24,color:"#fff",fontWeight:700,marginBottom:8}}>Lava<span style={{color:"#4db6e4"}}>&</span>Listo</div>
-      <div style={{color:"#a0c4da",fontSize:14}}>Sincronizando datos...</div>
-      <div style={{marginTop:20,width:40,height:40,border:"3px solid rgba(255,255,255,.2)",borderTop:"3px solid #4db6e4",borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-    </div>
-  );
 
   // Si cerró caja y quiere seguir trabajando, DEBE abrir caja nuevamente
   if(!cajaOk||esperandoApertura)return <AperturaObligatoria
