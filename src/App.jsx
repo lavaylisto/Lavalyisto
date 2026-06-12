@@ -400,7 +400,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         </div>
       )}
       {ticket&&<TicketModal venta={ticket} empleadas={empleadas} onClose={()=>setTicket(null)}/>}
-      {showSalidaEmp&&<SalidaCaja sesion={sesion} salidasCaja={salidasCaja||[]} setSalidasCaja={setSalidasCaja} onClose={()=>setShowSalidaEmp(false)}/>}
+      {showSalidaEmp&&<SalidaCaja sesion={sesion} salidasCaja={salidasCaja||[]} setSalidasCaja={setSalidasCaja} onClose={()=>setShowSalidaEmp(false)} upsertSalida={upsertSalida}/>}
     </div>
   );
 }
@@ -864,7 +864,7 @@ function Inventario({inventario,setInventario,upsertInventario}){
   </div>);
 }
 
-function Equipo({empleadas,setEmpleadas,ventas,esAdmin}){
+function Equipo({empleadas,setEmpleadas,ventas,esAdmin,upsertEmpleada}){
   const [nv,setNv]=useState({nombre:"",metaVentas:20,montoBonus:20});
   const [editId,setEditId]=useState(null);const [ed,setEd]=useState({});
   const mes=mesK(new Date());
@@ -1070,7 +1070,7 @@ function GestionUsuarios(){
 }
 
 // ─── SALIDA DE CAJA ────────────────────────────────────────────────
-function SalidaCaja({sesion,salidasCaja,setSalidasCaja,onClose}){
+function SalidaCaja({sesion,salidasCaja,setSalidasCaja,onClose,upsertSalida}){
   const [monto,setMonto]=useState("");
   const [motivo,setMotivo]=useState("");
   const hoy=fechaHoyLocal();
@@ -1459,7 +1459,7 @@ const { data: salidasCaja, setData: setSalidasCaja, upsert: upsertSalida } = use
       {tab==="usuarios"&&<GestionUsuarios/>}
     </div>
     {ticketV&&<TicketModal venta={ticketV} empleadas={empleadas} onClose={()=>setTicketV(null)}/>}
-    {showSalida&&<SalidaCaja sesion={sesion} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} onClose={()=>setShowSalida(false)}/>}
+    {showSalida&&<SalidaCaja sesion={sesion} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} onClose={()=>setShowSalida(false)} upsertSalida={upsertSalida}/>}
   </div>);
 }
 
