@@ -34,6 +34,7 @@ export function useCollection(colName, localKey, defaultVal = []) {
   }, [colName, localKey]);
 
   const upsert = async (item) => {
+    console.log("🔥 upsert llamado:", item?.folio || item?.id);
     const ts = new Date().toISOString();
     const payload = { ...item, _updatedAt: ts };
     const id = item._docId || item.folio || item.id?.toString();
