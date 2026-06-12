@@ -463,7 +463,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
     const total=calcT();
     if(tPago==="abono"){const m=parseFloat(abono);if(!m||m<=0||m>=total){setErr("El abono debe ser mayor a 0 y menor al total");return;}}
     let cid=cId,cNom=selC?.nombre,cTel=selC?.tel,cDir=selC?.direccion||"";
-    if(mC==="nuevo"){const nc={...nC,id:Date.now()};setClientes(prev=>[...prev,nc]);cid=nc.id;cNom=nc.nombre;cTel=nc.tel;cDir=nc.direccion||"";}
+    if(mC==="nuevo"){const nc={...nC,id:Date.now()};setClientes(prev=>[...prev,nc]);upsertCliente({...nc,_updatedAt:new Date().toISOString()});cid=nc.id;cNom=nc.nombre;cTel=nc.tel;cDir=nc.direccion||"";}
     let abs=[];
     if(tPago==="completo")abs=[{monto:total,metodo,fecha:new Date().toISOString(),cobradoPorId:sesion?.id,cobradoPorNombre:sesion?.nombre}];
     else if(tPago==="abono")abs=[{monto:parseFloat(abono),metodo,fecha:new Date().toISOString(),cobradoPorId:sesion?.id,cobradoPorNombre:sesion?.nombre}];
@@ -829,9 +829,9 @@ function Reportes({ventas,empleadas}){
 
 function Inventario({inventario,setInventario}){
   const [nv,setNv]=useState({nombre:"",stock:0,min:1,unidad:"pzas"});
-  const upd=(id,f,v)=>setInventario(prev=>prev.map(i=>i.id===id?{...i,[f]:v}:i));
+  const upd=(id,f,v)=>setInventario(prev=>{const next=prev.map(i=>i.id===id?{...i,[f]:v}:i);const updated=next.find(i=>i.id===id);if(updated&&upsertInventario)upsertInventario({...updated,_updatedAt:new Date().toISOString()});return next;});
   const del=id=>setInventario(prev=>prev.filter(i=>i.id!==id));
-  const add=()=>{if(!nv.nombre.trim())return;setInventario(prev=>[...prev,{...nv,id:Date.now(),stock:parseFloat(nv.stock)||0}]);setNv({nombre:"",stock:0,min:1,unidad:"pzas"});};
+  const add=()=>{if(!nv.nombre.trim())return;const ni={...nv,id:Date.now(),stock:parseFloat(nv.stock)||0};setInventario(prev=>[...prev,ni]);if(upsertInventario)upsertInventario({...ni,_updatedAt:new Date().toISOString()});setNv({nombre:"",stock:0,min:1,unidad:"pzas"});};
   const bajo=inventario.filter(i=>i.stock<=i.min);
   return(<div style={S.panel}>
     <h2 style={S.ptitle}>📦 Inventario</h2>
@@ -870,7 +870,7 @@ function Equipo({empleadas,setEmpleadas,ventas,esAdmin}){
   const mes=mesK(new Date());
   const add=()=>{if(!nv.nombre.trim())return;setEmpleadas(prev=>[...prev,{id:Date.now(),nombre:nv.nombre,activa:true,metaVentas:parseInt(nv.metaVentas)||20,montoBonus:parseFloat(nv.montoBonus)||0}]);setNv({nombre:"",metaVentas:20,montoBonus:20});};
   const tog=id=>setEmpleadas(prev=>prev.map(e=>e.id===id?{...e,activa:!e.activa}:e));
-  const save2=()=>{setEmpleadas(prev=>prev.map(e=>e.id===editId?{...e,...ed,metaVentas:parseInt(ed.metaVentas)||20,montoBonus:parseFloat(ed.montoBonus)||0}:e));setEditId(null);};
+  const save2=()=>{setEmpleadas(prev=>{const next=prev.map(e=>e.id===editId?{...e,...ed,metaVentas:parseInt(ed.metaVentas)||20,montoBonus:parseFloat(ed.montoBonus)||0}:e);const updated=next.find(e=>e.id===editId);if(updated&&upsertEmpleada)upsertEmpleada({...updated,_updatedAt:new Date().toISOString()});return next;});setEditId(null);};
   const stats=empleadas.map(e=>{const mv=ventas.filter(v=>v.empleadaId===e.id&&mesK(v.fecha)===mes);return{...e,vm:mv.length,tm:mv.reduce((a,v)=>a+v.total,0)};});
   return(<div style={S.panel}>
     <h2 style={S.ptitle}>👩 Equipo & Bonos</h2>
@@ -922,7 +922,7 @@ const CATS=["Insumos/Suministros","Servicios","Arriendo","Sueldos","Mantenimient
 function Gastos({gastos,setGastos,sesion}){
   const [nv,setNv]=useState({descripcion:"",categoria:"Insumos/Suministros",proveedor:"",numeroFactura:"",monto:"",fecha:fechaHoyLocal(),metodoPago:"Efectivo",notas:""});
   const [fMes,setFMes]=useState(mesK(new Date()));const [fCat,setFCat]=useState("Todas");const [err,setErr]=useState("");
-  const add=()=>{if(!nv.descripcion.trim()||!nv.monto){setErr("Completa descripcion y monto");return;}setGastos(prev=>[{...nv,id:Date.now(),monto:parseFloat(nv.monto),registradoPor:sesion.nombre},...prev]);setNv({descripcion:"",categoria:"Insumos/Suministros",proveedor:"",numeroFactura:"",monto:"",fecha:fechaHoyLocal(),metodoPago:"Efectivo",notas:""});setErr("");};
+  const add=()=>{if(!nv.descripcion.trim()||!nv.monto){setErr("Completa descripcion y monto");return;}const ng={...nv,id:Date.now(),monto:parseFloat(nv.monto),registradoPor:sesion.nombre};setGastos(prev=>[ng,...prev]);if(upsertGasto)upsertGasto({...ng,_updatedAt:new Date().toISOString()});setNv({descripcion:"",categoria:"Insumos/Suministros",proveedor:"",numeroFactura:"",monto:"",fecha:fechaHoyLocal(),metodoPago:"Efectivo",notas:""});setErr("");};
   const del=id=>{if(!window.confirm("Eliminar?"))return;setGastos(prev=>prev.filter(g=>g.id!==id));};
   const fil=gastos.filter(g=>(!fMes||fechaLocal(g.fecha).startsWith(fMes))&&(fCat==="Todas"||g.categoria===fCat));
   const tot=fil.reduce((a,g)=>a+g.monto,0);
@@ -966,9 +966,9 @@ function Gastos({gastos,setGastos,sesion}){
 
 function Configuracion({servicios,setServicios,exportarDatos,importarDatos,upsertVenta}){
   const [nv,setNv]=useState({label:"",precio:""});const [editId,setEditId]=useState(null);const [ed,setEd]=useState({});const [busq,setBusq]=useState("");
-  const add=()=>{if(!nv.label.trim()||!nv.precio)return;setServicios(prev=>[...prev,{id:"c-"+Date.now(),label:nv.label.toUpperCase(),precio:parseFloat(nv.precio)}]);setNv({label:"",precio:""});};
+  const add=()=>{if(!nv.label.trim()||!nv.precio)return;const ns={id:"c-"+Date.now(),label:nv.label.toUpperCase(),precio:parseFloat(nv.precio)};setServicios(prev=>[...prev,ns]);if(upsertServicio)upsertServicio({...ns,_updatedAt:new Date().toISOString()});setNv({label:"",precio:""});};
   const del=id=>setServicios(prev=>prev.filter(s=>s.id!==id));
-  const sav=()=>{setServicios(prev=>prev.map(s=>s.id===editId?{...s,label:ed.label.toUpperCase(),precio:parseFloat(ed.precio)}:s));setEditId(null);};
+  const sav=()=>{setServicios(prev=>{const next=prev.map(s=>s.id===editId?{...s,label:ed.label.toUpperCase(),precio:parseFloat(ed.precio)}:s);const updated=next.find(s=>s.id===editId);if(updated&&upsertServicio)upsertServicio({...updated,_updatedAt:new Date().toISOString()});return next;});setEditId(null);};
   const fil=servicios.filter(s=>s.label.toLowerCase().includes(busq.toLowerCase()));
   return(<div style={S.panel}>
     <h2 style={S.ptitle}>⚙️ Configuracion</h2>
@@ -1087,7 +1087,7 @@ function SalidaCaja({sesion,salidasCaja,setSalidasCaja,onClose}){
       monto:m,motivo:motivo.trim(),
       quien:sesion.nombre,quienId:sesion.id,
     };
-    setSalidasCaja(prev=>[salida,...prev]);
+    setSalidasCaja(prev=>[salida,...prev]);if(upsertSalida)upsertSalida({...salida,_updatedAt:new Date().toISOString()});
     setMonto("");setMotivo("");
   };
 
@@ -1734,7 +1734,7 @@ function Depositos({depositos,setDepositos,ventas}){
 
   const guardarDeposito=()=>{
     if(!formData.monto||!formData.comprobante.trim()){alert("Ingresa monto y número de comprobante");return;}
-    setDepositos(prev=>[{...formData,id:Date.now(),fecha:formDia,monto:parseFloat(formData.monto),creadoEn:new Date().toISOString()},...prev]);
+    const nd={...formData,id:Date.now(),fecha:formDia,monto:parseFloat(formData.monto),creadoEn:new Date().toISOString()};setDepositos(prev=>[nd,...prev]);if(upsertDeposito)upsertDeposito({...nd,_updatedAt:new Date().toISOString()});
     setFormDia(null);setFormData({banco:"Pichincha",monto:"",comprobante:"",notas:""});
   };
   const eliminar=id=>{if(!window.confirm("¿Eliminar?"))return;setDepositos(prev=>prev.filter(d=>d.id!==id));};
