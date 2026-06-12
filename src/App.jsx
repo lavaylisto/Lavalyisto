@@ -1167,8 +1167,10 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
   // AK: apertura de esta sesion especifica (sessionStorage = se borra al cerrar sesion)
   const AK="ll_apertura_"+hoy+"_"+uid;
   // CK de sesion: clave unica por sesion (incluye timestamp de login)
-  // CK unico por sesion usando _sesId (timestamp de login)
-  const CK="ll_cierre_"+hoy+"_"+uid+"_"+(sesion?._sesId||"0");
+  // CK unico por sesion - SIEMPRE diferente porque _sesId es timestamp
+  // Si no hay _sesId (no deberia pasar), usar timestamp actual como fallback
+  const sesId=sesion?._sesId||Date.now().toString();
+  const CK="ll_cierre_"+hoy+"_"+uid+"_"+sesId;
   // No necesitamos getAllCierres aqui - ResumenDia lo hace
   const [modo,setModo]=useState(()=>{try{return localStorage.getItem(AK)?"cierre":"apertura";}catch{return"apertura";}});
   const [ap,setAp]=useState(()=>{try{const a=localStorage.getItem(AK);return a?JSON.parse(a):null;}catch{return null;}});
@@ -1270,6 +1272,7 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
     try{localStorage.setItem(AK,JSON.stringify(d));}catch{}
     setAp(d);setModo("cierre");
   };
+  // Si ya hay cierre de esta sesion, mostrar resultado pero permitir nuevo cierre
   if(cg){return(
     <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#1a3c5e,#2563a8)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:20,fontFamily:"'DM Sans',sans-serif"}}>
       <div style={{background:"#fff",borderRadius:20,padding:"32px 28px",width:"100%",maxWidth:380,textAlign:"center",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}}>
@@ -1283,12 +1286,9 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
           <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span>🏦 Transferencias</span><strong>${(cg.totTr||0).toFixed(2)}</strong></div>
           <div style={{display:"flex",justifyContent:"space-between"}}><span>💳 Tarjeta</span><strong>${(cg.totTa||0).toFixed(2)}</strong></div>
         </div>
-        <div style={{background:"#fff3e0",borderRadius:8,padding:"10px",marginBottom:16,fontSize:13,color:"#e65100",fontWeight:600}}>
-          ⏱️ Cerrando sesión automáticamente...
-        </div>
         <button style={{width:"100%",padding:"12px",background:"#1a3c5e",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:8}} onClick={()=>imprimir(cg)}>🖨️ Reimprimir ticket</button>
-        <button style={{width:"100%",padding:"12px",background:"#e8f0f7",color:"#1a3c5e",border:"none",borderRadius:10,fontSize:14,fontWeight:600,cursor:"pointer",marginBottom:8}} onClick={()=>{setCg(null);setPaso(1);setModo("cierre");if(onResetCierre)onResetCierre();}}>🔄 Nuevo cierre</button>
-        <button style={{width:"100%",padding:"12px",background:"linear-gradient(135deg,#c62828,#e53935)",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer"}} onClick={()=>{if(onLogout)onLogout();}}>🚪 Salir ahora</button>
+        <button style={{width:"100%",padding:"12px",background:"linear-gradient(135deg,#2e7d32,#388e3c)",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:8}} onClick={()=>{setCg(null);setPaso(1);setModo("cierre");if(onResetCierre)onResetCierre();}}>🔄 Realizar otro cierre</button>
+        <button style={{width:"100%",padding:"12px",background:"linear-gradient(135deg,#c62828,#e53935)",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer"}} onClick={()=>{if(onLogout)onLogout();}}>🚪 Salir</button>
       </div>
     </div>
   );}
@@ -1410,8 +1410,9 @@ export default function LavaListo(){
 function AppContent({sesion,onLogout}){
   const hoy=fechaHoyLocal();
   const AK="ll_apertura_"+hoy+"_"+sesion.id;
-  // CK unico por sesion - usa _sesId que es timestamp unico por login
-  const CK="ll_cierre_"+hoy+"_"+sesion.id+"_"+(sesion._sesId||"0");
+  // CK unico por sesion - _sesId es timestamp unico por cada login
+  const sesId=sesion._sesId||Date.now().toString();
+  const CK="ll_cierre_"+hoy+"_"+sesion.id+"_"+sesId;
   // Estos 3 estados siempre empiezan en false porque AppContent se remonta con key={sesId}
   const [cajaOk,setCajaOk]=useState(false);
   const [cierreOk,setCierreOk]=useState(false);
