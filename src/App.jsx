@@ -1405,7 +1405,7 @@ function AppContent({sesion,onLogout}){
   useEffect(()=>save("ll_depositos",depositos),[depositos]);
   useEffect(()=>save("ll_salidas_caja",salidasCaja),[salidasCaja]);
   const esAdmin=sesion.rol==="Administrador";
-  const addAbono=(f,ab)=>setVentas(prev=>prev.map(v=>{if(v.folio!==f)return v;const abono={...ab,cobradoPorId:sesion.id,cobradoPorNombre:sesion.nombre};const abs=[...(v.abonos||[]),abono];return{...v,abonos:abs,pagada:saldo({...v,abonos:abs})<=0};}));
+  const addAbono=(f,ab)=>setVentas(prev=>{const next=prev.map(v=>{if(v.folio!==f)return v;const abono={...ab,cobradoPorId:sesion.id,cobradoPorNombre:sesion.nombre};const abs=[...(v.abonos||[]),abono];return{...v,abonos:abs,pagada:saldo({...v,abonos:abs})<=0};});const updated=next.find(v=>v.folio===f);if(updated&&upsertVenta)upsertVenta(updated);return next;});
   const handleCierreListo=()=>{
     setCierreOk(true);
     setCajaOk(false);
