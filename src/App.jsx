@@ -1396,13 +1396,7 @@ const { data: depositos, setData: setDepositos, upsert: upsertDeposito } = useCo
 const { data: salidasCaja, setData: setSalidasCaja, upsert: upsertSalida } = useCollection("salidasCaja", "ll_salidas_caja", []);  const [showSalida,setShowSalida]=useState(false);
   const [ticketV,setTicketV]=useState(null);
   // ─── GUARDAR EN LOCALSTORAGE ──────────────────────────────────────
-  useEffect(()=>save(KEYS.clientes,clientes),[clientes]);
-  useEffect(()=>save(KEYS.empleadas,empleadas),[empleadas]);
-  useEffect(()=>save(KEYS.inventario,inventario),[inventario]);
-  useEffect(()=>save(KEYS.servicios,servicios),[servicios]);
-  useEffect(()=>save("ll_gastos",gastos),[gastos]);
-  useEffect(()=>save("ll_depositos",depositos),[depositos]);
-  useEffect(()=>save("ll_salidas_caja",salidasCaja),[salidasCaja]);
+  
   const esAdmin=sesion.rol==="Administrador";
   const addAbono=(f,ab)=>setVentas(prev=>{const next=prev.map(v=>{if(v.folio!==f)return v;const abono={...ab,cobradoPorId:sesion.id,cobradoPorNombre:sesion.nombre};const abs=[...(v.abonos||[]),abono];return{...v,abonos:abs,pagada:saldo({...v,abonos:abs})<=0};});const updated=next.find(v=>v.folio===f);if(updated&&upsertVenta)upsertVenta(updated);return next;});
   const handleCierreListo=()=>{
