@@ -440,7 +440,7 @@ function ServicioBuscador({servId,piezas,servicios,onServChange,onPiezasChange})
   );
 }
 
-function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,servicios,sesion}){
+function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,servicios,sesion,upsertVenta}){
   const man=new Date();man.setDate(man.getDate()+1);
   const [cQ,setCQ]=useState("");const [cId,setCId]=useState(null);
   const [nC,setNC]=useState({nombre:"",tel:"",email:"",rfc:"",direccion:""});
@@ -470,7 +470,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
     const v={folio:folio(),fecha:new Date().toISOString(),entrega,clienteId:cid,clienteNombre:cNom,clienteTel:cTel,clienteDireccion:cDir,empleadaId:empId,
       items:items.map(it=>{if(it.custom)return{...it,label:it.lC||"Servicio personalizado",precio:parseFloat(it.pC)||0};const s=servicios.find(s=>s.id===it.servId);return{...it,label:s?.label,precio:s?.precio};}),
       pago:metodo,total,abonos:abs,pagada:tPago==="completo",notas,checkMsgRetiro:false,checkMsgEntrega:false,facturadoSRI:false,estado:"recibido"};
-    setVentas([v,...ventas]);setTicket(v);
+    setVentas([v,...ventas]);setTicket(v);if(upsertVenta)upsertVenta(v);
     setCQ("");setCId(null);setNC({nombre:"",tel:"",email:"",rfc:"",direccion:""});
     setItems([{servId:servicios[0]?.id,piezas:1,custom:false,lC:"",pC:""}]);
     setNotas("");setErr("");setAbono("");setTPago("completo");
@@ -1451,7 +1451,7 @@ function AppContent({sesion,onLogout}){
       </button>))}
     </div>
     <div style={S.content}>
-      {tab==="ventas"&&<NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={setTicketV} servicios={servicios} sesion={sesion}/>}
+      {tab==="ventas"&&<NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={setTicketV} servicios={servicios} sesion={sesion} upsertVenta={upsertVenta}/>}
       {tab==="historial"&&<Historial ventas={ventas} setVentas={setVentas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} esAdmin={esAdmin}/>}
       {tab==="pendientes"&&<Pendientes ventas={ventas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} setVentas={setVentas}/>}
       {tab==="resumen"&&<ResumenDia ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja}/>}
