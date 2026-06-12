@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useCollection } from "./hooks/useFirestore";
-
+G
 
 const KEYS = { ventas:"ll_ventas", clientes:"ll_clientes", empleadas:"ll_empleadas", inventario:"ll_inventario", servicios:"ll_servicios" };
 const load = (k,d) => { try { const v=localStorage.getItem(k); return v?JSON.parse(v):d; } catch { return d; } };
