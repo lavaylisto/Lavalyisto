@@ -23,7 +23,7 @@ export function useCollection(colName, localKey, defaultVal = []) {
   useEffect(() => {
     const q = query(collection(db, colName), orderBy("_updatedAt", "desc"));
     const unsub = onSnapshot(q, (snap) => {
-      if (!snap.empty) {
+      if (!snap.empty && snap.docs.length > 1) {
         const docs = snap.docs.map((d) => ({ ...d.data(), _docId: d.id }));
         setData(docs);
         try { localStorage.setItem(localKey, JSON.stringify(docs)); } catch {}
