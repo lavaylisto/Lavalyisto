@@ -827,7 +827,7 @@ function Reportes({ventas,empleadas}){
   );
 }
 
-function Inventario({inventario,setInventario}){
+function Inventario({inventario,setInventario,upsertInventario}){
   const [nv,setNv]=useState({nombre:"",stock:0,min:1,unidad:"pzas"});
   const upd=(id,f,v)=>setInventario(prev=>{const next=prev.map(i=>i.id===id?{...i,[f]:v}:i);const updated=next.find(i=>i.id===id);if(updated&&upsertInventario)upsertInventario({...updated,_updatedAt:new Date().toISOString()});return next;});
   const del=id=>setInventario(prev=>prev.filter(i=>i.id!==id));
@@ -1453,7 +1453,7 @@ const { data: salidasCaja, setData: setSalidasCaja, upsert: upsertSalida } = use
       {tab==="depositos"&&<Depositos depositos={depositos} setDepositos={setDepositos} ventas={ventas} upsertDeposito={upsertDeposito}/>}
       {tab==="gastos"&&<Gastos gastos={gastos} setGastos={setGastos} sesion={sesion} upsertGasto={upsertGasto}/>}
       {tab==="inventario"&&<Inventario inventario={inventario} setInventario={setInventario} upsertInventario={upsertInventario}/>}
-      {tab==="equipo"&&<Equipo empleadas={empleadas} setEmpleadas={setEmpleadas} ventas={ventas} esAdmin={esAdmin}/>}
+      {tab==="equipo"&&<Equipo empleadas={empleadas} setEmpleadas={setEmpleadas} ventas={ventas} esAdmin={esAdmin} upsertEmpleada={upsertEmpleada}/>}
       {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={handleCierreListo} onResetCierre={()=>setCierreOk(false)} sesion={sesion} salidasCaja={salidasCaja}/>}
       {tab==="config"&&<Configuracion servicios={servicios} setServicios={setServicios} exportarDatos={exportarDatos} importarDatos={importarDatos} upsertVenta={upsertVenta}/>}
       {tab==="usuarios"&&<GestionUsuarios/>}
@@ -1705,7 +1705,7 @@ function ResumenDia({ventas,empleadas,salidasCaja}){
 
 
 // ─── DEPÓSITOS ─────────────────────────────────────────────────────
-function Depositos({depositos,setDepositos,ventas}){
+function Depositos({depositos,setDepositos,ventas,upsertDeposito}){
   const hoy=fechaHoyLocal();
   const [mesVer,setMesVer]=useState(mesK(new Date()));
   const [formDia,setFormDia]=useState(null); // dia seleccionado para ingresar deposito
