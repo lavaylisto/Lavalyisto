@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useCollection } from "./hooks/useFirestore";
 
 
 const KEYS = { ventas:"ll_ventas", clientes:"ll_clientes", empleadas:"ll_empleadas", inventario:"ll_inventario", servicios:"ll_servicios" };
@@ -1384,7 +1385,7 @@ function AppContent({sesion,onLogout}){
   const [cierreOk,setCierreOk]=useState(false);
   const [esperandoApertura,setEsperandoApertura]=useState(false);
   const [tab,setTab]=useState("ventas");
-  const [ventas,setVentas]=useState(()=>load(KEYS.ventas,[]));
+  const { data: ventas, setData: setVentas, upsert: upsertVenta } = useCollection("ventas", KEYS.ventas, []);
   const [clientes,setClientes]=useState(()=>load(KEYS.clientes,[]));
   const [empleadas,setEmpleadas]=useState(()=>load(KEYS.empleadas,EMPLEADAS_DEFAULT));
   const [inventario,setInventario]=useState(()=>load(KEYS.inventario,INSUMOS_DEFAULT));
@@ -1395,7 +1396,6 @@ function AppContent({sesion,onLogout}){
   const [showSalida,setShowSalida]=useState(false);
   const [ticketV,setTicketV]=useState(null);
   // ─── GUARDAR EN LOCALSTORAGE ──────────────────────────────────────
-  useEffect(()=>save(KEYS.ventas,ventas),[ventas]);
   useEffect(()=>save(KEYS.clientes,clientes),[clientes]);
   useEffect(()=>save(KEYS.empleadas,empleadas),[empleadas]);
   useEffect(()=>save(KEYS.inventario,inventario),[inventario]);
