@@ -593,7 +593,7 @@ function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin}){
         <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
           <button style={S.btnT} onClick={()=>setTicket(v)}>🧾 Ticket</button>
           {!esPag&&!v.anulada&&<button style={{...S.btnT,background:"#fff3e0",color:"#e65100"}} onClick={()=>setShowAb(true)}>💰 Pago</button>}
-          {!v.anulada&&esAdmin&&setVentas&&<button style={{...S.btnT,background:"#ffebee",color:"#c62828"}} onClick={()=>{const m=window.prompt("Motivo de anulacion:");if(m===null)return;setVentas(prev=>prev.map(vv=>vv.folio===v.folio?{...vv,anulada:true,motivoAnulacion:m}:vv));}}>❌ Anular</button>}
+          {!v.anulada&&esAdmin&&setVentas&&<button style={{...S.btnT,background:"#ffebee",color:"#c62828"}} onClick={()=>{const m=window.prompt("Motivo de anulacion:");if(m===null)return;setVentas(prev=>{const next=prev.map(vv=>vv.folio===v.folio?{...vv,anulada:true,motivoAnulacion:m}:vv);const updated=next.find(vv=>vv.folio===v.folio);if(updated&&upsertVenta)upsertVenta(updated);return next;});}}>❌ Anular</button>}
         </div>
       </div>
       {showAb&&<AbonoModal venta={v} onSave={ab=>{addAbono(v.folio,ab);setShowAb(false);}} onClose={()=>setShowAb(false)}/>}
