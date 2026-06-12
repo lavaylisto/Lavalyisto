@@ -964,7 +964,7 @@ function Gastos({gastos,setGastos,sesion}){
   </div>);
 }
 
-function Configuracion({servicios,setServicios,exportarDatos,importarDatos}){
+function Configuracion({servicios,setServicios,exportarDatos,importarDatos,upsertVenta}){
   const [nv,setNv]=useState({label:"",precio:""});const [editId,setEditId]=useState(null);const [ed,setEd]=useState({});const [busq,setBusq]=useState("");
   const add=()=>{if(!nv.label.trim()||!nv.precio)return;setServicios(prev=>[...prev,{id:"c-"+Date.now(),label:nv.label.toUpperCase(),precio:parseFloat(nv.precio)}]);setNv({label:"",precio:""});};
   const del=id=>setServicios(prev=>prev.filter(s=>s.id!==id));
@@ -1462,7 +1462,7 @@ function AppContent({sesion,onLogout}){
       {tab==="inventario"&&<Inventario inventario={inventario} setInventario={setInventario}/>}
       {tab==="equipo"&&<Equipo empleadas={empleadas} setEmpleadas={setEmpleadas} ventas={ventas} esAdmin={esAdmin}/>}
       {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={handleCierreListo} onResetCierre={()=>setCierreOk(false)} sesion={sesion} salidasCaja={salidasCaja}/>}
-      {tab==="config"&&<Configuracion servicios={servicios} setServicios={setServicios} exportarDatos={exportarDatos} importarDatos={importarDatos}/>}
+      {tab==="config"&&<Configuracion servicios={servicios} setServicios={setServicios} exportarDatos={exportarDatos} importarDatos={importarDatos} upsertVenta={upsertVenta}/>}
       {tab==="usuarios"&&<GestionUsuarios/>}
     </div>
     {ticketV&&<TicketModal venta={ticketV} empleadas={empleadas} onClose={()=>setTicketV(null)}/>}
