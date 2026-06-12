@@ -973,7 +973,7 @@ function Configuracion({servicios,setServicios,exportarDatos,importarDatos,upser
   return(<div style={S.panel}>
     <h2 style={S.ptitle}>⚙️ Configuracion</h2>
     <Card title="💾 Respaldo">
-      <button style={{...S.btnP,marginBottom:10,background:"linear-gradient(135deg,#f59e0b,#d97706)"}} onClick={async()=>{const{db}=await import("../firebase");const{collection,setDoc,doc}=await import("firebase/firestore");const vs=JSON.parse(localStorage.getItem("ll_ventas")||"[]");for(const v of vs){await setDoc(doc(collection(db,"ventas"),v.folio),{...v,_updatedAt:new Date().toISOString()},{merge:true});}alert("✅ "+vs.length+" ventas subidas a Firestore");}}>🔥 Subir todas las ventas a Firestore</button>
+      <button style={{...S.btnP,marginBottom:10,background:"linear-gradient(135deg,#f59e0b,#d97706)"}} onClick={async()=>{const{db}=await import("./firebase");const{collection,setDoc,doc}=await import("firebase/firestore");const vs=JSON.parse(localStorage.getItem("ll_ventas")||"[]");for(const v of vs){await setDoc(doc(collection(db,"ventas"),v.folio),{...v,_updatedAt:new Date().toISOString()},{merge:true});}alert("✅ "+vs.length+" ventas subidas a Firestore");}}>🔥 Subir todas las ventas a Firestore</button>
             <button style={{...S.btnP,marginBottom:10}} onClick={exportarDatos}>📥 Exportar datos</button>
       <label style={{...S.btnP,display:"block",textAlign:"center",cursor:"pointer",background:"#e8f5fd",color:"#1a3c5e",padding:"13px",borderRadius:10,fontSize:15,fontWeight:700}}>📤 Importar datos<input type="file" accept=".json" style={{display:"none"}} onChange={importarDatos}/></label>
     </Card>
