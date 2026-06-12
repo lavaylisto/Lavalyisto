@@ -351,7 +351,7 @@ function OrdenCard({v,setVentas,addAbono,setTicket}){
   );
 }
 
-function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,cierreListo,onCierreListo,salidasCaja,setSalidasCaja}){
+function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja}){
   const hoy=fechaHoyLocal();
   const [tab,setTab]=useState("hoy");const [busq,setBusq]=useState("");
   const [fecha,setFecha]=useState(hoy);const [showNueva,setShowNueva]=useState(false);
@@ -428,7 +428,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
               <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e"}}>💰 Caja</div>
               <button style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:"#888"}} onClick={()=>setShowCaja(false)}>✕</button>
             </div>
-            <CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={onCierreListo} sesion={sesion} salidasCaja={salidasCaja}/>
+            <CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={onCierreListo} onResetCierre={onResetCierre} sesion={sesion} salidasCaja={salidasCaja}/>
           </div>
         </div>
       )}
@@ -1161,26 +1161,15 @@ function SalidaCaja({sesion,salidasCaja,setSalidasCaja,onClose}){
 }
 
 
-function CierreCaja({ventas,empleadas,onLogout,onCierreListo,sesion,salidasCaja}){
+function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesion,salidasCaja}){
   const hoy=fechaHoyLocal();
   const uid=sesion?.id||"admin";
   // AK: apertura de esta sesion especifica (sessionStorage = se borra al cerrar sesion)
   const AK="ll_apertura_"+hoy+"_"+uid;
   // CK de sesion: clave unica por sesion (incluye timestamp de login)
-  // CK unico por sesion usando contador (incrementa en cada login)
-  const sesCount=sesion?._sesCount||"0";
-  const CK="ll_cierre_"+hoy+"_"+uid+"_"+sesCount;
-  // Lista de todos los cierres del dia para este usuario
-  const getAllCierres=()=>{
-    const list=[];
-    try{for(let i=0;i<localStorage.length;i++){
-      const k=localStorage.key(i);
-      if(k&&k.startsWith("ll_cierre_"+hoy+"_"+uid)){
-        try{const c=JSON.parse(localStorage.getItem(k));if(c)list.push(c);}catch{}
-      }
-    }}catch{}
-    return list;
-  };
+  // CK unico por sesion usando _sesId (timestamp de login)
+  const CK="ll_cierre_"+hoy+"_"+uid+"_"+(sesion?._sesId||"0");
+  // No necesitamos getAllCierres aqui - ResumenDia lo hace
   const [modo,setModo]=useState(()=>{try{return localStorage.getItem(AK)?"cierre":"apertura";}catch{return"apertura";}});
   const [ap,setAp]=useState(()=>{try{const a=localStorage.getItem(AK);return a?JSON.parse(a):null;}catch{return null;}});
   // cg: cierre de ESTA sesion (no del dia completo)
@@ -1270,22 +1259,39 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,sesion,salidasCaja}
   const confirmar=()=>{
     const d={fecha:new Date().toISOString(),emp:sesion?.nombre||"",bills,coins,totEf,fd,efN,tPic:parseFloat(tPic)||0,tJep:parseFloat(tJep)||0,totTr,totTa,dEf,dTr,dTa,dTot,espEf,espEfBruto,espTr,espTa,espTot,totMisSalidas,misSalidas,nv:todosAbonos.length,tv:todosAbonos.reduce((a,ab)=>a+ab.monto,0)};
     try{localStorage.setItem(CK,JSON.stringify(d));}catch{}
-    setCg(d);if(onCierreListo)onCierreListo();imprimir(d);setTimeout(()=>{if(onLogout)onLogout();},3000);
+    setCg(d);
+    if(onCierreListo)onCierreListo();
+    imprimir(d);
+    // Logout inmediato despues de imprimir (no hay forma de cancelarlo)
+    setTimeout(()=>{if(onLogout)onLogout();},2000);
   };
   const regAp=()=>{
     const d={empleadaNombre:empleadas.find(e=>String(e.id)===String(aEmp))?.nombre||"",fondo:parseFloat(fondo)||15,fecha:new Date().toISOString()};
     try{localStorage.setItem(AK,JSON.stringify(d));}catch{}
     setAp(d);setModo("cierre");
   };
-  if(cg){return(<div style={S.panel}>
-    <h2 style={S.ptitle}>💰 Caja</h2>
-    <div style={{background:"#e8f5e9",borderRadius:12,padding:16,marginBottom:14,textAlign:"center"}}><div style={{fontSize:32}}>✅</div><div style={{fontWeight:700,fontSize:16,color:"#2e7d32"}}>Cierre confirmado</div><div style={{fontSize:12,color:"#888",marginTop:4}}>Ya no puede modificarse.</div></div>
-    <div style={{...S.kpi,borderLeft:`4px solid ${cg.dTot===0?"#4caf50":cg.dTot>0?"#1565c0":"#e53935"}`,marginBottom:14}}>
-      <div style={{fontSize:32}}>{cg.dTot===0?"✅":cg.dTot>0?"📈":"⚠️"}</div>
-      <div><div style={{fontWeight:800,fontSize:18,color:cg.dTot===0?"#2e7d32":cg.dTot>0?"#1565c0":"#e53935"}}>{cg.dTot===0?"¡Caja cuadrada!":cg.dTot>0?`Sobran $${cg.dTot.toFixed(2)}`:`Faltan $${Math.abs(cg.dTot).toFixed(2)}`}</div></div>
+  if(cg){return(
+    <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#1a3c5e,#2563a8)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:20,fontFamily:"'DM Sans',sans-serif"}}>
+      <div style={{background:"#fff",borderRadius:20,padding:"32px 28px",width:"100%",maxWidth:380,textAlign:"center",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}}>
+        <div style={{fontSize:48,marginBottom:8}}>{cg.dTot===0?"✅":cg.dTot>0?"📈":"⚠️"}</div>
+        <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,color:"#1a3c5e",marginBottom:6}}>
+          {cg.dTot===0?"¡Caja Cuadrada!":cg.dTot>0?`Sobran $${cg.dTot.toFixed(2)}`:`Faltan $${Math.abs(cg.dTot).toFixed(2)}`}
+        </div>
+        <div style={{fontSize:13,color:"#888",marginBottom:16}}>{new Date(cg.fecha).toLocaleString("es-MX")}</div>
+        <div style={{background:"#f0f4f8",borderRadius:10,padding:"12px 16px",marginBottom:16,fontSize:13}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span>💵 Efectivo neto</span><strong>${(cg.efN||0).toFixed(2)}</strong></div>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span>🏦 Transferencias</span><strong>${(cg.totTr||0).toFixed(2)}</strong></div>
+          <div style={{display:"flex",justifyContent:"space-between"}}><span>💳 Tarjeta</span><strong>${(cg.totTa||0).toFixed(2)}</strong></div>
+        </div>
+        <div style={{background:"#fff3e0",borderRadius:8,padding:"10px",marginBottom:16,fontSize:13,color:"#e65100",fontWeight:600}}>
+          ⏱️ Cerrando sesión automáticamente...
+        </div>
+        <button style={{width:"100%",padding:"12px",background:"#1a3c5e",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:8}} onClick={()=>imprimir(cg)}>🖨️ Reimprimir ticket</button>
+        <button style={{width:"100%",padding:"12px",background:"#e8f0f7",color:"#1a3c5e",border:"none",borderRadius:10,fontSize:14,fontWeight:600,cursor:"pointer",marginBottom:8}} onClick={()=>{setCg(null);setPaso(1);setModo("cierre");if(onResetCierre)onResetCierre();}}>🔄 Nuevo cierre</button>
+        <button style={{width:"100%",padding:"12px",background:"linear-gradient(135deg,#c62828,#e53935)",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer"}} onClick={()=>{if(onLogout)onLogout();}}>🚪 Salir ahora</button>
+      </div>
     </div>
-    <button style={{...S.btnP,background:"linear-gradient(135deg,#2e7d32,#388e3c)"}} onClick={()=>imprimir(cg)}>🖨️ Reimprimir ticket</button>
-  </div>);}
+  );}
   return(<div style={S.panel}>
     <h2 style={S.ptitle}>💰 Caja</h2>
     <div style={{display:"flex",gap:8,marginBottom:14}}>
@@ -1368,37 +1374,48 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,sesion,salidasCaja}
 }
 
 export default function LavaListo(){
-  const [ses,setSes]=useState(()=>{try{const s=sessionStorage.getItem("ll_ses");return s?JSON.parse(s):null;}catch{return null;}});
+  const [ses,setSes]=useState(null);
+
   const login=u=>{
-    // Incrementar contador de sesion en localStorage - SIEMPRE nuevo al entrar
-    const sesKey="ll_ses_count_"+u.id;
-    const count=(parseInt(localStorage.getItem(sesKey)||"0")+1).toString();
-    localStorage.setItem(sesKey, count);
-    // Guardar sesion con el contador incluido
-    const sesData={...u, _sesCount: count};
-    try{sessionStorage.setItem("ll_ses",JSON.stringify(sesData));}catch{}
+    // Cada login genera un ID de sesion unico con timestamp
+    const sesId=Date.now().toString();
+    const sesData={...u, _sesId: sesId};
+    // Guardar en localStorage (no sessionStorage - mas confiable)
+    try{localStorage.setItem("ll_sesion_activa",JSON.stringify(sesData));}catch{}
     setSes(sesData);
   };
+
   const logout=()=>{
-    try{sessionStorage.removeItem("ll_ses");}catch{}
+    try{localStorage.removeItem("ll_sesion_activa");}catch{}
     setSes(null);
   };
+
+  // Al montar: verificar si hay sesion activa
+  useEffect(()=>{
+    try{
+      const s=localStorage.getItem("ll_sesion_activa");
+      if(s){
+        const sesData=JSON.parse(s);
+        // Solo restaurar sesion si tiene _sesId (sesion valida)
+        if(sesData._sesId) setSes(sesData);
+        else localStorage.removeItem("ll_sesion_activa");
+      }
+    }catch{}
+  },[]);
+
   if(!ses)return <LoginScreen onLogin={login}/>;
-  return <AppContent sesion={ses} onLogout={logout}/>;
+  return <AppContent key={ses._sesId} sesion={ses} onLogout={logout}/>;
 }
 
 function AppContent({sesion,onLogout}){
   const hoy=fechaHoyLocal();
   const AK="ll_apertura_"+hoy+"_"+sesion.id;
-  // CK unico por sesion - usa contador de sesion (incrementa en cada login)
-  const sesCount=sesion._sesCount||"0";
-  const CK="ll_cierre_"+hoy+"_"+sesion.id+"_"+sesCount;
-  const SESSION_CAJA_KEY="ll_caja_abierta_"+sesion.id;
-  const [cajaOk,setCajaOk]=useState(()=>{try{return !!sessionStorage.getItem(SESSION_CAJA_KEY);}catch{return false;}});
-  // cierreOk: por sesion (se resetea al volver a entrar)
-  // cierreOk: SIEMPRE false al iniciar sesion nueva
-  // sesTs es nuevo cada login, entonces CK es nuevo, y no hay cierre guardado
+  // CK unico por sesion - usa _sesId que es timestamp unico por login
+  const CK="ll_cierre_"+hoy+"_"+sesion.id+"_"+(sesion._sesId||"0");
+  // Estos 3 estados siempre empiezan en false porque AppContent se remonta con key={sesId}
+  const [cajaOk,setCajaOk]=useState(false);
   const [cierreOk,setCierreOk]=useState(false);
+  const [esperandoApertura,setEsperandoApertura]=useState(false);
   const [tab,setTab]=useState("ventas");
   const [ventas,setVentas]=useState(()=>load(KEYS.ventas,[]));
   const [clientes,setClientes]=useState(()=>load(KEYS.clientes,[]));
@@ -1446,8 +1463,9 @@ function AppContent({sesion,onLogout}){
   const esAdmin=sesion.rol==="Administrador";
   const addAbono=(f,ab)=>setVentas(prev=>prev.map(v=>{if(v.folio!==f)return v;const abono={...ab,cobradoPorId:sesion.id,cobradoPorNombre:sesion.nombre};const abs=[...(v.abonos||[]),abono];return{...v,abonos:abs,pagada:saldo({...v,abonos:abs})<=0};}));
   const handleCierreListo=()=>{
-    try{sessionStorage.setItem("ll_cierre_ok_"+sesion.id,"1");}catch{}
     setCierreOk(true);
+    setCajaOk(false);
+    setEsperandoApertura(true);
   };
   const exportarDatos=()=>{const d={ventas,clientes,empleadas,inventario,servicios,gastos,depositos};const blob=new Blob([JSON.stringify(d,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="respaldo-"+hoy+".json";a.click();};
   const importarDatos=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>{try{const d=JSON.parse(ev.target.result);if(d.ventas)setVentas(d.ventas);if(d.clientes)setClientes(d.clientes);if(d.empleadas)setEmpleadas(d.empleadas);if(d.inventario)setInventario(d.inventario);if(d.servicios)setServicios(d.servicios);if(d.gastos)setGastos(d.gastos);if(d.depositos)setDepositos(d.depositos);alert("✅ Datos importados");}catch{alert("❌ Error al importar");}};r.readAsText(f);};
@@ -1463,8 +1481,18 @@ function AppContent({sesion,onLogout}){
     </div>
   );
 
-  if(!cajaOk)return <AperturaObligatoria sesion={sesion} onLogout={onLogout} onAbierta={()=>{try{localStorage.setItem(SESSION_CAJA_KEY,"1");}catch{}setCajaOk(true);}} empleadas={empleadas}/>;
-  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={servicios} sesion={sesion} addAbono={addAbono} onLogout={onLogout} cierreListo={cierreOk} onCierreListo={handleCierreListo} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja}/>;
+  // Si cerró caja y quiere seguir trabajando, DEBE abrir caja nuevamente
+  if(!cajaOk||esperandoApertura)return <AperturaObligatoria
+    sesion={sesion}
+    onLogout={onLogout}
+    onAbierta={()=>{
+      setCajaOk(true);
+      setEsperandoApertura(false);
+      setCierreOk(false); // nuevo turno = nuevo cierre requerido
+    }}
+    empleadas={empleadas}
+  />;
+  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={servicios} sesion={sesion} addAbono={addAbono} onLogout={onLogout} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja}/>;
   const tabs=[
     {id:"ventas",icon:"🧾",l:"Venta"},{id:"historial",icon:"📋",l:"Historial"},
     {id:"pendientes",icon:"⏳",l:"Pendientes",b:pCount},{id:"resumen",icon:"📈",l:"Resumen día"},
@@ -1499,7 +1527,7 @@ function AppContent({sesion,onLogout}){
       {tab==="gastos"&&<Gastos gastos={gastos} setGastos={setGastos} sesion={sesion}/>}
       {tab==="inventario"&&<Inventario inventario={inventario} setInventario={setInventario}/>}
       {tab==="equipo"&&<Equipo empleadas={empleadas} setEmpleadas={setEmpleadas} ventas={ventas} esAdmin={esAdmin}/>}
-      {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={handleCierreListo} sesion={sesion} salidasCaja={salidasCaja}/>}
+      {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={handleCierreListo} onResetCierre={()=>setCierreOk(false)} sesion={sesion} salidasCaja={salidasCaja}/>}
       {tab==="config"&&<Configuracion servicios={servicios} setServicios={setServicios} exportarDatos={exportarDatos} importarDatos={importarDatos}/>}
       {tab==="usuarios"&&<GestionUsuarios/>}
     </div>
