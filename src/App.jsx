@@ -549,7 +549,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
   );
 }
 
-function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin}){
+function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertVenta}){
   const [showAb,setShowAb]=useState(false);
   const emp=empleadas.find(e=>e.id===v.empleadaId);
   const pend=saldo(v);const esPag=pagada(v);
@@ -601,7 +601,7 @@ function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin}){
   );
 }
 
-function Historial({ventas,setVentas,empleadas,setTicket,addAbono,esAdmin}){
+function Historial({ventas,setVentas,empleadas,setTicket,addAbono,esAdmin,upsertVenta}){
   const [fP,setFP]=useState("Todos");const [fE,setFE]=useState("Todos");
   const [fEmp,setFEmp]=useState("Todos");const [fF,setFF]=useState("");const [busq,setBusq]=useState("");
   const filtered=ventas.filter(v=>{
@@ -626,7 +626,7 @@ function Historial({ventas,setVentas,empleadas,setTicket,addAbono,esAdmin}){
         </div>
       </Card>
       <div style={{fontSize:12,color:"#888",marginBottom:8}}>{filtered.length} ventas — Total: ${filtered.reduce((a,v)=>a+v.total,0).toFixed(2)}</div>
-      {filtered.length===0?<div style={S.empty}>Sin resultados</div>:filtered.map(v=><VentaCardItem key={v.folio} v={v} empleadas={empleadas} setTicket={setTicket} addAbono={addAbono} setVentas={setVentas} esAdmin={esAdmin}/>)}
+      {filtered.length===0?<div style={S.empty}>Sin resultados</div>:tab==="historial"&&<Historial ventas={ventas} setVentas={setVentas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} esAdmin={esAdmin} upsertVenta={upsertVenta}/>
     </div>
   );
 }
@@ -964,7 +964,7 @@ function Gastos({gastos,setGastos,sesion,upsertGasto}){
   </div>);
 }
 
-function Configuracion({servicios,setServicios,exportarDatos,importarDatos,upsertVenta}){
+function Configuracion({servicios,setServicios,exportarDatos,importarDatos,upsertVenta,upsertServicio}){
   const [nv,setNv]=useState({label:"",precio:""});const [editId,setEditId]=useState(null);const [ed,setEd]=useState({});const [busq,setBusq]=useState("");
   const add=()=>{if(!nv.label.trim()||!nv.precio)return;const ns={id:"c-"+Date.now(),label:nv.label.toUpperCase(),precio:parseFloat(nv.precio)};setServicios(prev=>[...prev,ns]);if(upsertServicio)upsertServicio({...ns,_updatedAt:new Date().toISOString()});setNv({label:"",precio:""});};
   const del=id=>setServicios(prev=>prev.filter(s=>s.id!==id));
@@ -1455,7 +1455,7 @@ const { data: salidasCaja, setData: setSalidasCaja, upsert: upsertSalida } = use
       {tab==="inventario"&&<Inventario inventario={inventario} setInventario={setInventario} upsertInventario={upsertInventario}/>}
       {tab==="equipo"&&<Equipo empleadas={empleadas} setEmpleadas={setEmpleadas} ventas={ventas} esAdmin={esAdmin} upsertEmpleada={upsertEmpleada}/>}
       {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={handleCierreListo} onResetCierre={()=>setCierreOk(false)} sesion={sesion} salidasCaja={salidasCaja}/>}
-      {tab==="config"&&<Configuracion servicios={servicios} setServicios={setServicios} exportarDatos={exportarDatos} importarDatos={importarDatos} upsertVenta={upsertVenta}/>}
+      {tab==="config"&&<Configuracion servicios={servicios} setServicios={setServicios} exportarDatos={exportarDatos} importarDatos={importarDatos} upsertVenta={upsertVenta} upsertServicio={upsertServicio}/>}
       {tab==="usuarios"&&<GestionUsuarios/>}
     </div>
     {ticketV&&<TicketModal venta={ticketV} empleadas={empleadas} onClose={()=>setTicketV(null)}/>}
