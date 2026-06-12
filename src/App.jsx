@@ -973,6 +973,7 @@ function Configuracion({servicios,setServicios,exportarDatos,importarDatos}){
   return(<div style={S.panel}>
     <h2 style={S.ptitle}>⚙️ Configuracion</h2>
     <Card title="💾 Respaldo">
+      <button style={{...S.btnP,marginBottom:10,background:"linear-gradient(135deg,#f59e0b,#d97706)"}} onClick={()=>{const vs=JSON.parse(localStorage.getItem("ll_ventas")||"[]");vs.forEach(v=>upsertVenta&&upsertVenta(v));alert("✅ "+vs.length+" ventas subidas a Firestore");}}>🔥 Subir todas las ventas a Firestore</button>
       <button style={{...S.btnP,marginBottom:10}} onClick={exportarDatos}>📥 Exportar datos</button>
       <label style={{...S.btnP,display:"block",textAlign:"center",cursor:"pointer",background:"#e8f5fd",color:"#1a3c5e",padding:"13px",borderRadius:10,fontSize:15,fontWeight:700}}>📤 Importar datos<input type="file" accept=".json" style={{display:"none"}} onChange={importarDatos}/></label>
     </Card>
