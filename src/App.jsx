@@ -1387,14 +1387,13 @@ function AppContent({sesion,onLogout}){
   const [esperandoApertura,setEsperandoApertura]=useState(false);
   const [tab,setTab]=useState("ventas");
   const { data: ventas, setData: setVentas, upsert: upsertVenta } = useCollection("ventas", KEYS.ventas, []);
-  const [clientes,setClientes]=useState(()=>load(KEYS.clientes,[]));
-  const [empleadas,setEmpleadas]=useState(()=>load(KEYS.empleadas,EMPLEADAS_DEFAULT));
-  const [inventario,setInventario]=useState(()=>load(KEYS.inventario,INSUMOS_DEFAULT));
-  const [servicios,setServicios]=useState(()=>load(KEYS.servicios,SERVICIOS_DEFAULT));
-  const [gastos,setGastos]=useState(()=>load("ll_gastos",[]));
-  const [depositos,setDepositos]=useState(()=>load("ll_depositos",[]));
-  const [salidasCaja,setSalidasCaja]=useState(()=>load("ll_salidas_caja",[]));
-  const [showSalida,setShowSalida]=useState(false);
+const { data: clientes, setData: setClientes, upsert: upsertCliente } = useCollection("clientes", KEYS.clientes, []);
+const { data: empleadas, setData: setEmpleadas, upsert: upsertEmpleada } = useCollection("empleadas", KEYS.empleadas, EMPLEADAS_DEFAULT);
+const { data: inventario, setData: setInventario, upsert: upsertInventario } = useCollection("inventario", KEYS.inventario, INSUMOS_DEFAULT);
+const { data: servicios, setData: setServicios, upsert: upsertServicio } = useCollection("servicios", KEYS.servicios, SERVICIOS_DEFAULT);
+const { data: gastos, setData: setGastos, upsert: upsertGasto } = useCollection("gastos", "ll_gastos", []);
+const { data: depositos, setData: setDepositos, upsert: upsertDeposito } = useCollection("depositos", "ll_depositos", []);
+const { data: salidasCaja, setData: setSalidasCaja, upsert: upsertSalida } = useCollection("salidasCaja", "ll_salidas_caja", []);  const [showSalida,setShowSalida]=useState(false);
   const [ticketV,setTicketV]=useState(null);
   // ─── GUARDAR EN LOCALSTORAGE ──────────────────────────────────────
   useEffect(()=>save(KEYS.clientes,clientes),[clientes]);
