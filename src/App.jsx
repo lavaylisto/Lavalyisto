@@ -1150,8 +1150,6 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
   const [coins,setCoins]=useState(()=>Object.fromEntries(MONEDAS.map(m=>[m,""])));
   const [tPic,setTPic]=useState("");const [tJep,setTJep]=useState("");const [tTar,setTTar]=useState("");
   const [paso,setPaso]=useState(1);
-  // Filtra SOLO los abonos cobrados por este usuario (sesion.id)
-  const uid=sesion?.id;
   const todosAbonos=ventas.filter(v=>!v.anulada).flatMap(v=>(v.abonos||[]).filter(ab=>{
     const tieneId=ab.cobradoPorId!=null;
     const mismoUsuario=tieneId
