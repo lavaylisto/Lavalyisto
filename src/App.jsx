@@ -1175,7 +1175,9 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
   const [modo,setModo]=useState(()=>{try{return localStorage.getItem(AK)?"cierre":"apertura";}catch{return"apertura";}});
   const [ap,setAp]=useState(()=>{try{const a=localStorage.getItem(AK);return a?JSON.parse(a):null;}catch{return null;}});
   // cg: cierre de ESTA sesion (no del dia completo)
-  const [cg,setCg]=useState(()=>{try{const c=localStorage.getItem(CK);return c?JSON.parse(c):null;}catch{return null;}});
+  // cg SIEMPRE empieza null - nunca leer del localStorage al montar
+  // Esto garantiza que cada sesion empieza con cierre limpio
+  const [cg,setCg]=useState(null);
   const [aEmp,setAEmp]=useState(empleadas[0]?.id||null);const [fondo,setFondo]=useState("15.00");
   // empId ya no se usa — el cierre filtra por sesion.id automaticamente
   const [bills,setBills]=useState(()=>Object.fromEntries(BILLETES.map(b=>[b,""])));
