@@ -384,7 +384,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
               <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e"}}>➕ Nueva Venta</div>
               <button style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:"#888"}} onClick={()=>setShowNueva(false)}>✕</button>
             </div>
-            <NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={v=>{setShowNueva(false);setTicket(v);}} servicios={servicios} sesion={sesion} upsertVenta={upsertVenta}/>
+            <NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={v=>{setShowNueva(false);setTicket(v);}} servicios={servicios} sesion={sesion} upsertVenta={upsertVenta} upsertCliente={upsertCliente}/>
           </div>
         </div>
       )}
@@ -1419,7 +1419,7 @@ const { data: salidasCaja, setData: setSalidasCaja, upsert: upsertSalida } = use
     }}
     empleadas={empleadas}
   />;
-  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={servicios} sesion={sesion} addAbono={addAbono} onLogout={onLogout} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} upsertVenta={upsertVenta}/>;
+  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={servicios} sesion={sesion} addAbono={addAbono} onLogout={onLogout} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} upsertVenta={upsertVenta} upsertSalida={upsertSalida} upsertCliente={upsertCliente}/>;
   const tabs=[
     {id:"ventas",icon:"🧾",l:"Venta"},{id:"historial",icon:"📋",l:"Historial"},
     {id:"pendientes",icon:"⏳",l:"Pendientes",b:pCount},{id:"resumen",icon:"📈",l:"Resumen día"},
