@@ -279,11 +279,11 @@ function AperturaObligatoria({sesion,onLogout,onAbierta,empleadas}){
 }
 
 // OrdenCard es componente SEPARADO (no dentro de map ni de PantallaEmpleada)
-function OrdenCard({v,setVentas,addAbono,setTicket}){
+function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta}){
   const [showAb,setShowAb]=useState(false);
   const est=getEst(v);const sig=sigEst(v.estado||"recibido");
   const esPag=pagada(v);const pend=saldo(v);
-  const cambiar=()=>{if(sig)setVentas(prev=>prev.map(vv=>vv.folio===v.folio?{...vv,estado:sig.id}:vv));};
+  const cambiar=()=>{if(sig){setVentas(prev=>{const next=prev.map(vv=>vv.folio===v.folio?{...vv,estado:sig.id}:vv);const updated=next.find(vv=>vv.folio===v.folio);if(updated&&upsertVenta)upsertVenta(updated);return next;});}};
   const toggle=f=>setVentas(prev=>prev.map(vv=>vv.folio===v.folio?{...vv,[f]:!vv[f]}:vv));
   return(
     <div style={{borderRadius:14,border:`2px solid ${est.color}`,background:"#fff",marginBottom:12,overflow:"hidden",boxShadow:"0 2px 8px rgba(0,0,0,.06)"}}>
@@ -374,7 +374,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         )}
         {filtrados.length===0
           ?<div style={{textAlign:"center",padding:"40px 20px",color:"#aaa"}}><div style={{fontSize:48,marginBottom:8}}>{tab==="cobrar"?"🎉":"📋"}</div><div>{tab==="cobrar"?"Todo cobrado":tab==="entregar"?"Todo entregado":"Sin ordenes"}</div></div>
-          :filtrados.map(v=><OrdenCard key={v.folio} v={v} setVentas={setVentas} addAbono={addAbono} setTicket={setTicket}/>)
+          :filtrados.map(v=><OrdenCard key={v.folio} v={v} setVentas={setVentas} addAbono={addAbono} setTicket={setTicket} upsertVenta={upsertVenta}/>)
         }
       </div>
       {showNueva&&(
