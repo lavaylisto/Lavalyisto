@@ -440,7 +440,7 @@ function ServicioBuscador({servId,piezas,servicios,onServChange,onPiezasChange})
   );
 }
 
-function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,servicios,sesion,upsertVenta}){
+function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,servicios,sesion,upsertVenta,upsertCliente}){
   const man=new Date();man.setDate(man.getDate()+1);
   const [cQ,setCQ]=useState("");const [cId,setCId]=useState(null);
   const [nC,setNC]=useState({nombre:"",tel:"",email:"",rfc:"",direccion:""});
