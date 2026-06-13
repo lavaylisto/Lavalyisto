@@ -631,13 +631,13 @@ function Historial({ventas,setVentas,empleadas,setTicket,addAbono,esAdmin,upsert
   );
 }
 
-function PendienteItem({v,empleadas,setTicket,addAbono,setVentas}){
+function PendienteItem({v,empleadas,setTicket,addAbono,setVentas,upsertVenta}){
   const [showAb,setShowAb]=useState(false);
   const emp=empleadas.find(e=>e.id===v.empleadaId);
   const pend=saldo(v);const esPag=pagada(v);
   const abs=v.abonos||[];const totAb=abs.reduce((a,ab)=>a+ab.monto,0);
   const est=getEst(v);
-  const toggle=f=>setVentas&&setVentas(prev=>prev.map(vv=>vv.folio===v.folio?{...vv,[f]:!vv[f]}:vv));
+  const toggle=f=>setVentas&&setVentas(prev=>{const next=prev.map(vv=>vv.folio===v.folio?{...vv,[f]:!vv[f]}:vv);const updated=next.find(vv=>vv.folio===v.folio);if(updated&&upsertVenta)upsertVenta(updated);return next;});
   return(
     <div>
       <div style={{...S.vcard,borderLeft:`4px solid ${esPag?"#ff9800":"#e53935"}`}}>
@@ -673,7 +673,7 @@ function PendienteItem({v,empleadas,setTicket,addAbono,setVentas}){
   );
 }
 
-function Pendientes({ventas,empleadas,setTicket,addAbono,setVentas}){
+function Pendientes({ventas,empleadas,setTicket,addAbono,setVentas,upsertVenta}){
   const [filtro,setFiltro]=useState("todos");const [busq,setBusq]=useState("");
   const porCob=ventas.filter(v=>!pagada(v)&&!v.anulada);
   const porEnt=ventas.filter(v=>pagada(v)&&!v.anulada&&(v.estado||"recibido")!=="entregado");
@@ -697,7 +697,7 @@ function Pendientes({ventas,empleadas,setTicket,addAbono,setVentas}){
       </div>
       <input style={{...S.inp,marginBottom:12}} placeholder="🔍 Buscar cliente o folio..." value={busq} onChange={e=>setBusq(e.target.value)}/>
       {filtrados.length===0?<div style={{textAlign:"center",padding:"30px",color:"#aaa"}}><div style={{fontSize:36}}>🎉</div><div>Sin pendientes</div></div>
-        :filtrados.map(v=><PendienteItem key={v.folio} v={v} empleadas={empleadas} setTicket={setTicket} addAbono={addAbono} setVentas={setVentas}/>)}
+        :filtrados.map(v=><PendienteItem key={v.folio} v={v} empleadas={empleadas} setTicket={setTicket} addAbono={addAbono} setVentas={setVentas} upsertVenta={upsertVenta}/>)}
     </div>
   );
 }
@@ -1447,7 +1447,7 @@ const { data: salidasCaja, setData: setSalidasCaja, upsert: upsertSalida } = use
     <div style={S.content}>
       {tab==="ventas"&&<NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={setTicketV} servicios={servicios} sesion={sesion} upsertVenta={upsertVenta}/>}
       {tab==="historial"&&<Historial ventas={ventas} setVentas={setVentas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} esAdmin={esAdmin} upsertVenta={upsertVenta}/>}
-      {tab==="pendientes"&&<Pendientes ventas={ventas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} setVentas={setVentas}/>}
+      {tab==="pendientes"&&<Pendientes ventas={ventas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} setVentas={setVentas} upsertVenta={upsertVenta}/>}
       {tab==="resumen"&&<ResumenDia ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja}/>}
       {tab==="reportes"&&<Reportes ventas={ventas} empleadas={empleadas}/>}
       {tab==="depositos"&&<Depositos depositos={depositos} setDepositos={setDepositos} ventas={ventas} upsertDeposito={upsertDeposito}/>}
