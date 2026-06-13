@@ -318,7 +318,7 @@ function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta}){
   );
 }
 
-function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta}){
+function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta,upsertSalida,upsertCliente}){
   const hoy=fechaHoyLocal();
   const [tab,setTab]=useState("hoy");const [busq,setBusq]=useState("");
   const [fecha,setFecha]=useState(hoy);const [showNueva,setShowNueva]=useState(false);
