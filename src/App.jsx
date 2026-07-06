@@ -719,7 +719,7 @@ function Pendientes({ventas,empleadas,setTicket,addAbono,setVentas,upsertVenta})
   );
 }
 
-function Reportes({ventas,empleadas}){
+function Reportes({ventas,empleadas,salidasCaja}){
   const hoy=fechaHoyLocal();
   const sem=semISO(new Date());const mes=mesK(new Date());
   const [mesS,setMesS]=useState(mes);const [sub,setSub]=useState("resumen");
@@ -744,7 +744,7 @@ function Reportes({ventas,empleadas}){
     <div style={S.panel}>
       <h2 style={S.ptitle}>📊 Reportes</h2>
       <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
-        {[{id:"resumen",l:"📈 Resumen"},{id:"depositos",l:"💵 Depositos"},{id:"cuadre",l:"🧮 Cuadre"},{id:"ventas",l:"📋 Ventas"},{id:"excel",l:"📥 Excel"}].map(t=>(
+        {[{id:"resumen",l:"📈 Resumen"},{id:"depositos",l:"💵 Depositos"},{id:"salidas",l:"💸 Salidas"},{id:"cuadre",l:"🧮 Cuadre"},{id:"ventas",l:"📋 Ventas"},{id:"excel",l:"📥 Excel"}].map(t=>(
           <button key={t.id} style={{...S.pill,...(sub===t.id?S.pillA:{}),fontSize:12}} onClick={()=>setSub(t.id)}>{t.l}</button>
         ))}
       </div>
@@ -812,6 +812,74 @@ function Reportes({ventas,empleadas}){
         </Card>
       </div>)}
 
+      {sub==="salidas"&&(()=>{
+        const salidasMes=(salidasCaja||[]).filter(s=>!s.eliminada&&s.fecha&&s.fecha.startsWith(mesS));
+        const totMes=parseFloat(salidasMes.reduce((a,s)=>a+s.monto,0).toFixed(2));
+        // Agrupar por día (más reciente primero)
+        const porDia={};
+        salidasMes.forEach(s=>{if(!porDia[s.fecha])porDia[s.fecha]=[];porDia[s.fecha].push(s);});
+        const dias=Object.entries(porDia).sort((a,b)=>b[0].localeCompare(a[0]));
+        // Resumen por persona
+        const porQuien={};
+        salidasMes.forEach(s=>{porQuien[s.quien||"Sin registrar"]=(porQuien[s.quien||"Sin registrar"]||0)+s.monto;});
+        const imprimirSalidas=()=>{
+          const w=window.open("","_blank","width=700,height=650");
+          if(!w)return;
+          const rows=dias.map(([dia,lista])=>{
+            const nombreDia=new Date(dia+"T12:00:00").toLocaleDateString("es-MX",{weekday:"long",day:"numeric",month:"long"});
+            const totDia=lista.reduce((a,s)=>a+s.monto,0);
+            return "<tr><td colspan='3' style='background:#e8f0f7;padding:5px;font-weight:bold;text-transform:capitalize'>"+nombreDia+"</td><td style='background:#e8f0f7;padding:5px;text-align:right;font-weight:bold'>-$"+totDia.toFixed(2)+"</td></tr>"
+              +lista.map(s=>"<tr style='border-bottom:1px solid #eee'><td style='padding:4px'>"+(s.hora||"")+"</td><td style='padding:4px'>"+s.motivo+"</td><td style='padding:4px'>"+(s.quien||"")+"</td><td style='padding:4px;text-align:right;color:#c62828;font-weight:bold'>-$"+s.monto.toFixed(2)+"</td></tr>").join("");
+          }).join("");
+          const quienHtml=Object.entries(porQuien).sort((a,b)=>b[1]-a[1]).map(([q,m])=>"<div style='font-size:12px'>"+q+": <strong>-$"+m.toFixed(2)+"</strong></div>").join("");
+          const html="<html><head><title>Salidas de caja del mes</title><style>body{font-family:sans-serif;padding:20px}h2{color:#1a3c5e;text-align:center}table{border-collapse:collapse;width:100%;font-size:11px}</style></head><body>"
+            +"<h2>🫧 Lava&amp;Listo — Salidas de caja "+mesS+"</h2>"
+            +"<table><tr><th style='background:#1a3c5e;color:#fff;padding:5px;text-align:left'>Hora</th><th style='background:#1a3c5e;color:#fff;padding:5px;text-align:left'>Motivo</th><th style='background:#1a3c5e;color:#fff;padding:5px;text-align:left'>Registró</th><th style='background:#1a3c5e;color:#fff;padding:5px;text-align:right'>Monto</th></tr>"+rows+"</table>"
+            +"<div style='border:2px solid #c62828;background:#ffebee;border-radius:10px;padding:12px;text-align:center;margin-top:14px'><div style='font-size:20px;font-weight:800;color:#c62828'>TOTAL SALIDAS DEL MES: -$"+totMes.toFixed(2)+"</div></div>"
+            +"<h3 style='color:#1a3c5e;margin-top:14px'>Por persona</h3>"+quienHtml
+            +"<p style='font-size:10px;color:#aaa;text-align:center'>Impreso: "+new Date().toLocaleString("es-MX")+"</p>"
+            +"<scr"+"ipt>window.print();window.close();</"+"script></body></html>";
+          w.document.write(html);w.document.close();
+        };
+        return(<div>
+          <div style={S.kgrid}>
+            <div style={{...S.kpi,borderLeft:"4px solid #c62828"}}><div style={{fontSize:22}}>💸</div><div><div style={{fontWeight:800,fontSize:18,color:"#c62828"}}>-${totMes.toFixed(2)}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Total salidas {mesS}</div></div></div>
+            <div style={{...S.kpi,borderLeft:"4px solid #ff9800"}}><div style={{fontSize:22}}>🧾</div><div><div style={{fontWeight:800,fontSize:18,color:"#ff9800"}}>{salidasMes.length}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Movimientos</div></div></div>
+          </div>
+          <button style={{...S.btnP,marginBottom:14,width:"auto",padding:"9px 16px",fontSize:13}} onClick={imprimirSalidas}>🖨️ Imprimir listado del mes</button>
+          {Object.keys(porQuien).length>0&&(
+            <Card title="👩 Salidas por persona">
+              {Object.entries(porQuien).sort((a,b)=>b[1]-a[1]).map(([q,m])=>{
+                const pct=totMes>0?Math.min(100,(m/totMes)*100):0;
+                return(<div key={q} style={{marginBottom:8}}>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:2}}><span style={{fontWeight:600}}>{q}</span><strong style={{color:"#c62828"}}>-${m.toFixed(2)}</strong></div>
+                  <div style={{background:"#e8f0f7",borderRadius:4,height:8}}><div style={{background:"#c62828",width:`${pct}%`,height:"100%",borderRadius:4}}/></div>
+                </div>);
+              })}
+            </Card>
+          )}
+          <Card title={`💸 Detalle día por día (${salidasMes.length})`}>
+            {dias.length===0?<div style={S.empty}>Sin salidas de caja en {mesS}</div>:dias.map(([dia,lista])=>{
+              const totDia=lista.reduce((a,s)=>a+s.monto,0);
+              const nombreDia=new Date(dia+"T12:00:00").toLocaleDateString("es-MX",{weekday:"long",day:"numeric",month:"long"});
+              return(
+                <div key={dia} style={{marginBottom:10}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"#e8f0f7",borderRadius:8,padding:"6px 12px",marginBottom:4}}>
+                    <span style={{fontWeight:700,fontSize:13,color:"#1a3c5e",textTransform:"capitalize"}}>{nombreDia}</span>
+                    <strong style={{color:"#c62828",fontSize:13}}>-${totDia.toFixed(2)}</strong>
+                  </div>
+                  {lista.map(s=>(
+                    <div key={s.id} style={{display:"flex",justifyContent:"space-between",padding:"5px 12px",borderBottom:"1px solid #f0f4f8",fontSize:13}}>
+                      <div><span style={{color:"#c62828",fontWeight:700}}>-${s.monto.toFixed(2)}</span> {s.motivo} <span style={{color:"#888",fontSize:11}}>({s.quien})</span></div>
+                      <span style={{color:"#888",fontSize:11}}>{s.hora}</span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </Card>
+        </div>);
+      })()}
       {sub==="cuadre"&&(<div>
         {!cuadre&&<div style={{background:"#ffebee",border:"2px solid #e53935",borderRadius:10,padding:"12px 16px",marginBottom:14}}><div style={{fontWeight:800,color:"#c62828",fontSize:15}}>⚠️ El cuadre no coincide</div><div style={{fontSize:13,color:"#c62828",marginTop:4}}>Total ${totV.toFixed(2)} ≠ Cobrado ${totCob.toFixed(2)} + Pendiente ${pendMes.toFixed(2)}</div></div>}
         {cuadre&&<div style={{background:"#e8f5e9",border:"2px solid #4caf50",borderRadius:10,padding:"12px 16px",marginBottom:14}}><div style={{fontWeight:800,color:"#2e7d32",fontSize:15}}>✅ Cuadre perfecto</div></div>}
@@ -1491,6 +1559,7 @@ const { data: salidasCaja, setData: setSalidasCaja, upsert: upsertSalida } = use
     {id:"ventas",icon:"🧾",l:"Venta"},{id:"historial",icon:"📋",l:"Historial"},
     {id:"pendientes",icon:"⏳",l:"Pendientes",b:pCount},{id:"resumen",icon:"📈",l:"Resumen día"},
     {id:"reportes",icon:"📊",l:"Reportes"},{id:"depositos",icon:"🏦",l:"Depósitos"},
+    {id:"conciliacion",icon:"🏛️",l:"Conciliación"},
     {id:"gastos",icon:"🛒",l:"Gastos"},{id:"inventario",icon:"📦",l:"Inventario"},
     {id:"equipo",icon:"👩",l:"Equipo"},{id:"caja",icon:"💰",l:"Caja"},
     {id:"config",icon:"⚙️",l:"Config"},{id:"usuarios",icon:"🔑",l:"Usuarios"},
@@ -1516,8 +1585,9 @@ const { data: salidasCaja, setData: setSalidasCaja, upsert: upsertSalida } = use
       {tab==="historial"&&<Historial ventas={ventas} setVentas={setVentas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} esAdmin={esAdmin} upsertVenta={upsertVenta}/>}
       {tab==="pendientes"&&<Pendientes ventas={ventas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} setVentas={setVentas} upsertVenta={upsertVenta}/>}
       {tab==="resumen"&&<ResumenDia ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja}/>}
-      {tab==="reportes"&&<Reportes ventas={ventas} empleadas={empleadas}/>}
+      {tab==="reportes"&&<Reportes ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja}/>}
       {tab==="depositos"&&<Depositos depositos={depositos} setDepositos={setDepositos} ventas={ventas} salidasCaja={salidasCaja} upsertDeposito={upsertDeposito}/>}
+      {tab==="conciliacion"&&<Conciliacion ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} depositos={depositos} setDepositos={setDepositos} upsertDeposito={upsertDeposito}/>}
       {tab==="gastos"&&<Gastos gastos={gastos} setGastos={setGastos} sesion={sesion} upsertGasto={upsertGasto}/>}
       {tab==="inventario"&&<Inventario inventario={inventario} setInventario={setInventario} upsertInventario={upsertInventario}/>}
       {tab==="equipo"&&<Equipo empleadas={empleadas} setEmpleadas={setEmpleadas} ventas={ventas} esAdmin={esAdmin} upsertEmpleada={upsertEmpleada}/>}
@@ -1869,6 +1939,159 @@ function Depositos({depositos,setDepositos,ventas,salidasCaja,upsertDeposito}){
           );
         })
       }
+    </div>
+  );
+}
+
+
+// ─── CONCILIACIÓN BANCARIA ─────────────────────────────────────────
+// Compara los movimientos del sistema contra el estado de cuenta del banco.
+// Cada movimiento tiene un check "conciliado" que se guarda en Firestore.
+function Conciliacion({ventas,setVentas,upsertVenta,depositos,setDepositos,upsertDeposito}){
+  const [mesVer,setMesVer]=useState(mesK(new Date()));
+  const [soloPend,setSoloPend]=useState(false);
+
+  // Transferencias y tarjeta: cada abono del mes por método
+  const movs={pichincha:[],jep:[],tarjeta:[]};
+  ventas.filter(v=>!v.anulada).forEach(v=>{
+    (v.abonos||[]).forEach((ab,idx)=>{
+      const d=fechaLocal(ab.fecha);
+      if(!d||!d.startsWith(mesVer))return;
+      const item={folio:v.folio,idx,fecha:d,fechaISO:ab.fecha,cliente:v.clienteNombre||"",monto:ab.monto,conciliado:!!ab.conciliado,quien:ab.cobradoPorNombre||""};
+      if(ab.metodo==="Transferencia Pichincha")movs.pichincha.push(item);
+      else if(ab.metodo==="Transferencia JEP")movs.jep.push(item);
+      else if(ab.metodo==="Tarjeta")movs.tarjeta.push(item);
+    });
+  });
+  // Depósitos de efectivo registrados en el mes
+  const depsMes=depositos.filter(d=>!d.eliminada&&d.fecha&&d.fecha.startsWith(mesVer));
+
+  const toggleAbono=(folio,idx)=>setVentas(prev=>{
+    const next=prev.map(v=>{
+      if(v.folio!==folio)return v;
+      const abs=(v.abonos||[]).map((ab,i)=>i===idx?{...ab,conciliado:!ab.conciliado}:ab);
+      return{...v,abonos:abs};
+    });
+    const updated=next.find(v=>v.folio===folio);
+    if(updated&&upsertVenta)upsertVenta(updated);
+    return next;
+  });
+  const toggleDep=id=>setDepositos(prev=>{
+    const next=prev.map(d=>d.id===id?{...d,conciliado:!d.conciliado}:d);
+    const updated=next.find(d=>d.id===id);
+    if(updated&&upsertDeposito)upsertDeposito({...updated,_updatedAt:new Date().toISOString()});
+    return next;
+  });
+
+  const resumen=lista=>{
+    const tot=parseFloat(lista.reduce((a,m)=>a+m.monto,0).toFixed(2));
+    const con=parseFloat(lista.filter(m=>m.conciliado).reduce((a,m)=>a+m.monto,0).toFixed(2));
+    return{tot,con,pend:parseFloat((tot-con).toFixed(2)),nPend:lista.filter(m=>!m.conciliado).length};
+  };
+  const rDep=resumen(depsMes);
+  const rPic=resumen(movs.pichincha);
+  const rJep=resumen(movs.jep);
+  const rTar=resumen(movs.tarjeta);
+  const totalPend=parseFloat((rDep.pend+rPic.pend+rJep.pend+rTar.pend).toFixed(2));
+  const nTotalPend=rDep.nPend+rPic.nPend+rJep.nPend+rTar.nPend;
+  const todoConciliado=nTotalPend===0&&(depsMes.length+movs.pichincha.length+movs.jep.length+movs.tarjeta.length)>0;
+
+  const ordenar=lista=>[...lista].sort((a,b)=>(a.fecha||"").localeCompare(b.fecha||""));
+
+  const Seccion=({titulo,color,bg,lista,tipo,r})=>{
+    const items=ordenar(lista).filter(m=>!soloPend||!m.conciliado);
+    return(
+      <div style={{background:"#fff",borderRadius:12,marginBottom:14,overflow:"hidden",boxShadow:"0 1px 6px rgba(26,60,94,.08)"}}>
+        <div style={{background:bg,padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:6}}>
+          <div style={{fontWeight:800,fontSize:14,color}}>{titulo}</div>
+          <div style={{fontSize:12,fontWeight:700,color}}>
+            {r.nPend===0?"✅ Conciliado":"⏳ Faltan $"+r.pend.toFixed(2)+" ("+r.nPend+")"}
+            <span style={{fontWeight:400,color:"#888",marginLeft:8}}>Total: ${r.tot.toFixed(2)}</span>
+          </div>
+        </div>
+        <div style={{padding:"6px 14px 10px"}}>
+          {items.length===0
+            ?<div style={{...S.empty,padding:"12px 0"}}>{lista.length===0?"Sin movimientos este mes":"Todo conciliado ✅"}</div>
+            :items.map((m,i)=>(
+              <label key={(m.folio||m.id)+"-"+(m.idx!=null?m.idx:i)} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:"1px solid #f0f4f8",cursor:"pointer",opacity:m.conciliado?0.65:1}}>
+                <input type="checkbox" checked={m.conciliado||false} style={{width:18,height:18,accentColor:"#2e7d32",flexShrink:0}}
+                  onChange={()=>tipo==="dep"?toggleDep(m.id):toggleAbono(m.folio,m.idx)}/>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:600,color:"#1a3c5e",textDecoration:m.conciliado?"line-through":"none"}}>
+                    {tipo==="dep"?("🏦 "+m.banco+" · Comprobante "+m.comprobante):m.cliente}
+                  </div>
+                  <div style={{fontSize:11,color:"#888"}}>
+                    {m.fecha}{m.quien?" · "+m.quien:""}{tipo==="dep"&&m.notas?" · "+m.notas:""}
+                  </div>
+                </div>
+                <div style={{fontWeight:800,fontSize:14,color:m.conciliado?"#2e7d32":color}}>${m.monto.toFixed(2)}</div>
+              </label>
+            ))
+          }
+        </div>
+      </div>
+    );
+  };
+
+  const imprimirConciliacion=()=>{
+    const secHtml=(titulo,lista,tipo)=>{
+      if(lista.length===0)return "";
+      const r=resumen(lista);
+      return "<h3 style='color:#1a3c5e;margin-top:16px'>"+titulo+"</h3>"
+        +"<table cellpadding='4' cellspacing='0' style='border-collapse:collapse;width:100%;font-size:11px'>"
+        +"<tr><th style='background:#e8f0f7;text-align:center;padding:4px'>✓</th><th style='background:#e8f0f7;text-align:left;padding:4px'>Fecha</th><th style='background:#e8f0f7;text-align:left;padding:4px'>"+(tipo==="dep"?"Banco / Comprobante":"Cliente")+"</th><th style='background:#e8f0f7;text-align:right;padding:4px'>Monto</th></tr>"
+        +ordenar(lista).map(m=>"<tr style='border-bottom:1px solid #eee'>"
+          +"<td style='text-align:center;padding:4px'>"+(m.conciliado?"✔":"◻")+"</td>"
+          +"<td style='padding:4px'>"+m.fecha+"</td>"
+          +"<td style='padding:4px'>"+(tipo==="dep"?(m.banco+" · "+m.comprobante):m.cliente)+"</td>"
+          +"<td style='padding:4px;text-align:right;font-weight:bold'>$"+m.monto.toFixed(2)+"</td></tr>").join("")
+        +"<tr><td colspan='3' style='padding:4px;font-weight:bold'>Total: $"+r.tot.toFixed(2)+" · Conciliado: $"+r.con.toFixed(2)+"</td><td style='padding:4px;text-align:right;font-weight:bold;color:"+(r.pend>0?"#c62828":"#2e7d32")+"'>"+(r.pend>0?"Pendiente $"+r.pend.toFixed(2):"✔ OK")+"</td></tr>"
+        +"</table>";
+    };
+    const w=window.open("","_blank","width=750,height=700");
+    if(!w)return;
+    const banner=todoConciliado
+      ?"<div style='border:2px solid #2e7d32;background:#e8f5e9;border-radius:10px;padding:12px;text-align:center;font-size:18px;font-weight:800;color:#1b5e20;margin-top:14px'>✅ MES TOTALMENTE CONCILIADO</div>"
+      :"<div style='border:2px solid #c62828;background:#ffebee;border-radius:10px;padding:12px;text-align:center;font-size:16px;font-weight:800;color:#c62828;margin-top:14px'>⏳ PENDIENTE POR CONCILIAR: $"+totalPend.toFixed(2)+" ("+nTotalPend+" movimientos)</div>";
+    const html="<html><head><title>Conciliación bancaria</title><style>body{font-family:sans-serif;padding:20px}h2{color:#1a3c5e;text-align:center}</style></head><body>"
+      +"<h2>🫧 Lava&amp;Listo — Conciliación bancaria "+mesVer+"</h2>"
+      +secHtml("💵 Depósitos de efectivo registrados",depsMes,"dep")
+      +secHtml("🏦 Transferencias Pichincha recibidas",movs.pichincha,"ab")
+      +secHtml("🏦 Transferencias JEP recibidas",movs.jep,"ab")
+      +secHtml("💳 Cobros con tarjeta",movs.tarjeta,"ab")
+      +banner
+      +"<p style='font-size:10px;color:#aaa;text-align:center'>Impreso: "+new Date().toLocaleString("es-MX")+"</p>"
+      +"<scr"+"ipt>window.print();window.close();</"+"script></body></html>";
+    w.document.write(html);w.document.close();
+  };
+
+  return(
+    <div style={S.panel}>
+      <h2 style={S.ptitle}>🏛️ Conciliación bancaria</h2>
+      <p style={{fontSize:13,color:"#555",marginBottom:12}}>Compara con tu estado de cuenta: marca ✓ cada movimiento a medida que lo encuentres en el banco. Los checks se guardan en la nube.</p>
+
+      <div style={{display:"flex",gap:8,marginBottom:12,alignItems:"flex-end",flexWrap:"wrap"}}>
+        <div style={{flex:1,minWidth:140}}><label style={S.lbl}>Mes</label><input type="month" style={S.inp} value={mesVer} onChange={e=>setMesVer(e.target.value)}/></div>
+        <button style={{...S.pill,...(soloPend?S.pillA:{}),padding:"9px 14px"}} onClick={()=>setSoloPend(!soloPend)}>⏳ Solo pendientes</button>
+        <button style={{...S.btnP,width:"auto",padding:"9px 16px",fontSize:13}} onClick={imprimirConciliacion}>🖨️ Imprimir</button>
+      </div>
+
+      {/* ESTADO GLOBAL */}
+      <div style={{background:todoConciliado?"#e8f5e9":"#fff3e0",border:"2px solid "+(todoConciliado?"#4caf50":"#ff9800"),borderRadius:12,padding:"12px 16px",marginBottom:14,textAlign:"center"}}>
+        {todoConciliado
+          ?<div style={{fontWeight:800,fontSize:16,color:"#2e7d32"}}>✅ Mes totalmente conciliado</div>
+          :<>
+            <div style={{fontWeight:800,fontSize:16,color:"#e65100"}}>⏳ Pendiente por conciliar: ${totalPend.toFixed(2)}</div>
+            <div style={{fontSize:12,color:"#888"}}>{nTotalPend} movimiento{nTotalPend!==1?"s":""} sin verificar en el estado de cuenta</div>
+          </>}
+      </div>
+
+      <Seccion titulo="💵 Depósitos de efectivo" color="#1a3c5e" bg="#e8f0f7" lista={depsMes} tipo="dep" r={rDep}/>
+      <Seccion titulo="🏦 Transferencias Pichincha" color="#1565c0" bg="#e3f2fd" lista={movs.pichincha} tipo="ab" r={rPic}/>
+      <Seccion titulo="🏦 Transferencias JEP" color="#1565c0" bg="#e3f2fd" lista={movs.jep} tipo="ab" r={rJep}/>
+      <Seccion titulo="💳 Tarjeta" color="#7c3aed" bg="#f3e8fd" lista={movs.tarjeta} tipo="ab" r={rTar}/>
+
+      <div style={{fontSize:12,color:"#888"}}>💡 Consejo: abre el estado de cuenta del banco en el celular o impreso, y ve marcando aquí cada valor que encuentres. Lo que quede sin ✓ al final es lo que hay que investigar (depósito no realizado, transferencia mal registrada, etc.).</div>
     </div>
   );
 }
