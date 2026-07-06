@@ -219,6 +219,23 @@ function AbonoModal({venta,onSave,onClose}){
 
 function LoginScreen({onLogin}){
   const [u,setU]=useState("");const [c,setC]=useState("");const [err,setErr]=useState("");const [show,setShow]=useState(false);
+  // Sincronizar usuarios con Firestore al abrir el login:
+  // - Si la nube tiene usuarios, se descargan a este dispositivo.
+  // - Si la nube está vacía (primera vez), se suben los usuarios locales.
+  useEffect(()=>{(async()=>{
+    try{
+      const {db}=await import("./firebase");
+      const {collection,getDocs,setDoc,doc}=await import("firebase/firestore");
+      const snap=await getDocs(collection(db,"usuarios"));
+      const nube=snap.docs.map(d=>d.data());
+      if(nube.length===0){
+        const locales=load("ll_usuarios",USUARIOS_DEFAULT);
+        for(const us of locales){await setDoc(doc(collection(db,"usuarios"),String(us.id)),{...us,_updatedAt:new Date().toISOString()},{merge:true});}
+      }else{
+        save("ll_usuarios",nube.filter(us=>!us.eliminada));
+      }
+    }catch(e){console.log("No se pudo sincronizar usuarios:",e);}
+  })();},[]);
   const go=()=>{
     const users=load("ll_usuarios",USUARIOS_DEFAULT);
     const found=users.find(x=>x.usuario.toLowerCase()===u.toLowerCase().trim()&&x.clave===c);
@@ -975,7 +992,34 @@ function Configuracion({servicios,setServicios,exportarDatos,importarDatos,upser
   return(<div style={S.panel}>
     <h2 style={S.ptitle}>⚙️ Configuracion</h2>
     <Card title="💾 Respaldo">
-      <button style={{...S.btnP,marginBottom:10,background:"linear-gradient(135deg,#f59e0b,#d97706)"}} onClick={async()=>{const{db}=await import("./firebase");const{collection,setDoc,doc}=await import("firebase/firestore");const vs=JSON.parse(localStorage.getItem("ll_ventas")||"[]");for(const v of vs){await setDoc(doc(collection(db,"ventas"),v.folio),{...v,_updatedAt:new Date().toISOString()},{merge:true});}alert("✅ "+vs.length+" ventas subidas a Firestore");}}>🔥 Subir todas las ventas a Firestore</button>
+      <button style={{...S.btnP,marginBottom:10,background:"linear-gradient(135deg,#f59e0b,#d97706)"}} onClick={async()=>{
+        if(!window.confirm("Se subirán TODOS los datos de este dispositivo a Firestore (ventas, gastos, salidas, usuarios, etc.). ¿Continuar?"))return;
+        try{
+          const{db}=await import("./firebase");
+          const{collection,setDoc,doc}=await import("firebase/firestore");
+          const cols=[
+            ["ventas","ll_ventas","folio"],
+            ["clientes","ll_clientes","id"],
+            ["empleadas","ll_empleadas","id"],
+            ["inventario","ll_inventario","id"],
+            ["servicios","ll_servicios","id"],
+            ["gastos","ll_gastos","id"],
+            ["depositos","ll_depositos","id"],
+            ["salidasCaja","ll_salidas_caja","id"],
+            ["usuarios","ll_usuarios","id"],
+          ];
+          let tot=0;
+          for(const [col,key,idField] of cols){
+            const items=JSON.parse(localStorage.getItem(key)||"[]");
+            for(const it of items){
+              if(it[idField]==null)continue;
+              await setDoc(doc(collection(db,col),String(it[idField])),{...it,_updatedAt:new Date().toISOString()},{merge:true});
+              tot++;
+            }
+          }
+          alert("✅ "+tot+" registros subidos a Firestore");
+        }catch(e){alert("❌ Error al subir: "+e.message);}
+      }}>🔥 Subir TODO a Firestore</button>
             <button style={{...S.btnP,marginBottom:10}} onClick={exportarDatos}>📥 Exportar datos</button>
       <label style={{...S.btnP,display:"block",textAlign:"center",cursor:"pointer",background:"#e8f5fd",color:"#1a3c5e",padding:"13px",borderRadius:10,fontSize:15,fontWeight:700}}>📤 Importar datos<input type="file" accept=".json" style={{display:"none"}} onChange={importarDatos}/></label>
     </Card>
@@ -1015,22 +1059,34 @@ function GestionUsuarios(){
   const [editId,setEditId]=useState(null);const [ed,setEd]=useState({});
   const [showC,setShowC]=useState({});const [msg,setMsg]=useState("");const [err,setErr]=useState("");
   useEffect(()=>save("ll_usuarios",users),[users]);
+  const visibles=users.filter(u=>!u.eliminada);
+  // Sube un usuario a Firestore (crear, editar o marcar eliminado)
+  const subirUsuario=async(u)=>{
+    try{
+      const{db}=await import("./firebase");
+      const{collection,setDoc,doc}=await import("firebase/firestore");
+      await setDoc(doc(collection(db,"usuarios"),String(u.id)),{...u,_updatedAt:new Date().toISOString()},{merge:true});
+    }catch(e){console.log("No se pudo subir usuario:",e);}
+  };
   const add=()=>{
     if(!nv.usuario.trim()||!nv.clave.trim()||!nv.nombre.trim()){setErr("Completa todos los campos");return;}
-    if(users.find(u=>u.usuario.toLowerCase()===nv.usuario.toLowerCase())){setErr("Ese usuario ya existe");return;}
-    setUsers(prev=>[...prev,{...nv,id:Date.now()}]);setNv({usuario:"",clave:"",nombre:"",rol:"Empleada"});setErr("");setMsg("✅ Usuario creado");setTimeout(()=>setMsg(""),3000);
+    if(visibles.find(u=>u.usuario.toLowerCase()===nv.usuario.toLowerCase())){setErr("Ese usuario ya existe");return;}
+    const nuevo={...nv,id:Date.now()};
+    setUsers(prev=>[...prev,nuevo]);subirUsuario(nuevo);
+    setNv({usuario:"",clave:"",nombre:"",rol:"Empleada"});setErr("");setMsg("✅ Usuario creado y subido a la nube");setTimeout(()=>setMsg(""),3000);
   };
   const del=id=>{
-    if(users.filter(u=>u.rol==="Administrador").length<=1&&users.find(u=>u.id===id)?.rol==="Administrador"){alert("Debe haber al menos un administrador");return;}
-    if(!window.confirm("Eliminar?"))return;setUsers(prev=>prev.filter(u=>u.id!==id));
+    if(visibles.filter(u=>u.rol==="Administrador").length<=1&&visibles.find(u=>u.id===id)?.rol==="Administrador"){alert("Debe haber al menos un administrador");return;}
+    if(!window.confirm("Eliminar?"))return;
+    setUsers(prev=>{const next=prev.map(u=>u.id===id?{...u,eliminada:true}:u);const borrado=next.find(u=>u.id===id);if(borrado)subirUsuario(borrado);return next;});
   };
-  const sav=()=>{const clave=ed.nuevaClave?.trim()?ed.nuevaClave:ed.clave;setUsers(prev=>prev.map(u=>u.id===editId?{...u,nombre:ed.nombre,usuario:ed.usuario,clave,rol:ed.rol}:u));setEditId(null);setMsg("✅ Actualizado");setTimeout(()=>setMsg(""),3000);};
+  const sav=()=>{const clave=ed.nuevaClave?.trim()?ed.nuevaClave:ed.clave;setUsers(prev=>{const next=prev.map(u=>u.id===editId?{...u,nombre:ed.nombre,usuario:ed.usuario,clave,rol:ed.rol}:u);const updated=next.find(u=>u.id===editId);if(updated)subirUsuario(updated);return next;});setEditId(null);setMsg("✅ Actualizado y subido a la nube");setTimeout(()=>setMsg(""),3000);};
   return(<div style={S.panel}>
     <h2 style={S.ptitle}>🔑 Usuarios</h2>
     {msg&&<div style={{background:"#e8f5e9",color:"#2e7d32",padding:"10px 14px",borderRadius:8,fontSize:13,marginBottom:12,fontWeight:600}}>{msg}</div>}
-    <div style={{...S.alrt,fontSize:12}}>ℹ️ Los usuarios se guardan solo en este dispositivo. Si creas o cambias un usuario, hazlo en cada computador o celular donde usen el sistema.</div>
+    <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12}}>☁️ Los usuarios se guardan en la nube y se descargan a cada dispositivo al abrir la pantalla de ingreso. Si creas o cambias un usuario, en los otros dispositivos aparecerá al volver a la pantalla de login.</div>
     <Card title="👥 Usuarios del sistema">
-      {users.map(u=>(<div key={u.id} style={S.vcard}>
+      {visibles.map(u=>(<div key={u.id} style={S.vcard}>
         {editId===u.id?(
           <div>
             <div style={{fontWeight:700,color:"#1a3c5e",marginBottom:10}}>✏️ Editando: {u.nombre}</div>
@@ -1533,10 +1589,26 @@ function ResumenDia({ventas,empleadas,salidasCaja}){
       +"<tr>"+hdrs.map(h=>"<th style='background:#1a3c5e;color:#fff;padding:6px'>"+h+"</th>").join("")+"</tr>"
       +rows.map(r=>"<tr>"+r.map((c,i)=>"<td style='text-align:"+(i===0?"left":"right")+";padding:5px'>"+(typeof c==="number"?"$"+c.toFixed(2):c)+"</td>").join("")+"</tr>").join("")
       +"</table>";
+    const cobrosOrd=[...cobros].sort((a,b)=>(a.fecha||"").localeCompare(b.fecha||""));
+    const detHtml=cobrosOrd.length>0
+      ?"<h3 style='color:#2e7d32;margin-top:14px'>Detalle de cobros ("+cobrosOrd.length+")</h3>"
+        +"<table cellpadding='4' cellspacing='0' style='border-collapse:collapse;width:100%;font-size:11px'>"
+        +"<tr><th style='background:#e8f5e9;text-align:left;padding:4px'>Hora</th><th style='background:#e8f5e9;text-align:left;padding:4px'>Cliente</th><th style='background:#e8f5e9;text-align:left;padding:4px'>Forma</th><th style='background:#e8f5e9;text-align:left;padding:4px'>Cobró</th><th style='background:#e8f5e9;text-align:right;padding:4px'>Monto</th></tr>"
+        +cobrosOrd.map(c=>{
+          const hora=c.fecha?new Date(c.fecha).toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"}):"";
+          const tag=c.factAnterior?" <span style='color:#e65100;font-weight:bold'>(FACT. ANTERIOR)</span>":"";
+          return "<tr style='border-bottom:1px solid #eee'><td style='padding:4px'>"+hora+"</td><td style='padding:4px'>"+(c.cliente||"")+tag+"</td><td style='padding:4px'>"+c.metodo+"</td><td style='padding:4px'>"+c.quien+"</td><td style='padding:4px;text-align:right;color:#2e7d32;font-weight:bold'>+$"+c.monto.toFixed(2)+"</td></tr>";
+        }).join("")
+        +"<tr><td colspan='4' style='padding:4px;font-weight:bold'>TOTAL COBRADO</td><td style='padding:4px;text-align:right;font-weight:bold'>$"+totCobrado.toFixed(2)+"</td></tr>"
+        +"</table>"
+      :"";
     const salHtml=salidasDia.length>0
-      ?"<h3 style='color:#c62828;margin-top:14px'>Salidas de caja</h3>"
-        +salidasDia.map(s=>"<div style='font-size:12px'>-$"+s.monto.toFixed(2)+" "+s.motivo+" ("+s.quien+")"+(s.hora?" · "+s.hora:"")+"</div>").join("")
-        +"<p style='font-size:13px'><strong>Total salidas: -$"+totSalidas.toFixed(2)+"</strong></p>"
+      ?"<h3 style='color:#c62828;margin-top:14px'>Detalle de salidas de caja ("+salidasDia.length+")</h3>"
+        +"<table cellpadding='4' cellspacing='0' style='border-collapse:collapse;width:100%;font-size:11px'>"
+        +"<tr><th style='background:#ffebee;text-align:left;padding:4px'>Hora</th><th style='background:#ffebee;text-align:left;padding:4px'>Motivo</th><th style='background:#ffebee;text-align:left;padding:4px'>Registró</th><th style='background:#ffebee;text-align:right;padding:4px'>Monto</th></tr>"
+        +salidasDia.map(s=>"<tr style='border-bottom:1px solid #eee'><td style='padding:4px'>"+(s.hora||"")+"</td><td style='padding:4px'>"+s.motivo+"</td><td style='padding:4px'>"+s.quien+"</td><td style='padding:4px;text-align:right;color:#c62828;font-weight:bold'>-$"+s.monto.toFixed(2)+"</td></tr>").join("")
+        +"<tr><td colspan='3' style='padding:4px;font-weight:bold'>TOTAL SALIDAS</td><td style='padding:4px;text-align:right;font-weight:bold;color:#c62828'>-$"+totSalidas.toFixed(2)+"</td></tr>"
+        +"</table>"
       :"";
     const w=window.open("","_blank","width=700,height=650");
     if(!w)return;
@@ -1544,6 +1616,7 @@ function ResumenDia({ventas,empleadas,salidasCaja}){
       +"<h2>🫧 Lava&amp;Listo — Resumen de cobros "+fechaSel+"</h2>"
       +tableHtml
       +(efAnterior>0?"<p style='font-size:11px;color:#555'>Incluye $"+efAnterior.toFixed(2)+" en efectivo por cobro de facturas de días anteriores.</p>":"")
+      +detHtml
       +salHtml
       +"<div class='dep'><div style='font-size:13px;color:#2e7d32'>Efectivo cobrado $"+totEf.toFixed(2)+" − Salidas de caja $"+totSalidas.toFixed(2)+"</div>"
       +"<div style='font-size:26px;font-weight:800;color:#1b5e20'>VALOR A DEPOSITAR: $"+aDepositar.toFixed(2)+"</div>"
