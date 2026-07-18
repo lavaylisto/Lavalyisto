@@ -67,6 +67,59 @@ const calcGanancia = (items) => items.reduce((acc, it) => {
   return acc + (esLavadoSeco(it.label) ? subtotal * 0.20 : subtotal);
 }, 0);
 
+// ===== WhatsApp obligatorio =====
+// Normaliza teléfonos de Ecuador al formato internacional para wa.me (593...)
+const telWa = t => {
+  if(!t) return null;
+  let d = String(t).replace(/\D/g,"");
+  if(!d) return null;
+  if(d.startsWith("593")) return d;
+  if(d.startsWith("0")) d = d.slice(1);
+  if(d.length < 8) return null;
+  return "593" + d;
+};
+const msgWa = (v, tipo) => {
+  const items = (v.items||[]).map(it=>`• ${it.label}${it.piezas>1?` x${it.piezas}`:""}`).join("\n");
+  const pend = saldo(v);
+  if(tipo==="recibido") return `🫧 *Lava&Listo* 🫧\n\nHola ${v.clienteNombre}! Recibimos tu orden ✅\n\n📋 Folio: *${v.folio}*\n${items}\n\n💵 Total: $${v.total.toFixed(2)}${pend>0?`\n⏳ Saldo pendiente: $${pend.toFixed(2)}`:"\n✅ Pagado en su totalidad"}\n📅 Entrega estimada: ${fmtD(v.entrega)}\n\n¡Gracias por tu preferencia! 💙`;
+  return `🫧 *Lava&Listo* 🫧\n\n¡Hola ${v.clienteNombre}! 🎉\n\nTu pedido *${v.folio}* ya está *LISTO PARA RETIRAR* ✅${pend>0?`\n\n⏳ Saldo pendiente al retirar: $${pend.toFixed(2)}`:""}\n\n¡Te esperamos! 💙`;
+};
+
+// Modal obligatorio: no se puede continuar sin abrir WhatsApp y confirmar el envío.
+// Si el cliente no tiene teléfono válido, se registra la excepción con motivo.
+function WhatsAppObligatorio({venta,tipo,onConfirm,onCancel}){
+  const [abierto,setAbierto]=useState(false);
+  const tel=telWa(venta.clienteTel);
+  const msg=msgWa(venta,tipo);
+  const abrir=()=>{window.open(`https://wa.me/${tel}?text=${encodeURIComponent(msg)}`,"_blank");setAbierto(true);};
+  return(
+    <div style={S.ov}>
+      <div style={S.tbox}>
+        <div style={{textAlign:"center",fontSize:36,marginBottom:6}}>📲</div>
+        <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e",textAlign:"center",marginBottom:4}}>
+          {tipo==="recibido"?"Confirmar orden por WhatsApp":"Avisar: listo para retirar"}
+        </div>
+        <div style={{fontSize:12,color:"#888",textAlign:"center",marginBottom:12}}>
+          {tipo==="recibido"?"Paso obligatorio: avisa al cliente que su orden fue recibida.":"Paso obligatorio: avisa al cliente antes de marcar la orden como lista."}
+        </div>
+        <div style={S.trow}><span>Cliente</span><strong>{venta.clienteNombre}</strong></div>
+        <div style={S.trow}><span>Folio</span><span>{venta.folio}</span></div>
+        {tel
+          ? <div style={S.trow}><span>WhatsApp</span><strong style={{color:"#2e7d32"}}>+{tel}</strong></div>
+          : <div style={{...S.err,marginTop:8}}>⚠️ El cliente no tiene un número de WhatsApp válido registrado.</div>}
+        <div style={{background:"#f0f4f8",borderRadius:10,padding:"10px 12px",fontSize:12,color:"#555",whiteSpace:"pre-wrap",margin:"10px 0",maxHeight:160,overflowY:"auto"}}>{msg}</div>
+        {tel&&(<>
+          <button style={{width:"100%",padding:"12px",background:"linear-gradient(135deg,#25d366,#128c7e)",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:8}} onClick={abrir}>📲 Abrir WhatsApp con el mensaje</button>
+          <button disabled={!abierto} style={{width:"100%",padding:"12px",background:abierto?"linear-gradient(135deg,#2e7d32,#388e3c)":"#e0e0e0",color:abierto?"#fff":"#999",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:abierto?"pointer":"not-allowed",marginBottom:8}} onClick={()=>onConfirm({enviado:true,fecha:new Date().toISOString()})}>✅ Ya envié el mensaje</button>
+          {!abierto&&<div style={{fontSize:11,color:"#888",textAlign:"center",marginBottom:8}}>Primero abre WhatsApp y envía el mensaje para poder confirmar.</div>}
+        </>)}
+        {!tel&&<button style={{width:"100%",padding:"12px",background:"#fff3e0",color:"#e65100",border:"1.5px solid #e65100",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",marginBottom:8}} onClick={()=>{const m=window.prompt("Motivo (ej: cliente sin celular, se avisará por llamada):");if(m===null)return;onConfirm({enviado:false,sinTelefono:true,motivo:m,fecha:new Date().toISOString()});}}>⚠️ Continuar sin WhatsApp (registrar motivo)</button>}
+        {onCancel&&<button style={{width:"100%",padding:"10px",background:"transparent",color:"#888",border:"1px solid #d0dce8",borderRadius:10,fontSize:13,cursor:"pointer"}} onClick={onCancel}>Cancelar</button>}
+      </div>
+    </div>
+  );
+}
+
 
 // ─── FECHA LOCAL ECUADOR (UTC-5) ──────────────────────────────────
 const fechaHoyLocal = () => {
@@ -298,9 +351,15 @@ function AperturaObligatoria({sesion,onLogout,onAbierta,empleadas}){
 // OrdenCard es componente SEPARADO (no dentro de map ni de PantallaEmpleada)
 function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta}){
   const [showAb,setShowAb]=useState(false);
+  const [waListo,setWaListo]=useState(false);
   const est=getEst(v);const sig=sigEst(v.estado||"recibido");
   const esPag=pagada(v);const pend=saldo(v);
-  const cambiar=()=>{if(sig){setVentas(prev=>{const next=prev.map(vv=>vv.folio===v.folio?{...vv,estado:sig.id}:vv);const updated=next.find(vv=>vv.folio===v.folio);if(updated&&upsertVenta)upsertVenta(updated);return next;});}};
+  const aplicarEstado=(nuevoEstado,extra={})=>setVentas(prev=>{const next=prev.map(vv=>vv.folio===v.folio?{...vv,estado:nuevoEstado,...extra}:vv);const updated=next.find(vv=>vv.folio===v.folio);if(updated&&upsertVenta)upsertVenta(updated);return next;});
+  const cambiar=()=>{
+    if(!sig)return;
+    if(sig.id==="listo"){setWaListo(true);return;} // WhatsApp obligatorio antes de "listo"
+    aplicarEstado(sig.id);
+  };
   const toggle=f=>setVentas(prev=>{const next=prev.map(vv=>vv.folio===v.folio?{...vv,[f]:!vv[f]}:vv);const updated=next.find(vv=>vv.folio===v.folio);if(updated&&upsertVenta)upsertVenta(updated);return next;});
   return(
     <div style={{borderRadius:14,border:`2px solid ${est.color}`,background:"#fff",marginBottom:12,overflow:"hidden",boxShadow:"0 2px 8px rgba(0,0,0,.06)"}}>
@@ -331,6 +390,7 @@ function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta}){
         </div>
       </div>
       {showAb&&<AbonoModal venta={v} onSave={ab=>{addAbono(v.folio,ab);setShowAb(false);}} onClose={()=>setShowAb(false)}/>}
+      {waListo&&<WhatsAppObligatorio venta={v} tipo="listo" onConfirm={info=>{aplicarEstado("listo",{checkMsgRetiro:info.enviado,msgListo:info});setWaListo(false);}} onCancel={()=>setWaListo(false)}/>}
     </div>
   );
 }
@@ -412,7 +472,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
               <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e"}}>💰 Caja</div>
               <button style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:"#888"}} onClick={()=>setShowCaja(false)}>✕</button>
             </div>
-            <CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={onCierreListo} onResetCierre={onResetCierre} sesion={sesion} salidasCaja={salidasCaja}/>
+            <CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={onCierreListo} onResetCierre={onResetCierre} sesion={sesion} salidasCaja={salidasCaja} setVentas={setVentas} upsertVenta={upsertVenta}/>
           </div>
         </div>
       )}
@@ -468,6 +528,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
   const [entrega,setEntrega]=useState((()=>{const off=man.getTimezoneOffset();const l=new Date(man.getTime()-off*60000);return l.toISOString().split("T")[0];})());
   const [notas,setNotas]=useState("");const [err,setErr]=useState("");
   const [tPago,setTPago]=useState("completo");const [metodo,setMetodo]=useState("Efectivo");const [abono,setAbono]=useState("");
+  const [waVenta,setWaVenta]=useState(null);
   const cFilt=clientes.filter(c=>c.nombre.toLowerCase().includes(cQ.toLowerCase())||(c.tel&&c.tel.includes(cQ))).slice(0,5);
   const selC=clientes.find(c=>c.id===cId);
   const calcT=()=>items.reduce((a,it)=>{if(it.custom)return a+(parseFloat(it.pC)||0)*(it.piezas||1);const s=servicios.find(s=>s.id===it.servId);return a+(s?s.precio*(it.piezas||1):0);},0);
@@ -487,10 +548,17 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
     const v={folio:folio(),fecha:new Date().toISOString(),entrega,clienteId:cid,clienteNombre:cNom,clienteTel:cTel,clienteDireccion:cDir,empleadaId:empId,
       items:items.map(it=>{if(it.custom)return{...it,label:it.lC||"Servicio personalizado",precio:parseFloat(it.pC)||0};const s=servicios.find(s=>s.id===it.servId);return{...it,label:s?.label,precio:s?.precio};}),
       pago:metodo,total,abonos:abs,pagada:tPago==="completo",notas,checkMsgRetiro:false,checkMsgEntrega:false,facturadoSRI:false,estado:"recibido"};
-    setVentas([v,...ventas]);setTicket(v);if(upsertVenta)upsertVenta(v);
+    setVentas([v,...ventas]);if(upsertVenta)upsertVenta(v);
+    setWaVenta(v); // WhatsApp obligatorio antes de mostrar el ticket
     setCQ("");setCId(null);setNC({nombre:"",tel:"",email:"",rfc:"",direccion:""});
     setItems([{servId:servicios[0]?.id,piezas:1,custom:false,lC:"",pC:""}]);
     setNotas("");setErr("");setAbono("");setTPago("completo");
+  };
+  const confirmarWaRecibido=info=>{
+    const v2={...waVenta,msgRecibido:info};
+    setVentas(prev=>{const next=prev.map(vv=>vv.folio===waVenta.folio?{...vv,msgRecibido:info}:vv);return next;});
+    if(upsertVenta)upsertVenta(v2);
+    setWaVenta(null);setTicket(v2);
   };
   const total=calcT();
   return(
@@ -562,18 +630,24 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
       </Card>
       {err&&<div style={S.err}>{err}</div>}
       <button style={S.btnP} onClick={reg}>🧾 Registrar Venta</button>
+      {waVenta&&<WhatsAppObligatorio venta={waVenta} tipo="recibido" onConfirm={confirmarWaRecibido}/>}
     </div>
   );
 }
 
 function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertVenta}){
   const [showAb,setShowAb]=useState(false);
+  const [waListo,setWaListo]=useState(false);
   const emp=empleadas.find(e=>e.id===v.empleadaId);
   const pend=saldo(v);const esPag=pagada(v);
   const abs=v.abonos||[];const totAb=abs.reduce((a,ab)=>a+ab.monto,0);
   const est=getEst(v);
   const toggle=f=>setVentas&&setVentas(prev=>{const next=prev.map(vv=>vv.folio===v.folio?{...vv,[f]:!vv[f]}:vv);const updated=next.find(vv=>vv.folio===v.folio);if(updated&&upsertVenta)upsertVenta(updated);return next;});
-  const cambEst=nv=>setVentas&&setVentas(prev=>{const next=prev.map(vv=>vv.folio===v.folio?{...vv,estado:nv}:vv);const updated=next.find(vv=>vv.folio===v.folio);if(updated&&upsertVenta)upsertVenta(updated);return next;});
+  const aplicarEstado=(nv,extra={})=>setVentas&&setVentas(prev=>{const next=prev.map(vv=>vv.folio===v.folio?{...vv,estado:nv,...extra}:vv);const updated=next.find(vv=>vv.folio===v.folio);if(updated&&upsertVenta)upsertVenta(updated);return next;});
+  const cambEst=nv=>{
+    if(nv==="listo"&&(v.estado||"recibido")!=="listo"){setWaListo(true);return;} // WhatsApp obligatorio
+    aplicarEstado(nv);
+  };
   return(
     <>
       <div style={{...S.vcard,borderLeft:`4px solid ${v.anulada?"#9e9e9e":esPag?"#4caf50":"#ff9800"}`,opacity:v.anulada?0.7:1}}>
@@ -614,6 +688,7 @@ function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertV
         </div>
       </div>
       {showAb&&<AbonoModal venta={v} onSave={ab=>{addAbono(v.folio,ab);setShowAb(false);}} onClose={()=>setShowAb(false)}/>}
+      {waListo&&<WhatsAppObligatorio venta={v} tipo="listo" onConfirm={info=>{aplicarEstado("listo",{checkMsgRetiro:info.enviado,msgListo:info});setWaListo(false);}} onCancel={()=>setWaListo(false)}/>}
     </>
   );
 }
@@ -1264,7 +1339,7 @@ function SalidaCaja({sesion,salidasCaja,setSalidasCaja,onClose,upsertSalida}){
 }
 
 
-function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesion,salidasCaja}){
+function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesion,salidasCaja,setVentas,upsertVenta}){
   const hoy=fechaHoyLocal();
   const uid=sesion?.id||"admin";
   // AK: apertura de esta sesion especifica (sessionStorage = se borra al cerrar sesion)
@@ -1285,7 +1360,18 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
   const [bills,setBills]=useState(()=>Object.fromEntries(BILLETES.map(b=>[b,""])));
   const [coins,setCoins]=useState(()=>Object.fromEntries(MONEDAS.map(m=>[m,""])));
   const [tPic,setTPic]=useState("");const [tJep,setTJep]=useState("");const [tTar,setTTar]=useState("");
-  const [paso,setPaso]=useState(1);
+  const [paso,setPaso]=useState(0); // paso 0 = revisión obligatoria de estados
+  const [revisado,setRevisado]=useState(false);
+  const [waRevision,setWaRevision]=useState(null); // venta a la que hay que avisar desde la revisión
+  // ---- Revisión de órdenes antes del cierre ----
+  const activas=ventas.filter(v=>!v.anulada&&(v.estado||"recibido")!=="entregado");
+  const listosSinAviso=activas.filter(v=>(v.estado||"recibido")==="listo"&&!v.checkMsgRetiro&&!v.msgListo);
+  const atrasadas=activas.filter(v=>["recibido","proceso"].includes(v.estado||"recibido")&&fechaLocal(v.entrega)<hoy);
+  const puedeContinuar=listosSinAviso.length===0&&revisado;
+  const marcarAvisada=(venta,info)=>{
+    if(setVentas)setVentas(prev=>{const next=prev.map(vv=>vv.folio===venta.folio?{...vv,checkMsgRetiro:info.enviado,msgListo:info}:vv);const updated=next.find(vv=>vv.folio===venta.folio);if(updated&&upsertVenta)upsertVenta(updated);return next;});
+    setWaRevision(null);
+  };
   const todosAbonos=ventas.filter(v=>!v.anulada).flatMap(v=>(v.abonos||[]).filter(ab=>{
     const tieneId=ab.cobradoPorId!=null;
     const mismoUsuario=tieneId
@@ -1389,7 +1475,7 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
           <div style={{display:"flex",justifyContent:"space-between"}}><span>💳 Tarjeta</span><strong>${(cg.totTa||0).toFixed(2)}</strong></div>
         </div>
         <button style={{width:"100%",padding:"12px",background:"#1a3c5e",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:8}} onClick={()=>imprimir(cg)}>🖨️ Reimprimir ticket</button>
-        <button style={{width:"100%",padding:"12px",background:"linear-gradient(135deg,#2e7d32,#388e3c)",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:8}} onClick={()=>{setCg(null);setPaso(1);setModo("cierre");if(onResetCierre)onResetCierre();}}>🔄 Realizar otro cierre</button>
+        <button style={{width:"100%",padding:"12px",background:"linear-gradient(135deg,#2e7d32,#388e3c)",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:8}} onClick={()=>{setCg(null);setPaso(0);setRevisado(false);setModo("cierre");if(onResetCierre)onResetCierre();}}>🔄 Realizar otro cierre</button>
         <button style={{width:"100%",padding:"12px",background:"linear-gradient(135deg,#c62828,#e53935)",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer"}} onClick={()=>{if(onLogout)onLogout();}}>🚪 Salir</button>
       </div>
     </div>
@@ -1422,10 +1508,45 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
         {espTot===0&&totMisSalidas===0&&<div style={{fontSize:11,color:"#2e7d32",fontWeight:700,marginTop:4}}>Sin cobros — si solo tienes el fondo cuadrará en ✅</div>}
       </div>}
       <div style={{display:"flex",gap:6,marginBottom:14,overflowX:"auto"}}>
-        {[{n:1,l:"💵 Billetes"},{n:2,l:"🪙 Monedas"},{n:3,l:"🏦 Digital"},{n:4,l:"✅ Confirmar"}].map(p=>(
+        {[{n:0,l:"📋 Revisión"},{n:1,l:"💵 Billetes"},{n:2,l:"🪙 Monedas"},{n:3,l:"🏦 Digital"},{n:4,l:"✅ Confirmar"}].map(p=>(
           <div key={p.n} style={{...S.badge,background:paso>=p.n?"#1a3c5e":"#e8f0f7",color:paso>=p.n?"#fff":"#888",padding:"6px 10px",fontSize:11,whiteSpace:"nowrap",cursor:paso>p.n?"pointer":"default"}} onClick={()=>{if(paso>p.n)setPaso(p.n);}}>{p.n}. {p.l}</div>
         ))}
       </div>
+      {paso===0&&<Card title="📋 Paso 0 — Revisión obligatoria de órdenes">
+        <div style={{fontSize:12,color:"#888",marginBottom:10}}>Antes de contar el dinero, verifica que el estado de cada orden refleje la realidad del día.</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:12}}>
+          {ESTADOS.map(e=>{const cnt=e.id==="entregado"?ventas.filter(v=>!v.anulada&&v.estado==="entregado"&&fechaLocal(v.fecha)===hoy).length:activas.filter(v=>(v.estado||"recibido")===e.id).length;return(
+            <div key={e.id} style={{background:e.bg,borderRadius:8,padding:"8px 4px",textAlign:"center"}}>
+              <div style={{fontSize:16}}>{e.icon}</div>
+              <div style={{fontSize:16,fontWeight:800,color:e.color}}>{cnt}</div>
+              <div style={{fontSize:9,color:e.color}}>{e.label}</div>
+            </div>);})}
+        </div>
+        {listosSinAviso.length>0&&<div style={{background:"#ffebee",borderRadius:10,padding:"10px 12px",marginBottom:10}}>
+          <div style={{fontSize:13,fontWeight:800,color:"#c62828",marginBottom:6}}>🚫 {listosSinAviso.length} orden(es) LISTAS sin avisar al cliente — debes avisar para poder cerrar:</div>
+          {listosSinAviso.map(v=>(
+            <div key={v.folio} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"#fff",borderRadius:8,padding:"8px 10px",marginBottom:6}}>
+              <div>
+                <div style={{fontSize:13,fontWeight:700,color:"#1a3c5e"}}>{v.clienteNombre}</div>
+                <div style={{fontSize:11,color:"#888"}}>{v.folio} · 📅 {fmtD(v.entrega)}</div>
+              </div>
+              <button style={{padding:"8px 12px",background:"linear-gradient(135deg,#25d366,#128c7e)",color:"#fff",border:"none",borderRadius:8,fontSize:12,fontWeight:700,cursor:"pointer"}} onClick={()=>setWaRevision(v)}>📲 Avisar</button>
+            </div>
+          ))}
+        </div>}
+        {atrasadas.length>0&&<div style={{background:"#fff3e0",borderRadius:10,padding:"10px 12px",marginBottom:10}}>
+          <div style={{fontSize:13,fontWeight:700,color:"#e65100",marginBottom:6}}>⚠️ {atrasadas.length} orden(es) con fecha de entrega vencida y aún sin terminar — revisa si el estado es correcto:</div>
+          {atrasadas.map(v=><div key={v.folio} style={{fontSize:12,color:"#555",marginBottom:2}}>• {v.clienteNombre} · {v.folio} · {getEst(v).icon} {getEst(v).label} · entrega {fmtD(v.entrega)}</div>)}
+        </div>}
+        {listosSinAviso.length===0&&atrasadas.length===0&&<div style={{background:"#e8f5e9",borderRadius:10,padding:"10px 12px",marginBottom:10,fontSize:13,color:"#2e7d32",fontWeight:600}}>✅ Sin pendientes críticos: todas las órdenes listas tienen aviso enviado.</div>}
+        <label style={{...S.chk,fontSize:13,background:"#f0f4f8",borderRadius:8,padding:"10px 12px",marginBottom:10}}>
+          <input type="checkbox" checked={revisado} onChange={()=>setRevisado(!revisado)}/>
+          <span>He revisado el estado de <strong>todas</strong> las órdenes y son correctos.</span>
+        </label>
+        <button disabled={!puedeContinuar} style={{...S.btnP,background:puedeContinuar?undefined:"#e0e0e0",color:puedeContinuar?undefined:"#999",cursor:puedeContinuar?"pointer":"not-allowed"}} onClick={()=>{if(puedeContinuar)setPaso(1);}}>Continuar al conteo de billetes →</button>
+        {!puedeContinuar&&<div style={{fontSize:11,color:"#c62828",textAlign:"center",marginTop:6}}>{listosSinAviso.length>0?"Envía los avisos pendientes y marca la casilla de revisión.":"Marca la casilla de revisión para continuar."}</div>}
+        {waRevision&&<WhatsAppObligatorio venta={waRevision} tipo="listo" onConfirm={info=>marcarAvisada(waRevision,info)} onCancel={()=>setWaRevision(null)}/>}
+      </Card>}
       {paso===1&&<Card title="💵 Paso 1 — Billetes">
         {BILLETES.map(b=><CD key={b} valor={b} cantidad={bills[b]} tipo="billete" onChange={v=>setBills(prev=>({...prev,[b]:v}))}/>)}
         <div style={{background:"#fff8e1",borderRadius:8,padding:"10px",marginTop:10,display:"flex",justifyContent:"space-between"}}><span style={{fontWeight:700}}>Total billetes:</span><span style={{fontWeight:800,fontSize:16,color:"#f59e0b"}}>${totB.toFixed(2)}</span></div>
@@ -1591,7 +1712,7 @@ const { data: salidasCaja, setData: setSalidasCaja, upsert: upsertSalida } = use
       {tab==="gastos"&&<Gastos gastos={gastos} setGastos={setGastos} sesion={sesion} upsertGasto={upsertGasto}/>}
       {tab==="inventario"&&<Inventario inventario={inventario} setInventario={setInventario} upsertInventario={upsertInventario}/>}
       {tab==="equipo"&&<Equipo empleadas={empleadas} setEmpleadas={setEmpleadas} ventas={ventas} esAdmin={esAdmin} upsertEmpleada={upsertEmpleada}/>}
-      {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={handleCierreListo} onResetCierre={()=>setCierreOk(false)} sesion={sesion} salidasCaja={salidasCaja}/>}
+      {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={handleCierreListo} onResetCierre={()=>setCierreOk(false)} sesion={sesion} salidasCaja={salidasCaja} setVentas={setVentas} upsertVenta={upsertVenta}/>}
       {tab==="config"&&<Configuracion servicios={servicios} setServicios={setServicios} exportarDatos={exportarDatos} importarDatos={importarDatos} upsertVenta={upsertVenta} upsertServicio={upsertServicio}/>}
       {tab==="usuarios"&&<GestionUsuarios/>}
     </div>
