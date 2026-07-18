@@ -79,10 +79,11 @@ const telWa = t => {
   return "593" + d;
 };
 const msgWa = (v, tipo) => {
-  const items = (v.items||[]).map(it=>`• ${it.label}${it.piezas>1?` x${it.piezas}`:""}`).join("\n");
+  const L = "━━━━━━━━━━━━━━━";
+  const items = (v.items||[]).map(it=>`  🔹 ${it.label}${it.piezas>1?` x${it.piezas}`:""}`).join("\n");
   const pend = saldo(v);
-  if(tipo==="recibido") return `🫧 *Lava&Listo* 🫧\n\nHola ${v.clienteNombre}! Recibimos tu orden ✅\n\n📋 Folio: *${v.folio}*\n${items}\n\n💵 Total: $${v.total.toFixed(2)}${pend>0?`\n⏳ Saldo pendiente: $${pend.toFixed(2)}`:"\n✅ Pagado en su totalidad"}\n📅 Entrega estimada: ${fmtD(v.entrega)}\n\n¡Gracias por tu preferencia! 💙`;
-  return `🫧 *Lava&Listo* 🫧\n\n¡Hola ${v.clienteNombre}! 🎉\n\nTu pedido *${v.folio}* ya está *LISTO PARA RETIRAR* ✅${pend>0?`\n\n⏳ Saldo pendiente al retirar: $${pend.toFixed(2)}`:""}\n\n¡Te esperamos! 💙`;
+  if(tipo==="recibido") return `🫧 *LAVA & LISTO* 🫧\n_Lavandería & Limpieza Especializada_\n${L}\n¡Hola *${v.clienteNombre}*! 👋\nTu orden fue *RECIBIDA* ✅\n\n📋 *Folio:* ${v.folio}\n${L}\n*DETALLE DEL SERVICIO:*\n${items}\n${L}\n💵 *Total:* $${v.total.toFixed(2)}\n${pend>0?`⏳ *Saldo pendiente:* $${pend.toFixed(2)}`:"✅ *Pagado en su totalidad*"}\n📅 *Entrega estimada:* ${fmtD(v.entrega)}\n${L}\n¡Gracias por confiar en nosotros! 💙\n📍 Ricaurte, Cuenca`;
+  return `🫧 *LAVA & LISTO* 🫧\n_Lavandería & Limpieza Especializada_\n${L}\n¡Hola *${v.clienteNombre}*! 🎉\n\nTu pedido *${v.folio}* ya está\n✨ *LISTO PARA RETIRAR* ✨\n${L}${pend>0?`\n⏳ *Saldo al retirar:* $${pend.toFixed(2)}\n${L}`:""}\n🕐 Te esperamos en nuestro local\n¡Gracias por tu preferencia! 💙\n📍 Ricaurte, Cuenca`;
 };
 
 // Modal obligatorio: no se puede continuar sin abrir WhatsApp y confirmar el envío.
