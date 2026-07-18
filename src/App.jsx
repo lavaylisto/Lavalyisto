@@ -78,12 +78,19 @@ const telWa = t => {
   if(d.length < 8) return null;
   return "593" + d;
 };
+const EMO = {
+  burbuja:"\u{1FAE7}", saludo:"\u{1F44B}", check:"\u2705", folio:"\u{1F4CB}",
+  item:"\u{1F539}", dinero:"\u{1F4B5}", reloj:"\u23F3", fecha:"\u{1F4C5}",
+  corazon:"\u{1F499}", pin:"\u{1F4CD}", fiesta:"\u{1F389}", brillo:"\u2728",
+  hora:"\u{1F550}"
+};
 const msgWa = (v, tipo) => {
-  const L = "━━━━━━━━━━━━━━━";
-  const items = (v.items||[]).map(it=>`  🔹 ${it.label}${it.piezas>1?` x${it.piezas}`:""}`).join("\n");
+  const L = "\u2501".repeat(15);
+  const E = EMO;
+  const items = (v.items||[]).map(it=>`  ${E.item} ${it.label}${it.piezas>1?` x${it.piezas}`:""}`).join("\n");
   const pend = saldo(v);
-  if(tipo==="recibido") return `🫧 *LAVA & LISTO* 🫧\n_Lavandería & Limpieza Especializada_\n${L}\n¡Hola *${v.clienteNombre}*! 👋\nTu orden fue *RECIBIDA* ✅\n\n📋 *Folio:* ${v.folio}\n${L}\n*DETALLE DEL SERVICIO:*\n${items}\n${L}\n💵 *Total:* $${v.total.toFixed(2)}\n${pend>0?`⏳ *Saldo pendiente:* $${pend.toFixed(2)}`:"✅ *Pagado en su totalidad*"}\n📅 *Entrega estimada:* ${fmtD(v.entrega)}\n${L}\n¡Gracias por confiar en nosotros! 💙\n📍 Ricaurte, Cuenca`;
-  return `🫧 *LAVA & LISTO* 🫧\n_Lavandería & Limpieza Especializada_\n${L}\n¡Hola *${v.clienteNombre}*! 🎉\n\nTu pedido *${v.folio}* ya está\n✨ *LISTO PARA RETIRAR* ✨\n${L}${pend>0?`\n⏳ *Saldo al retirar:* $${pend.toFixed(2)}\n${L}`:""}\n🕐 Te esperamos en nuestro local\n¡Gracias por tu preferencia! 💙\n📍 Ricaurte, Cuenca`;
+  if(tipo==="recibido") return `${E.burbuja} *LAVA & LISTO* ${E.burbuja}\n_Lavanderia & Limpieza Especializada_\n${L}\n¡Hola *${v.clienteNombre}*! ${E.saludo}\nTu orden fue *RECIBIDA* ${E.check}\n\n${E.folio} *Folio:* ${v.folio}\n${L}\n*DETALLE DEL SERVICIO:*\n${items}\n${L}\n${E.dinero} *Total:* $${v.total.toFixed(2)}\n${pend>0?`${E.reloj} *Saldo pendiente:* $${pend.toFixed(2)}`:`${E.check} *Pagado en su totalidad*`}\n${E.fecha} *Entrega estimada:* ${fmtD(v.entrega)}\n${L}\n¡Gracias por confiar en nosotros! ${E.corazon}\n${E.pin} Ricaurte, Cuenca`;
+  return `${E.burbuja} *LAVA & LISTO* ${E.burbuja}\n_Lavanderia & Limpieza Especializada_\n${L}\n¡Hola *${v.clienteNombre}*! ${E.fiesta}\n\nTu pedido *${v.folio}* ya esta\n${E.brillo} *LISTO PARA RETIRAR* ${E.brillo}\n${L}${pend>0?`\n${E.reloj} *Saldo al retirar:* $${pend.toFixed(2)}\n${L}`:""}\n${E.hora} Te esperamos en nuestro local\n¡Gracias por tu preferencia! ${E.corazon}\n${E.pin} Ricaurte, Cuenca`;
 };
 
 // Modal obligatorio: no se puede continuar sin abrir WhatsApp y confirmar el envío.
