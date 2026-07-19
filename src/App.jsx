@@ -103,7 +103,7 @@ function WhatsAppObligatorio({venta,tipo,onConfirm,onCancel}){
   return(
     <div style={S.ov}>
       <div style={S.tbox}>
-        <div style={{textAlign:"center",fontSize:36,marginBottom:6}}>📲</div>
+        <div style={{textAlign:"center",fontSize:36,marginBottom:6}}>{"\u{1F4F2}"}</div>
         <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e",textAlign:"center",marginBottom:4}}>
           {tipo==="recibido"?"Confirmar orden por WhatsApp":"Avisar: listo para retirar"}
         </div>
