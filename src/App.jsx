@@ -99,7 +99,7 @@ function WhatsAppObligatorio({venta,tipo,onConfirm,onCancel}){
   const [abierto,setAbierto]=useState(false);
   const tel=telWa(venta.clienteTel);
   const msg=msgWa(venta,tipo);
-  const abrir=()=>{window.open(`https://wa.me/${tel}?text=${encodeURIComponent(msg)}`,"_blank");setAbierto(true);};
+  const abrir=()=>{window.open(`https://api.whatsapp.com/send/?phone=${tel}&text=${encodeURIComponent(msg)}`,"_blank");setAbierto(true);};
   return(
     <div style={S.ov}>
       <div style={S.tbox}>
