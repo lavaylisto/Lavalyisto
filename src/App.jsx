@@ -326,13 +326,14 @@ function LoginScreen({onLogin}){
   );
 }
 
-function AperturaObligatoria({sesion,onLogout,onAbierta,empleadas}){
+function AperturaObligatoria({sesion,onLogout,onAbierta,empleadas,upsertCaja}){
   const hoy=fechaHoyLocal();
   const AK="ll_apertura_"+hoy+"_"+sesion.id;
   const [fondo,setFondo]=useState("15.00");
   const abrir=()=>{
-    const d={empleadaNombre:sesion.nombre,empleadaId:sesion.id,fondo:parseFloat(fondo)||15,fecha:new Date().toISOString()};
+    const d={id:"ap_"+hoy+"_"+sesion.id+"_"+Date.now(),tipo:"apertura",dia:hoy,empleadaNombre:sesion.nombre,empleadaId:sesion.id,fondo:parseFloat(fondo)||15,fecha:new Date().toISOString()};
     try{localStorage.setItem(AK,JSON.stringify(d));}catch{}
+    if(upsertCaja)upsertCaja(d); // ☁️ apertura guardada en la nube
     onAbierta();
   };
   return(
@@ -403,7 +404,7 @@ function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta}){
   );
 }
 
-function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta,upsertSalida,upsertCliente}){
+function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta,upsertSalida,upsertCliente,upsertCaja}){
   const hoy=fechaHoyLocal();
   const [tab,setTab]=useState("hoy");const [busq,setBusq]=useState("");
   const [fecha,setFecha]=useState(hoy);const [showNueva,setShowNueva]=useState(false);
@@ -480,7 +481,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
               <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e"}}>💰 Caja</div>
               <button style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:"#888"}} onClick={()=>setShowCaja(false)}>✕</button>
             </div>
-            <CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={onCierreListo} onResetCierre={onResetCierre} sesion={sesion} salidasCaja={salidasCaja} setVentas={setVentas} upsertVenta={upsertVenta}/>
+            <CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={onCierreListo} onResetCierre={onResetCierre} sesion={sesion} salidasCaja={salidasCaja} setVentas={setVentas} upsertVenta={upsertVenta} upsertCaja={upsertCaja}/>
           </div>
         </div>
       )}
@@ -525,6 +526,76 @@ function ServicioBuscador({servId,piezas,servicios,onServChange,onPiezasChange})
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// 🎁 PROMOS DEL DÍA — EDITA AQUÍ TU LISTA
+// dias: null = todos los días · [1]=lunes, [2]=martes, [3]=miércoles,
+//       [4]=jueves, [5]=viernes, [6]=sábado, [0]=domingo
+// tipo "servicio": al tocarla agrega ese servicio del catálogo (servId)
+// tipo "descuento": al tocarla agrega un descuento de $monto a la venta
+// ═══════════════════════════════════════════════════════════════════
+const PROMOS_DEL_DIA=[
+  {id:"promo_edredon",tipo:"descuento",monto:1.00,dias:null,emoji:"🛏️",
+   titulo:"Trae tu edredón: $1 de descuento",
+   detalle:"Se descuenta $1.00 al llevar el lavado de su edredón",
+   labelDescuento:"🎁 PROMO: -$1 por traer edredón"},
+  {id:"promo_miercoles",tipo:"servicio",servId:"010",dias:[3],emoji:"👟",
+   titulo:"¡Hoy es MIÉRCOLES de zapatos!",detalle:"4 pares de zapatos a precio especial"},
+  {id:"promo_combo15",tipo:"servicio",servId:"006",dias:null,emoji:"🧺",
+   titulo:"Combo 15lb + 1 par de zapatos",detalle:"Ropa limpia y zapatos como nuevos en un solo combo"},
+  {id:"promo_combo25",tipo:"servicio",servId:"007",dias:null,emoji:"👕",
+   titulo:"Combo 25lb + 2 pares de zapatos",detalle:"El combo grande para toda la familia"},
+  {id:"promo_pack3",tipo:"servicio",servId:"004",dias:null,emoji:"👞",
+   titulo:"Pack Ahorro: 3 pares de zapatos",detalle:"Más pares, mejor precio por par"},
+  {id:"promo_estudiantes",tipo:"servicio",servId:"008",dias:null,emoji:"🎒",
+   titulo:"Pack Estudiantes: 2 pares",detalle:"Ideal para el regreso a clases"},
+];
+// Cuántas promos mostrar como máximo en la ventana (las del día van primero)
+const PROMOS_MAX=5;
+
+// Se muestra 1 vez por venta: al registrar una venta se reactiva para la siguiente
+let PROMO_VISTO=false;
+
+function PromosDelDia({servicios,onAgregar,onCerrar}){
+  const dow=new Date().getDay();
+  const resolver=p=>{
+    if(p.tipo==="descuento")return{...p,precioTxt:`-$${p.monto.toFixed(2)}`};
+    const s=servicios.find(x=>x.id===p.servId&&!x.eliminada);
+    if(!s)return null; // si el servicio ya no existe, la promo no se muestra
+    return{...p,precioTxt:`$${s.precio.toFixed(2)}`,detalle:p.detalle};
+  };
+  const activas=PROMOS_DEL_DIA
+    .filter(p=>!p.dias||p.dias.includes(dow))
+    .sort((a,b)=>(a.dias?0:1)-(b.dias?0:1)) // primero las exclusivas de hoy
+    .map(resolver).filter(Boolean).slice(0,PROMOS_MAX);
+  if(activas.length===0)return null;
+  const nombreDia=new Date().toLocaleDateString("es-EC",{weekday:"long"});
+  return(
+    <div style={{...S.ov,zIndex:90}}>
+      <div style={{background:"#fff",borderRadius:18,width:"100%",maxWidth:380,maxHeight:"85vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,.35)"}}>
+        <div style={{background:"linear-gradient(135deg,#1a3c5e,#2563a8)",borderRadius:"18px 18px 0 0",padding:"18px 20px",textAlign:"center"}}>
+          <div style={{fontSize:36}}>🎁</div>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:20,fontWeight:700,color:"#fff"}}>Promos de hoy</div>
+          <div style={{fontSize:12,color:"#a0c4da",textTransform:"capitalize"}}>{nombreDia} · ¡Ofrécelas al cliente! 💪</div>
+        </div>
+        <div style={{padding:"14px 16px"}}>
+          {activas.map(p=>(
+            <button key={p.id} onClick={()=>onAgregar(p)} style={{display:"flex",alignItems:"center",gap:12,width:"100%",textAlign:"left",background:p.dias?"#fff8e1":"#f8fbfd",border:`1.5px solid ${p.dias?"#f59e0b":"#e8f0f7"}`,borderRadius:12,padding:"12px 14px",marginBottom:8,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+              <div style={{fontSize:26}}>{p.emoji}</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontWeight:700,fontSize:14,color:"#1a3c5e"}}>{p.titulo}</div>
+                <div style={{fontSize:11,color:"#888"}}>{p.detalle}</div>
+              </div>
+              <div style={{fontWeight:800,fontSize:15,color:p.tipo==="descuento"?"#2e7d32":"#1a3c5e",flexShrink:0}}>{p.precioTxt}</div>
+            </button>
+          ))}
+          <div style={{fontSize:11,color:"#888",textAlign:"center",margin:"4px 0 10px"}}>👆 Toca una promo para agregarla directo a la venta</div>
+          <button style={{...S.btnC,width:"100%"}} onClick={onCerrar}>Continuar sin promo</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,servicios,sesion,upsertVenta,upsertCliente}){
   const man=new Date();man.setDate(man.getDate()+1);
   const [cQ,setCQ]=useState("");const [cId,setCId]=useState(null);
@@ -537,12 +608,27 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
   const [notas,setNotas]=useState("");const [err,setErr]=useState("");
   const [tPago,setTPago]=useState("completo");const [metodo,setMetodo]=useState("Efectivo");const [abono,setAbono]=useState("");
   const [waVenta,setWaVenta]=useState(null);
+  const [showPromos,setShowPromos]=useState(!PROMO_VISTO); // 🎁 se muestra al entrar, 1 vez por venta
   const cFilt=clientes.filter(c=>c.nombre.toLowerCase().includes(cQ.toLowerCase())||(c.tel&&c.tel.includes(cQ))).slice(0,5);
   const selC=clientes.find(c=>c.id===cId);
   const calcT=()=>items.reduce((a,it)=>{if(it.custom)return a+(parseFloat(it.pC)||0)*(it.piezas||1);const s=servicios.find(s=>s.id===it.servId);return a+(s?s.precio*(it.piezas||1):0);},0);
   const addIt=()=>setItems([...items,{servId:servicios[0]?.id,piezas:1,custom:false,lC:"",pC:""}]);
   const remIt=i=>setItems(items.filter((_,idx)=>idx!==i));
   const updIt=(i,f,v)=>{const c=[...items];c[i]={...c[i],[f]:v};setItems(c);};
+  const cerrarPromos=()=>{setShowPromos(false);PROMO_VISTO=true;};
+  const agregarPromo=p=>{
+    if(p.tipo==="descuento"){
+      setItems(prev=>[...prev,{servId:servicios[0]?.id,piezas:1,custom:true,lC:p.labelDescuento,pC:String(-Math.abs(p.monto))}]);
+    }else{
+      const s=servicios.find(x=>x.id===p.servId);
+      if(s)setItems(prev=>{
+        // Si el primer renglón sigue intacto (servicio por defecto, 1 pieza), se reemplaza por la promo
+        const intacto=prev.length===1&&!prev[0].custom&&prev[0].servId===servicios[0]?.id&&(prev[0].piezas||1)===1;
+        return[...(intacto?[]:prev),{servId:s.id,piezas:1,custom:false,lC:"",pC:""}];
+      });
+    }
+    cerrarPromos();
+  };
   const reg=()=>{
     if(!cId&&mC==="buscar"){setErr("Selecciona o crea un cliente");return;}
     if(mC==="nuevo"&&!nC.nombre.trim()){setErr("Escribe el nombre del cliente");return;}
@@ -567,6 +653,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
     setVentas(prev=>{const next=prev.map(vv=>vv.folio===waVenta.folio?{...vv,msgRecibido:info}:vv);return next;});
     if(upsertVenta)upsertVenta(v2);
     setWaVenta(null);setTicket(v2);
+    PROMO_VISTO=false;setShowPromos(true); // 🎁 recordar promos en la siguiente venta (queda detrás del ticket)
   };
   const total=calcT();
   return(
@@ -638,6 +725,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
       </Card>
       {err&&<div style={S.err}>{err}</div>}
       <button style={S.btnP} onClick={reg}>🧾 Registrar Venta</button>
+      {showPromos&&!waVenta&&<PromosDelDia servicios={servicios} onAgregar={agregarPromo} onCerrar={cerrarPromos}/>}
       {waVenta&&<WhatsAppObligatorio venta={waVenta} tipo="recibido" onConfirm={confirmarWaRecibido}/>}
     </div>
   );
@@ -1158,6 +1246,7 @@ function Configuracion({servicios,setServicios,exportarDatos,importarDatos,upser
             ["depositos","ll_depositos","id"],
             ["salidasCaja","ll_salidas_caja","id"],
             ["usuarios","ll_usuarios","id"],
+            ["cajas","ll_cajas","id"],
           ];
           let tot=0;
           for(const [col,key,idField] of cols){
@@ -1347,7 +1436,7 @@ function SalidaCaja({sesion,salidasCaja,setSalidasCaja,onClose,upsertSalida}){
 }
 
 
-function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesion,salidasCaja,setVentas,upsertVenta}){
+function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesion,salidasCaja,setVentas,upsertVenta,upsertCaja}){
   const hoy=fechaHoyLocal();
   const uid=sesion?.id||"admin";
   // AK: apertura de esta sesion especifica (sessionStorage = se borra al cerrar sesion)
@@ -1455,8 +1544,10 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
     w.document.close();
   };
   const confirmar=()=>{
-    const d={fecha:new Date().toISOString(),emp:sesion?.nombre||"",bills,coins,totEf,fd,efN,tPic:parseFloat(tPic)||0,tJep:parseFloat(tJep)||0,totTr,totTa,dEf,dTr,dTa,dTot,espEf,espEfBruto,espTr,espTa,espTot,totMisSalidas,misSalidas,nv:todosAbonos.length,tv:todosAbonos.reduce((a,ab)=>a+ab.monto,0)};
+    const hoyC=fechaHoyLocal();
+    const d={id:"ci_"+hoyC+"_"+(sesion?.id||"x")+"_"+Date.now(),tipo:"cierre",dia:hoyC,empleadaId:sesion?.id,fecha:new Date().toISOString(),emp:sesion?.nombre||"",bills,coins,totEf,fd,efN,tPic:parseFloat(tPic)||0,tJep:parseFloat(tJep)||0,totTr,totTa,dEf,dTr,dTa,dTot,espEf,espEfBruto,espTr,espTa,espTot,totMisSalidas,misSalidas,nv:todosAbonos.length,tv:todosAbonos.reduce((a,ab)=>a+ab.monto,0)};
     try{localStorage.setItem(CK,JSON.stringify(d));}catch{}
+    if(upsertCaja)upsertCaja(d); // ☁️ cierre guardado en la nube
     setCg(d);
     if(onCierreListo)onCierreListo();
     imprimir(d);
@@ -1464,8 +1555,10 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
     setTimeout(()=>{if(onLogout)onLogout();},2000);
   };
   const regAp=()=>{
-    const d={empleadaNombre:empleadas.find(e=>String(e.id)===String(aEmp))?.nombre||"",fondo:parseFloat(fondo)||15,fecha:new Date().toISOString()};
+    const hoyA=fechaHoyLocal();
+    const d={id:"ap_"+hoyA+"_"+(sesion?.id||"x")+"_"+Date.now(),tipo:"apertura",dia:hoyA,empleadaNombre:empleadas.find(e=>String(e.id)===String(aEmp))?.nombre||"",empleadaId:aEmp,fondo:parseFloat(fondo)||15,fecha:new Date().toISOString()};
     try{localStorage.setItem(AK,JSON.stringify(d));}catch{}
+    if(upsertCaja)upsertCaja(d); // ☁️ apertura guardada en la nube
     setAp(d);setModo("cierre");
   };
   // Si ya hay cierre de esta sesion, mostrar resultado pero permitir nuevo cierre
@@ -2009,7 +2102,8 @@ const { data: inventario, setData: setInventario, upsert: upsertInventario } = u
 const { data: servicios, setData: setServicios, upsert: upsertServicio } = useCollection("servicios", KEYS.servicios, SERVICIOS_DEFAULT);
 const { data: gastos, setData: setGastos, upsert: upsertGasto } = useCollection("gastos", "ll_gastos", []);
 const { data: depositos, setData: setDepositos, upsert: upsertDeposito } = useCollection("depositos", "ll_depositos", []);
-const { data: salidasCaja, setData: setSalidasCaja, upsert: upsertSalida } = useCollection("salidasCaja", "ll_salidas_caja", []);  const [showSalida,setShowSalida]=useState(false);
+const { data: salidasCaja, setData: setSalidasCaja, upsert: upsertSalida } = useCollection("salidasCaja", "ll_salidas_caja", []);
+const { data: cajas, upsert: upsertCaja, nube } = useCollection("cajas", "ll_cajas", []);  const [showSalida,setShowSalida]=useState(false);
   const [ticketV,setTicketV]=useState(null);
   // Servicios visibles (excluye los eliminados, que quedan marcados en la nube)
   const serviciosActivos=servicios.filter(s=>!s.eliminada);
@@ -2021,7 +2115,7 @@ const { data: salidasCaja, setData: setSalidasCaja, upsert: upsertSalida } = use
     setCajaOk(false);
     setEsperandoApertura(true);
   };
-  const exportarDatos=()=>{const d={ventas,clientes,empleadas,inventario,servicios,gastos,depositos,salidasCaja};const blob=new Blob([JSON.stringify(d,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="respaldo-"+hoy+".json";a.click();};
+  const exportarDatos=()=>{const d={ventas,clientes,empleadas,inventario,servicios,gastos,depositos,salidasCaja,cajas};const blob=new Blob([JSON.stringify(d,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="respaldo-"+hoy+".json";a.click();};
   const importarDatos=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>{try{const d=JSON.parse(ev.target.result);if(d.ventas)setVentas(d.ventas);if(d.clientes)setClientes(d.clientes);if(d.empleadas)setEmpleadas(d.empleadas);if(d.inventario)setInventario(d.inventario);if(d.servicios)setServicios(d.servicios);if(d.gastos)setGastos(d.gastos);if(d.depositos)setDepositos(d.depositos);if(d.salidasCaja)setSalidasCaja(d.salidasCaja);alert("✅ Datos importados");}catch{alert("❌ Error al importar");}};r.readAsText(f);};
   const pCount=ventas.filter(v=>(!pagada(v)&&!v.anulada)||(pagada(v)&&!v.anulada&&(v.estado||"recibido")!=="entregado")).length;
 
@@ -2035,8 +2129,9 @@ const { data: salidasCaja, setData: setSalidasCaja, upsert: upsertSalida } = use
       setCierreOk(false); // nuevo turno = nuevo cierre requerido
     }}
     empleadas={empleadas}
+    upsertCaja={upsertCaja}
   />;
-  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={serviciosActivos} sesion={sesion} addAbono={addAbono} onLogout={onLogout} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} upsertVenta={upsertVenta} upsertSalida={upsertSalida} upsertCliente={upsertCliente}/>;
+  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={serviciosActivos} sesion={sesion} addAbono={addAbono} onLogout={onLogout} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} upsertVenta={upsertVenta} upsertSalida={upsertSalida} upsertCliente={upsertCliente} upsertCaja={upsertCaja}/>;
   const tabs=[
     {id:"ventas",icon:"🧾",l:"Venta"},{id:"historial",icon:"📋",l:"Historial"},
     {id:"pendientes",icon:"⏳",l:"Pendientes",b:pCount},{id:"bi",icon:"🚀",l:"Dashboard"},
@@ -2052,7 +2147,7 @@ const { data: salidasCaja, setData: setSalidasCaja, upsert: upsertSalida } = use
     <div style={S.hdr}><div style={S.hdrI}>
       <span style={S.logo}>🫧 Lava<span style={{color:"#4db6e4"}}>&</span>Listo</span>
       <div style={{display:"flex",alignItems:"center",gap:10}}>
-        <span style={{fontSize:12,color:"#a0c4da"}}>👑 {sesion.nombre}</span>
+        <span title={nube?"Sincronizado con la nube":"Sin conexión a la nube — guardando en este dispositivo"} style={{fontSize:12,color:"#a0c4da"}}>{nube?"☁️":"📴"} 👑 {sesion.nombre}</span>
         <button onClick={()=>setShowSalida(true)} style={{background:"rgba(220,50,50,.3)",border:"none",borderRadius:6,color:"#ffcccc",fontSize:11,padding:"4px 10px",cursor:"pointer",fontWeight:600}}>💸 Salida</button>
         {cierreOk?<button onClick={onLogout} style={{background:"rgba(255,255,255,.15)",border:"none",borderRadius:6,color:"#fff",fontSize:11,padding:"4px 10px",cursor:"pointer"}}>Salir</button>:<button onClick={()=>alert("Debes hacer el cierre de caja antes de salir.")} style={{background:"rgba(255,80,80,.3)",border:"none",borderRadius:6,color:"#ffcccc",fontSize:11,padding:"4px 10px",cursor:"not-allowed"}}>🔒 Salir</button>}
       </div>
@@ -2076,7 +2171,7 @@ const { data: salidasCaja, setData: setSalidasCaja, upsert: upsertSalida } = use
       {tab==="gastos"&&<Gastos gastos={gastos} setGastos={setGastos} sesion={sesion} upsertGasto={upsertGasto}/>}
       {tab==="inventario"&&<Inventario inventario={inventario} setInventario={setInventario} upsertInventario={upsertInventario}/>}
       {tab==="equipo"&&<Equipo empleadas={empleadas} setEmpleadas={setEmpleadas} ventas={ventas} esAdmin={esAdmin} upsertEmpleada={upsertEmpleada}/>}
-      {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={handleCierreListo} onResetCierre={()=>setCierreOk(false)} sesion={sesion} salidasCaja={salidasCaja} setVentas={setVentas} upsertVenta={upsertVenta}/>}
+      {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={handleCierreListo} onResetCierre={()=>setCierreOk(false)} sesion={sesion} salidasCaja={salidasCaja} setVentas={setVentas} upsertVenta={upsertVenta} upsertCaja={upsertCaja}/>}
       {tab==="config"&&<Configuracion servicios={servicios} setServicios={setServicios} exportarDatos={exportarDatos} importarDatos={importarDatos} upsertVenta={upsertVenta} upsertServicio={upsertServicio}/>}
       {tab==="usuarios"&&<GestionUsuarios/>}
     </div>
