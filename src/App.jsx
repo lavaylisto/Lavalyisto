@@ -528,7 +528,7 @@ function ServicioBuscador({servId,piezas,servicios,onServChange,onPiezasChange})
 function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,servicios,sesion,upsertVenta,upsertCliente}){
   const man=new Date();man.setDate(man.getDate()+1);
   const [cQ,setCQ]=useState("");const [cId,setCId]=useState(null);
-  const [nC,setNC]=useState({nombre:"",tel:"",email:"",rfc:"",direccion:""});
+  const [nC,setNC]=useState({nombre:"",tel:"",cedula:"",email:"",rfc:"",direccion:""});
   const [mC,setMC]=useState("buscar");
   const empDef=empleadas.find(e=>String(e.id)===String(sesion?.id))||empleadas[0];
   const [empId,setEmpId]=useState(empDef?.id||null);
@@ -558,7 +558,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
       pago:metodo,total,abonos:abs,pagada:tPago==="completo",notas,checkMsgRetiro:false,checkMsgEntrega:false,facturadoSRI:false,estado:"recibido"};
     setVentas([v,...ventas]);if(upsertVenta)upsertVenta(v);
     setWaVenta(v); // WhatsApp obligatorio antes de mostrar el ticket
-    setCQ("");setCId(null);setNC({nombre:"",tel:"",email:"",rfc:"",direccion:""});
+    setCQ("");setCId(null);setNC({nombre:"",tel:"",cedula:"",email:"",rfc:"",direccion:""});
     setItems([{servId:servicios[0]?.id,piezas:1,custom:false,lC:"",pC:""}]);
     setNotas("");setErr("");setAbono("");setTPago("completo");
   };
@@ -584,7 +584,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
           </div>
         ):(
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            {[["nombre","Nombre *"],["tel","Telefono"],["email","Email"],["rfc","RUC/RFC"]].map(([k,l])=><input key={k} style={S.inp} placeholder={l} value={nC[k]} onChange={e=>setNC({...nC,[k]:e.target.value})}/>)}
+            {[["nombre","Nombre *"],["tel","Telefono"],["cedula","Cedula"],["email","Email"],["rfc","RUC/RFC"]].map(([k,l])=><input key={k} style={S.inp} placeholder={l} value={nC[k]||""} onChange={e=>setNC({...nC,[k]:e.target.value})}/>)}
             <input style={{...S.inp,gridColumn:"1/-1"}} placeholder="📍 Direccion" value={nC.direccion} onChange={e=>setNC({...nC,direccion:e.target.value})}/>
           </div>
         )}
@@ -1638,6 +1638,359 @@ export default function LavaListo(){
   return <AppContent key={ses._sesId} sesion={ses} onLogout={logout}/>;
 }
 
+// ─── CLIENTES: GESTIÓN COMPLETA (ADMIN) ───────────────────────────
+// Edición de nombre, teléfono, cédula, email y dirección + historial
+// de ventas por cliente. Al editar, se propagan nombre/teléfono/dirección
+// a las órdenes activas (no entregadas ni anuladas) para que los mensajes
+// de WhatsApp y tickets salgan con los datos correctos.
+function Clientes({clientes,setClientes,upsertCliente,ventas,setVentas,upsertVenta}){
+  const [q,setQ]=useState("");
+  const [orden,setOrden]=useState("recientes");
+  const [editId,setEditId]=useState(null);const [ed,setEd]=useState({});
+  const [histId,setHistId]=useState(null);
+  const activos=clientes.filter(c=>!c.eliminada);
+  const stats=activos.map(c=>{
+    const vs=ventas.filter(v=>String(v.clienteId)===String(c.id)&&!v.anulada);
+    const gastado=vs.reduce((a,v)=>a+v.total,0);
+    const pendiente=vs.reduce((a,v)=>a+saldo(v),0);
+    const ultima=vs.length?vs.map(v=>v.fecha).sort().slice(-1)[0]:null;
+    return {...c,vs,compras:vs.length,gastado,pendiente,ultima};
+  });
+  const fil=stats.filter(c=>{
+    const s=q.toLowerCase().trim();
+    if(!s)return true;
+    return (c.nombre||"").toLowerCase().includes(s)||(c.tel||"").includes(s)||(c.cedula||"").includes(s)||(c.email||"").toLowerCase().includes(s);
+  }).sort((a,b)=>{
+    if(orden==="gastado")return b.gastado-a.gastado;
+    if(orden==="compras")return b.compras-a.compras;
+    if(orden==="nombre")return (a.nombre||"").localeCompare(b.nombre||"");
+    return (b.ultima||"").localeCompare(a.ultima||"");
+  });
+  const abrirEdicion=c=>{setEditId(c.id);setEd({nombre:c.nombre||"",tel:c.tel||"",cedula:c.cedula||"",email:c.email||"",rfc:c.rfc||"",direccion:c.direccion||""});setHistId(null);};
+  const guardar=()=>{
+    if(!ed.nombre.trim()){alert("El nombre es obligatorio");return;}
+    const datos={nombre:ed.nombre.trim(),tel:ed.tel.trim(),cedula:ed.cedula.trim(),email:ed.email.trim(),rfc:ed.rfc.trim(),direccion:ed.direccion.trim()};
+    setClientes(prev=>{
+      const next=prev.map(c=>c.id===editId?{...c,...datos}:c);
+      const upd=next.find(c=>c.id===editId);
+      if(upd&&upsertCliente)upsertCliente({...upd,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+    // Sincroniza los datos de contacto en las órdenes activas del cliente
+    setVentas(prev=>prev.map(v=>{
+      if(String(v.clienteId)!==String(editId)||v.anulada||(v.estado||"recibido")==="entregado")return v;
+      const v2={...v,clienteNombre:datos.nombre,clienteTel:datos.tel,clienteDireccion:datos.direccion};
+      if(upsertVenta)upsertVenta(v2);
+      return v2;
+    }));
+    setEditId(null);
+  };
+  const eliminar=c=>{
+    const msg=c.compras>0
+      ?`${c.nombre} tiene ${c.compras} venta(s). Se ocultará de la lista pero su historial de ventas se conserva. ¿Eliminar?`
+      :`¿Eliminar a ${c.nombre}?`;
+    if(!window.confirm(msg))return;
+    setClientes(prev=>{
+      const next=prev.map(x=>x.id===c.id?{...x,eliminada:true}:x);
+      const upd=next.find(x=>x.id===c.id);
+      if(upd&&upsertCliente)upsertCliente({...upd,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+  };
+  const totalCartera=stats.reduce((a,c)=>a+c.gastado,0);
+  const totalPend=stats.reduce((a,c)=>a+c.pendiente,0);
+  return(<div style={S.panel}>
+    <h2 style={S.ptitle}>👥 Clientes</h2>
+    <div style={S.kgrid}>
+      <div style={{...S.kpi,borderLeft:"4px solid #1a3c5e"}}><div style={{fontSize:22}}>👥</div><div><div style={{fontWeight:800,fontSize:18,color:"#1a3c5e"}}>{activos.length}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Clientes activos</div></div></div>
+      <div style={{...S.kpi,borderLeft:"4px solid #4caf50"}}><div style={{fontSize:22}}>💚</div><div><div style={{fontWeight:800,fontSize:18,color:"#2e7d32"}}>${totalCartera.toFixed(2)}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Ventas históricas</div>{totalPend>0&&<div style={{fontSize:11,color:"#e65100"}}>⏳ ${totalPend.toFixed(2)} por cobrar</div>}</div></div>
+    </div>
+    <Card title="🔍 Buscar cliente">
+      <input style={S.inp} placeholder="Nombre, teléfono, cédula o email..." value={q} onChange={e=>setQ(e.target.value)}/>
+      <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
+        {[{id:"recientes",l:"🕐 Recientes"},{id:"gastado",l:"💵 Más gastan"},{id:"compras",l:"🧾 Más compran"},{id:"nombre",l:"🔤 A-Z"}].map(o=>(
+          <button key={o.id} style={{...S.pill,fontSize:11,...(orden===o.id?S.pillA:{})}} onClick={()=>setOrden(o.id)}>{o.l}</button>
+        ))}
+      </div>
+    </Card>
+    <Card title={`📇 Directorio (${fil.length})`}>
+      {fil.length===0?<div style={S.empty}>Sin clientes{q?` que coincidan con "${q}"`:""}</div>:fil.slice(0,100).map(c=>(
+        <div key={c.id} style={{...S.vcard,borderLeft:`4px solid ${c.pendiente>0?"#ff9800":"#4db6e4"}`}}>
+          {editId===c.id?(
+            <div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+                <div style={{gridColumn:"1/-1"}}><label style={S.lbl}>Nombre *</label><input style={S.inp} value={ed.nombre} onChange={e=>setEd({...ed,nombre:e.target.value})}/></div>
+                <div><label style={S.lbl}>Teléfono</label><input style={S.inp} placeholder="09..." value={ed.tel} onChange={e=>setEd({...ed,tel:e.target.value})}/></div>
+                <div><label style={S.lbl}>Cédula</label><input style={S.inp} value={ed.cedula} onChange={e=>setEd({...ed,cedula:e.target.value})}/></div>
+                <div><label style={S.lbl}>Email</label><input style={S.inp} value={ed.email} onChange={e=>setEd({...ed,email:e.target.value})}/></div>
+                <div><label style={S.lbl}>RUC</label><input style={S.inp} value={ed.rfc} onChange={e=>setEd({...ed,rfc:e.target.value})}/></div>
+                <div style={{gridColumn:"1/-1"}}><label style={S.lbl}>Dirección</label><input style={S.inp} placeholder="📍 Dirección" value={ed.direccion} onChange={e=>setEd({...ed,direccion:e.target.value})}/></div>
+              </div>
+              <div style={{fontSize:11,color:"#888",marginBottom:8}}>ℹ️ El nombre y teléfono se actualizarán también en sus órdenes activas.</div>
+              <div style={{display:"flex",gap:8}}>
+                <button style={{...S.btnP,flex:1}} onClick={guardar}>✓ Guardar cambios</button>
+                <button style={S.btnC} onClick={()=>setEditId(null)}>Cancelar</button>
+              </div>
+            </div>
+          ):(
+            <>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                <div style={{minWidth:0}}>
+                  <div style={{fontWeight:700,fontSize:15}}>{c.nombre}</div>
+                  <div style={{fontSize:12,color:"#888"}}>
+                    {c.tel?`📱 ${c.tel}`:"📱 sin teléfono"}{c.cedula?` · 🪪 ${c.cedula}`:""}
+                  </div>
+                  {c.email&&<div style={{fontSize:11,color:"#888"}}>✉️ {c.email}</div>}
+                  {c.direccion&&<div style={{fontSize:11,color:"#888"}}>📍 {c.direccion}</div>}
+                  <div style={{fontSize:11,color:"#4db6e4",marginTop:3}}>
+                    {c.compras} compra{c.compras!==1?"s":""} · ${c.gastado.toFixed(2)}{c.ultima?` · última: ${fmtD(c.ultima)}`:""}
+                  </div>
+                  {c.pendiente>0&&<div style={{...S.badge,background:"#fff3e0",color:"#e65100",marginTop:4}}>⏳ Debe ${c.pendiente.toFixed(2)}</div>}
+                </div>
+                <div style={{display:"flex",flexDirection:"column",gap:5,alignItems:"flex-end"}}>
+                  <button style={S.btnS} onClick={()=>abrirEdicion(c)}>✏️ Editar</button>
+                  <button style={S.btnS} onClick={()=>setHistId(histId===c.id?null:c.id)}>{histId===c.id?"▲ Ocultar":"📋 Historial"}</button>
+                  <button style={S.btnR} onClick={()=>eliminar(c)}>🗑️</button>
+                </div>
+              </div>
+              {histId===c.id&&(
+                <div style={{marginTop:10,borderTop:"1.5px dashed #d0dce8",paddingTop:8}}>
+                  <div style={{fontSize:12,fontWeight:700,color:"#4db6e4",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>Historial de ventas ({c.vs.length})</div>
+                  {c.vs.length===0?<div style={S.empty}>Sin ventas registradas</div>:
+                    [...c.vs].sort((a,b)=>b.fecha.localeCompare(a.fecha)).slice(0,30).map(v=>{
+                      const est=getEst(v);const p=pagada(v);
+                      return(<div key={v.folio} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #f0f4f8",fontSize:13}}>
+                        <div style={{minWidth:0}}>
+                          <div style={{fontWeight:600}}>{v.folio} <span style={{...S.badge,background:est.bg,color:est.color,fontSize:10}}>{est.icon} {est.label}</span></div>
+                          <div style={{fontSize:11,color:"#888"}}>{fmt(v.fecha)} · {(v.items||[]).map(it=>it.label).join(", ").slice(0,60)}{(v.items||[]).map(it=>it.label).join(", ").length>60?"…":""}</div>
+                        </div>
+                        <div style={{textAlign:"right",flexShrink:0}}>
+                          <div style={{fontWeight:800}}>${v.total.toFixed(2)}</div>
+                          <div style={{...S.badge,background:p?"#e8f5e9":"#fff3e0",color:p?"#2e7d32":"#e65100",fontSize:10}}>{p?"✅ Pagado":`⏳ $${saldo(v).toFixed(2)}`}</div>
+                        </div>
+                      </div>);
+                    })}
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:13,fontWeight:700,color:"#1a3c5e",paddingTop:8}}>
+                    <span>Total histórico</span><span>${c.gastado.toFixed(2)}</span>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      ))}
+    </Card>
+  </div>);
+}
+
+// ─── DASHBOARD BI: META MENSUAL AUTOMÁTICA + PROGRESO + BONOS ─────
+// La meta se calcula sola con el historial completo: promedio de los
+// últimos 3 meses cerrados + 10% de crecimiento (redondeado a $10).
+// Si aún no hay meses cerrados, usa la proyección del mes en curso.
+function DashboardBI({ventas,empleadas,gastos}){
+  const hoyD=new Date();
+  const mesAct=mesK(hoyD);
+  const diaMes=hoyD.getDate();
+  const diasMes=new Date(hoyD.getFullYear(),hoyD.getMonth()+1,0).getDate();
+  const [mesSel,setMesSel]=useState(mesAct);
+  const esMesActual=mesSel===mesAct;
+  const vOk=ventas.filter(v=>!v.anulada);
+  // Totales por mes (historial completo)
+  const porMes={};vOk.forEach(v=>{const k=mesK(v.fecha);porMes[k]={tot:(porMes[k]?.tot||0)+v.total,cnt:(porMes[k]?.cnt||0)+1};});
+  const vMes=vOk.filter(v=>mesK(v.fecha)===mesSel);
+  const ventaMes=vMes.reduce((a,v)=>a+v.total,0);
+  const cobradoMes=vOk.flatMap(v=>(v.abonos||[]).filter(ab=>mesK(ab.fecha)===mesSel)).reduce((a,ab)=>a+ab.monto,0);
+  // Meta automática: promedio de últimos 3 meses cerrados anteriores al mes seleccionado, +10%
+  const cerrados=Object.keys(porMes).filter(k=>k<mesSel).sort();
+  const ult3=cerrados.slice(-3).map(k=>porMes[k].tot);
+  const diasTranscurridos=esMesActual?diaMes:diasMes;
+  let meta,origenMeta;
+  if(ult3.length>0){
+    const prom=ult3.reduce((a,b)=>a+b,0)/ult3.length;
+    meta=Math.max(10,Math.ceil((prom*1.10)/10)*10);
+    origenMeta=`Promedio de ${ult3.length} mes${ult3.length>1?"es":""} anterior${ult3.length>1?"es":""} ($${prom.toFixed(0)}) + 10% de crecimiento`;
+  }else{
+    const proy=(ventaMes/Math.max(1,diasTranscurridos))*diasMes;
+    meta=Math.max(10,Math.ceil(proy/10)*10);
+    origenMeta="Sin meses cerrados aún — meta según el ritmo del propio mes";
+  }
+  const pct=Math.min(100,meta>0?(ventaMes/meta)*100:0);
+  const pctReal=meta>0?(ventaMes/meta)*100:0;
+  const pctEsperado=(diasTranscurridos/diasMes)*100;
+  const proyeccion=(ventaMes/Math.max(1,diasTranscurridos))*diasMes;
+  const faltante=Math.max(0,meta-ventaMes);
+  const diasRestantes=Math.max(0,diasMes-diasTranscurridos);
+  const ritmoNecesario=diasRestantes>0?faltante/diasRestantes:0;
+  const adelantada=pctReal>=pctEsperado;
+  // Serie de meses para la gráfica (hasta 12)
+  const serieKeys=[...new Set([...Object.keys(porMes),mesAct])].sort().slice(-12);
+  const serie=serieKeys.map(k=>({k,l:k.slice(5)+"/"+k.slice(2,4),v:porMes[k]?.tot||0}));
+  const maxSerie=Math.max(...serie.map(s=>s.v),meta,1);
+  // Ventas por día del mes seleccionado
+  const porDia={};vMes.forEach(v=>{const d=parseInt(fechaLocal(v.fecha).slice(8));porDia[d]=(porDia[d]||0)+v.total;});
+  const dias=Array.from({length:esMesActual?diaMes:diasMes},(_,i)=>({d:i+1,v:porDia[i+1]||0}));
+  const maxDia=Math.max(...dias.map(x=>x.v),1);
+  // Métodos de pago (cobros del mes seleccionado)
+  const metodos=PAGOS.map(p=>({p,v:vOk.flatMap(v=>(v.abonos||[]).filter(ab=>ab.metodo===p&&mesK(ab.fecha)===mesSel)).reduce((a,ab)=>a+ab.monto,0)})).filter(m=>m.v>0);
+  const totMet=metodos.reduce((a,m)=>a+m.v,0);
+  const colMet={"Efectivo":"#4caf50","Transferencia Pichincha":"#1565c0","Transferencia JEP":"#7c3aed","Tarjeta":"#e65100"};
+  // Top servicios y top clientes del mes
+  const srvMap={};vMes.forEach(v=>(v.items||[]).forEach(it=>{const sub=(it.precio||0)*(it.piezas||1);if(!srvMap[it.label])srvMap[it.label]={v:0,n:0};srvMap[it.label].v+=sub;srvMap[it.label].n+=(it.piezas||1);}));
+  const topSrv=Object.entries(srvMap).sort((a,b)=>b[1].v-a[1].v).slice(0,5);
+  const cliMap={};vMes.forEach(v=>{const n=v.clienteNombre||"Sin nombre";if(!cliMap[n])cliMap[n]={v:0,n:0};cliMap[n].v+=v.total;cliMap[n].n++;});
+  const topCli=Object.entries(cliMap).sort((a,b)=>b[1].v-a[1].v).slice(0,5);
+  // Gastos y utilidad estimada del mes
+  const gastosMes=(gastos||[]).filter(g=>!g.eliminada&&fechaLocal(g.fecha).startsWith(mesSel)).reduce((a,g)=>a+g.monto,0);
+  const utilidad=ventaMes-gastosMes;
+  // Bonos por empleada (mes seleccionado)
+  const bonos=empleadas.filter(e=>e.activa||vMes.some(v=>v.empleadaId===e.id)).map(e=>{
+    const mv=vMes.filter(v=>v.empleadaId===e.id);
+    const metaE=e.metaVentas||20;
+    const cumple=mv.length>=metaE;
+    return{...e,cnt:mv.length,tot:mv.reduce((a,v)=>a+v.total,0),metaE,cumple,pctE:Math.min(100,(mv.length/metaE)*100)};
+  }).sort((a,b)=>b.cnt-a.cnt);
+  const totBonos=bonos.filter(b=>b.cumple).reduce((a,b)=>a+(b.montoBonus||0),0);
+  const semColor=pctReal>=100?"#4caf50":adelantada?"#4db6e4":"#e53935";
+  return(<div style={S.panel}>
+    <h2 style={S.ptitle}>🚀 Dashboard BI</h2>
+    <div style={{marginBottom:12}}><label style={S.lbl}>Mes</label><input type="month" style={S.inp} value={mesSel} onChange={e=>setMesSel(e.target.value||mesAct)}/></div>
+
+    {/* META MENSUAL AUTOMÁTICA */}
+    <div style={{background:"linear-gradient(135deg,#1a3c5e,#2563a8)",borderRadius:14,padding:"18px 18px 16px",marginBottom:14,color:"#fff",boxShadow:"0 4px 16px rgba(26,60,94,.3)"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+        <div>
+          <div style={{fontSize:12,fontWeight:600,color:"#a0c4da",textTransform:"uppercase",letterSpacing:0.5}}>🎯 Meta del mes (automática)</div>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:30,fontWeight:700,marginTop:2}}>${meta.toFixed(2)}</div>
+          <div style={{fontSize:11,color:"#a0c4da",marginTop:2}}>{origenMeta}</div>
+        </div>
+        <div style={{textAlign:"right"}}>
+          <div style={{fontSize:26,fontWeight:800,color:semColor==="#e53935"?"#ffab91":semColor==="#4caf50"?"#a5d6a7":"#81d4fa"}}>{pctReal.toFixed(0)}%</div>
+          <div style={{fontSize:11,color:"#a0c4da"}}>alcanzado</div>
+        </div>
+      </div>
+      <div style={{marginTop:12,position:"relative"}}>
+        <div style={{background:"rgba(255,255,255,.2)",borderRadius:8,height:14,overflow:"hidden"}}>
+          <div style={{background:pctReal>=100?"#4caf50":"#4dd9e8",width:`${pct}%`,height:"100%",borderRadius:8,transition:"width .4s"}}/>
+        </div>
+        {esMesActual&&<div title="Avance esperado a hoy" style={{position:"absolute",top:-3,bottom:-3,left:`${Math.min(100,pctEsperado)}%`,width:2,background:"#fff",opacity:0.9}}/>}
+      </div>
+      <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginTop:6,color:"#e3f2fd"}}>
+        <span>Vendido: <strong>${ventaMes.toFixed(2)}</strong></span>
+        {esMesActual&&<span>Esperado a hoy: {pctEsperado.toFixed(0)}%</span>}
+        <span>Falta: <strong>${faltante.toFixed(2)}</strong></span>
+      </div>
+      {esMesActual&&(
+        <div style={{marginTop:10,background:"rgba(255,255,255,.12)",borderRadius:8,padding:"8px 12px",fontSize:12}}>
+          {pctReal>=100
+            ?<span>🎉 <strong>¡Meta cumplida!</strong> Todo lo que vendas ahora es crecimiento extra.</span>
+            :adelantada
+              ?<span>💪 Vas <strong>adelantada</strong>. Proyección de cierre: <strong>${proyeccion.toFixed(2)}</strong>.</span>
+              :<span>⚡ Necesitas <strong>${ritmoNecesario.toFixed(2)}/día</strong> los próximos {diasRestantes} día{diasRestantes!==1?"s":""} para llegar. Proyección actual: ${proyeccion.toFixed(2)}.</span>}
+        </div>
+      )}
+    </div>
+
+    <div style={S.kgrid}>
+      <div style={{...S.kpi,borderLeft:"4px solid #4caf50"}}><div style={{fontSize:22}}>💚</div><div><div style={{fontWeight:800,fontSize:18,color:"#2e7d32"}}>${cobradoMes.toFixed(2)}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Cobrado en el mes</div></div></div>
+      <div style={{...S.kpi,borderLeft:"4px solid #4db6e4"}}><div style={{fontSize:22}}>🧾</div><div><div style={{fontWeight:800,fontSize:18,color:"#1a3c5e"}}>{vMes.length}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Ventas · ticket ${vMes.length?(ventaMes/vMes.length).toFixed(2):"0.00"}</div></div></div>
+      <div style={{...S.kpi,borderLeft:"4px solid #e53935"}}><div style={{fontSize:22}}>🛒</div><div><div style={{fontWeight:800,fontSize:18,color:"#e53935"}}>-${gastosMes.toFixed(2)}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Gastos del mes</div></div></div>
+      <div style={{...S.kpi,borderLeft:`4px solid ${utilidad>=0?"#4caf50":"#e53935"}`}}><div style={{fontSize:22}}>{utilidad>=0?"📈":"📉"}</div><div><div style={{fontWeight:800,fontSize:18,color:utilidad>=0?"#2e7d32":"#c62828"}}>${utilidad.toFixed(2)}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Utilidad estimada</div></div></div>
+    </div>
+
+    <Card title="📊 Evolución mensual vs meta">
+      <div style={{position:"relative"}}>
+        <div style={{display:"flex",alignItems:"flex-end",gap:6,height:150,padding:"14px 2px 0"}}>
+          {serie.map(s=>{
+            const h=Math.max(4,(s.v/maxSerie)*110);
+            const esSel=s.k===mesSel;
+            return(<div key={s.k} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-end",gap:3,minWidth:0,height:"100%"}}>
+              <div style={{fontSize:9,fontWeight:700,color:esSel?"#1a3c5e":"#aaa"}}>${s.v>=1000?(s.v/1000).toFixed(1)+"k":s.v.toFixed(0)}</div>
+              <div title={`${s.l}: $${s.v.toFixed(2)}`} style={{width:"100%",maxWidth:34,height:h,background:esSel?"linear-gradient(180deg,#4dd9e8,#1a3c5e)":"#c8dcec",borderRadius:"5px 5px 0 0"}}/>
+              <div style={{fontSize:9,color:esSel?"#1a3c5e":"#888",fontWeight:esSel?800:500}}>{s.l}</div>
+            </div>);
+          })}
+        </div>
+        {/* Línea de meta: se dibuja a la altura proporcional de la meta (base de barras = 14px de etiqueta inferior) */}
+        <div style={{position:"absolute",left:0,right:0,bottom:14+(meta/maxSerie)*110,borderTop:"2px dashed #f59e0b",pointerEvents:"none"}}>
+          <span style={{position:"absolute",right:0,top:-16,fontSize:9,fontWeight:700,color:"#f59e0b",background:"#fff8e1",padding:"1px 6px",borderRadius:6}}>Meta ${meta.toFixed(0)}</span>
+        </div>
+      </div>
+    </Card>
+
+    <Card title="📅 Ventas por día del mes">
+      {dias.every(d=>d.v===0)?<div style={S.empty}>Sin ventas en {mesSel}</div>:(
+        <div style={{display:"flex",alignItems:"flex-end",gap:2,height:80}}>
+          {dias.map(x=>(
+            <div key={x.d} title={`Día ${x.d}: $${x.v.toFixed(2)}`} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+              <div style={{width:"100%",height:Math.max(2,(x.v/maxDia)*60),background:x.v>0?"#4db6e4":"#eef3f8",borderRadius:2}}/>
+              {(x.d===1||x.d%5===0)&&<div style={{fontSize:8,color:"#aaa"}}>{x.d}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+
+    {metodos.length>0&&<Card title="💳 Cobros por método de pago">
+      <div style={{display:"flex",height:14,borderRadius:8,overflow:"hidden",marginBottom:10}}>
+        {metodos.map(m=><div key={m.p} title={`${m.p}: $${m.v.toFixed(2)}`} style={{width:`${(m.v/totMet)*100}%`,background:colMet[m.p]||"#888"}}/>)}
+      </div>
+      {metodos.map(m=>(
+        <div key={m.p} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"4px 0"}}>
+          <span><span style={{display:"inline-block",width:10,height:10,borderRadius:3,background:colMet[m.p]||"#888",marginRight:6}}/>{m.p}</span>
+          <strong>${m.v.toFixed(2)} <span style={{color:"#888",fontWeight:500,fontSize:11}}>({((m.v/totMet)*100).toFixed(0)}%)</span></strong>
+        </div>
+      ))}
+    </Card>}
+
+    <Card title="🧺 Top servicios del mes">
+      {topSrv.length===0?<div style={S.empty}>Sin datos</div>:topSrv.map(([lbl,d],i)=>{
+        const max=topSrv[0][1].v;
+        return(<div key={lbl} style={{marginBottom:8}}>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:2}}>
+            <span style={{fontWeight:600}}>{i+1}. {lbl} <span style={{color:"#888"}}>×{d.n}</span></span><strong>${d.v.toFixed(2)}</strong>
+          </div>
+          <div style={{background:"#e8f0f7",borderRadius:4,height:8}}><div style={{background:"#1a3c5e",width:`${(d.v/max)*100}%`,height:"100%",borderRadius:4}}/></div>
+        </div>);
+      })}
+    </Card>
+
+    <Card title="⭐ Top clientes del mes">
+      {topCli.length===0?<div style={S.empty}>Sin datos</div>:topCli.map(([n,d],i)=>(
+        <div key={n} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid #f0f4f8",fontSize:13}}>
+          <span><span style={{fontWeight:800,color:"#4db6e4"}}>{i+1}.</span> <span style={{fontWeight:600}}>{n}</span> <span style={{color:"#888",fontSize:11}}>({d.n} compra{d.n!==1?"s":""})</span></span>
+          <strong>${d.v.toFixed(2)}</strong>
+        </div>
+      ))}
+    </Card>
+
+    <Card title="🌟 Bonos por empleada">
+      {bonos.length===0?<div style={S.empty}>Sin empleadas activas</div>:(
+        <>
+          {bonos.map(b=>(
+            <div key={b.id} style={{padding:"8px 0",borderBottom:"1px solid #f0f4f8"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div>
+                  <div style={{fontWeight:700,fontSize:14}}>{b.nombre}</div>
+                  <div style={{fontSize:11,color:"#888"}}>{b.cnt}/{b.metaE} ventas · ${b.tot.toFixed(2)}</div>
+                </div>
+                {b.cumple
+                  ?<div style={{...S.badge,background:"#fff8e1",color:"#f59e0b"}}>🌟 Bono ${(b.montoBonus||0).toFixed(2)}</div>
+                  :<div style={{fontSize:11,color:"#888"}}>Faltan {b.metaE-b.cnt}</div>}
+              </div>
+              <div style={{background:"#e8f0f7",borderRadius:6,height:8,marginTop:5}}>
+                <div style={{background:b.cumple?"#f59e0b":"#4db6e4",width:`${b.pctE}%`,height:"100%",borderRadius:6}}/>
+              </div>
+            </div>
+          ))}
+          <div style={{display:"flex",justifyContent:"space-between",padding:"10px 0 2px",fontWeight:800,color:"#1a3c5e",fontSize:14}}>
+            <span>💰 Total bonos a pagar</span><span style={{color:totBonos>0?"#f59e0b":"#888"}}>${totBonos.toFixed(2)}</span>
+          </div>
+        </>
+      )}
+    </Card>
+  </div>);
+}
+
 function AppContent({sesion,onLogout}){
   const hoy=fechaHoyLocal();
   const AK="ll_apertura_"+hoy+"_"+sesion.id;
@@ -1686,7 +2039,8 @@ const { data: salidasCaja, setData: setSalidasCaja, upsert: upsertSalida } = use
   if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={serviciosActivos} sesion={sesion} addAbono={addAbono} onLogout={onLogout} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} upsertVenta={upsertVenta} upsertSalida={upsertSalida} upsertCliente={upsertCliente}/>;
   const tabs=[
     {id:"ventas",icon:"🧾",l:"Venta"},{id:"historial",icon:"📋",l:"Historial"},
-    {id:"pendientes",icon:"⏳",l:"Pendientes",b:pCount},{id:"resumen",icon:"📈",l:"Resumen día"},
+    {id:"pendientes",icon:"⏳",l:"Pendientes",b:pCount},{id:"bi",icon:"🚀",l:"Dashboard"},
+    {id:"clientes",icon:"👥",l:"Clientes"},{id:"resumen",icon:"📈",l:"Resumen día"},
     {id:"reportes",icon:"📊",l:"Reportes"},{id:"depositos",icon:"🏦",l:"Depósitos"},
     {id:"conciliacion",icon:"🏛️",l:"Conciliación"},
     {id:"gastos",icon:"🛒",l:"Gastos"},{id:"inventario",icon:"📦",l:"Inventario"},
@@ -1713,6 +2067,8 @@ const { data: salidasCaja, setData: setSalidasCaja, upsert: upsertSalida } = use
       {tab==="ventas"&&<NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={setTicketV} servicios={serviciosActivos} sesion={sesion} upsertVenta={upsertVenta} upsertCliente={upsertCliente}/>}
       {tab==="historial"&&<Historial ventas={ventas} setVentas={setVentas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} esAdmin={esAdmin} upsertVenta={upsertVenta}/>}
       {tab==="pendientes"&&<Pendientes ventas={ventas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} setVentas={setVentas} upsertVenta={upsertVenta}/>}
+      {tab==="bi"&&<DashboardBI ventas={ventas} empleadas={empleadas} gastos={gastos}/>}
+      {tab==="clientes"&&<Clientes clientes={clientes} setClientes={setClientes} upsertCliente={upsertCliente} ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta}/>}
       {tab==="resumen"&&<ResumenDia ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja}/>}
       {tab==="reportes"&&<Reportes ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja}/>}
       {tab==="depositos"&&<Depositos depositos={depositos} setDepositos={setDepositos} ventas={ventas} salidasCaja={salidasCaja} upsertDeposito={upsertDeposito}/>}
