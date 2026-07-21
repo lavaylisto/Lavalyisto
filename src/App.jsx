@@ -492,7 +492,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
       </div>
       {showNueva&&(
         <div style={S.ov}>
-          <div style={{background:"#fff",borderRadius:16,width:"100%",maxWidth:500,maxHeight:"90vh",overflowY:"auto",padding:16}}>
+          <div style={{background:"#fff",borderRadius:16,width:"96vw",maxWidth:1300,maxHeight:"92vh",overflowY:"auto",padding:16}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
               <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e"}}>➕ Nueva Venta</div>
               <button style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:"#888"}} onClick={()=>setShowNueva(false)}>✕</button>
@@ -861,20 +861,20 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
       <div style={{flex:"1 1 300px",minWidth:290,maxWidth:360}}>
       <div style={{position:"sticky",top:12}}>
         {/* 🔔 Caja de recordatorios: junto a los datos del cliente, arriba del resumen */}
-        <div style={{background:"#fff",borderRadius:14,padding:"14px 16px",boxShadow:"0 4px 14px rgba(0,0,0,.12)",border:"2px solid #f59e0b"}}>
-          <div style={{fontSize:13,fontWeight:800,color:"#b45309",textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>🔔 Recordatorios para el cliente</div>
+        <div style={{background:"#E6FFFA",borderRadius:14,padding:"14px 16px",boxShadow:"0 4px 14px rgba(0,0,0,.08)",border:"1.5px solid #00E5B8"}}>
+          <div style={{fontSize:13,fontWeight:800,color:"#00695C",textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>🔔 Recordatorios para el cliente</div>
           {clienteCumple&&!descCumple&&(
-            <div style={{background:"#fff8e1",borderRadius:8,padding:"9px 11px",fontSize:13,marginBottom:7,color:"#7a4a00",fontWeight:600}}>🎂 <strong>{nombreCumple}</strong> cumple hoy — ¡ofrécele el 10% de descuento!</div>
+            <div style={{background:"#fff",borderRadius:8,padding:"9px 11px",fontSize:13,marginBottom:7,color:"#00695C",fontWeight:600}}>🎂 <strong>{nombreCumple}</strong> cumple hoy — ¡ofrécele el 10% de descuento!</div>
           )}
           {cuponClienteVig&&(
-            <div style={{background:"#e6fffa",borderRadius:8,padding:"9px 11px",fontSize:13,marginBottom:7,color:"#00695c",fontWeight:600}}>🎟️ Tiene el cupón <strong>{cuponClienteVig.id}</strong> vigente (vence {fmtD(cuponClienteVig.caduca)}) — recuérdaselo</div>
+            <div style={{background:"#fff",borderRadius:8,padding:"9px 11px",fontSize:13,marginBottom:7,color:"#00695C",fontWeight:600}}>🎟️ Tiene el cupón <strong>{cuponClienteVig.id}</strong> vigente (vence {fmtD(cuponClienteVig.caduca)}) — recuérdaselo</div>
           )}
           {promosHoy.length>0&&(<>
-            <div style={{fontSize:11,fontWeight:700,color:"#1a3c5e",textTransform:"uppercase",letterSpacing:0.5,margin:"4px 0 6px"}}>🎁 Promos que puedes ofrecer hoy</div>
+            <div style={{fontSize:11,fontWeight:700,color:"#00695C",textTransform:"uppercase",letterSpacing:0.5,margin:"4px 0 6px"}}>🎁 Promos que puedes ofrecer hoy</div>
             {promosHoy.map(p=>(
-              <div key={p.id} style={{background:"#f0f7fc",borderRadius:8,padding:"9px 11px",fontSize:13,color:"#1a3c5e",marginBottom:6}}>
+              <div key={p.id} style={{background:"#fff",borderRadius:8,padding:"9px 11px",fontSize:13,color:"#00695C",marginBottom:6}}>
                 <div style={{fontWeight:700}}>{p.emoji} {p.titulo}</div>
-                {p.detalle&&<div style={{fontSize:11,color:"#5a7a95",marginTop:1}}>{p.detalle}</div>}
+                {p.detalle&&<div style={{fontSize:11,color:"#4a9c92",marginTop:1}}>{p.detalle}</div>}
               </div>
             ))}
           </>)}
