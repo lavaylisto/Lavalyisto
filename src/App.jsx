@@ -431,7 +431,7 @@ function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta}){
   );
 }
 
-function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta,upsertSalida,upsertCliente,upsertCaja,cupones,setCupones,upsertCupon}){
+function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta,upsertSalida,upsertCliente,upsertCaja,cupones,setCupones,upsertCupon,promos}){
   const hoy=fechaHoyLocal();
   const [tab,setTab]=useState("hoy");const [busq,setBusq]=useState("");
   const [fecha,setFecha]=useState(hoy);const [showNueva,setShowNueva]=useState(false);
@@ -497,7 +497,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
               <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e"}}>➕ Nueva Venta</div>
               <button style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:"#888"}} onClick={()=>setShowNueva(false)}>✕</button>
             </div>
-            <NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={v=>{setShowNueva(false);setTicket(v);}} servicios={servicios} sesion={sesion} upsertVenta={upsertVenta} upsertCliente={upsertCliente} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon}/>
+            <NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={v=>{setShowNueva(false);setTicket(v);}} servicios={servicios} sesion={sesion} upsertVenta={upsertVenta} upsertCliente={upsertCliente} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos}/>
           </div>
         </div>
       )}
@@ -513,7 +513,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         </div>
       )}
       {ticket&&<TicketModal venta={ticket} empleadas={empleadas} onClose={()=>{setCuponSugE(ticket);setTicket(null);}}/>}
-      {cuponSugE&&<CuponSugerido venta={cuponSugE} clientes={clientes} ventas={ventas} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} sesion={sesion} onClose={()=>setCuponSugE(null)}/>}
+      {cuponSugE&&<CuponSugerido venta={cuponSugE} clientes={clientes} ventas={ventas} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} sesion={sesion} promos={promos} onClose={()=>setCuponSugE(null)}/>}
       {showSalidaEmp&&<SalidaCaja sesion={sesion} salidasCaja={salidasCaja||[]} setSalidasCaja={setSalidasCaja} onClose={()=>setShowSalidaEmp(false)} upsertSalida={upsertSalida}/>}
     </div>
   );
@@ -561,41 +561,45 @@ function ServicioBuscador({servId,piezas,servicios,onServChange,onPiezasChange})
 // tipo "servicio": al tocarla agrega ese servicio del catálogo (servId)
 // tipo "descuento": al tocarla agrega un descuento de $monto a la venta
 // ═══════════════════════════════════════════════════════════════════
-const PROMOS_DEL_DIA=[
-  {id:"promo_2zapatos",tipo:"custom",dias:null,emoji:"👟",
+// Promos de fábrica: se usan solo si el admin aún no ha guardado ninguna en la nube
+const DEFAULT_PROMOS=[
+  {id:"promo_2zapatos",tipo:"custom",dias:null,activa:true,emoji:"👟",
    titulo:"2 pares de zapatos por $5.99",
    detalle:"Antes $7.00 — ¡ahorra $1.01!",antes:7.00,precio:5.99,
-   label:"🎁 PROMO: 2 PARES DE ZAPATOS"},
-  {id:"promo_sabanas",tipo:"custom",dias:null,emoji:"🛏️",
+   label:"🎁 PROMO: 2 PARES DE ZAPATOS",claves:["zapato","tenis","calzado","sneaker","pares"]},
+  {id:"promo_sabanas",tipo:"custom",dias:null,activa:true,emoji:"🛏️",
    titulo:"2 juegos de sábanas completos por $3.99",
    detalle:"Antes $5.00 · Adicional: ¡elige el perfumado! 🌸",antes:5.00,precio:3.99,
-   label:"🎁 PROMO: 2 JUEGOS DE SÁBANAS + PERFUMADO"},
-  {id:"promo_edredon",tipo:"descuento",monto:1.00,dias:null,emoji:"🫧",
+   label:"🎁 PROMO: 2 JUEGOS DE SÁBANAS + PERFUMADO",claves:["sabana"]},
+  {id:"promo_edredon",tipo:"descuento",monto:1.00,dias:null,activa:true,emoji:"🫧",
    titulo:"$1 de descuento en cualquier edredón",
    detalle:"Adicional: ¡elige el perfumado! 🌸",
-   labelDescuento:"🎁 PROMO: -$1 EN TU EDREDÓN + PERFUMADO"},
+   labelDescuento:"🎁 PROMO: -$1 EN TU EDREDÓN + PERFUMADO",
+   minCompra:5.00,claves:["edredon","cobija","cobertor","plumon"]},
 ];
 // Cuántas promos mostrar como máximo en la ventana (las del día van primero)
 const PROMOS_MAX=5;
+const DOW_LBL=["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"];
 
 // La ventana sale al tocar "Registrar venta": último recordatorio antes de cerrar
-const promosDeHoy=servicios=>{
+const promosDeHoy=(promos,servicios)=>{
   const dow=new Date().getDay();
   const resolver=p=>{
-    if(p.tipo==="descuento")return{...p,precioTxt:`-$${p.monto.toFixed(2)}`};
-    if(p.tipo==="custom")return{...p,precioTxt:`$${p.precio.toFixed(2)}`};
+    if(p.activa===false)return null;
+    if(p.tipo==="descuento")return{...p,precioTxt:`-$${(p.monto||0).toFixed(2)}`};
+    if(p.tipo==="custom")return{...p,precioTxt:`$${(p.precio||0).toFixed(2)}`};
     const s=servicios.find(x=>x.id===p.servId&&!x.eliminada);
     if(!s)return null; // si el servicio ya no existe, la promo no se muestra
     return{...p,precioTxt:`$${s.precio.toFixed(2)}`,detalle:p.detalle};
   };
-  return PROMOS_DEL_DIA
-    .filter(p=>!p.dias||p.dias.includes(dow))
-    .sort((a,b)=>(a.dias?0:1)-(b.dias?0:1)) // primero las exclusivas de hoy
+  return (promos&&promos.length?promos:DEFAULT_PROMOS)
+    .filter(p=>!p.dias||p.dias.length===0||p.dias.includes(dow))
+    .sort((a,b)=>((a.dias&&a.dias.length)?0:1)-((b.dias&&b.dias.length)?0:1)) // primero las exclusivas de hoy
     .map(resolver).filter(Boolean).slice(0,PROMOS_MAX);
 };
 
-function PromosDelDia({servicios,onAgregar,onCerrar}){
-  const activas=promosDeHoy(servicios);
+function PromosDelDia({promos,servicios,onAgregar,onCerrar}){
+  const activas=promosDeHoy(promos,servicios);
   if(activas.length===0)return null;
   const nombreDia=new Date().toLocaleDateString("es-EC",{weekday:"long"});
   return(
@@ -628,7 +632,7 @@ function PromosDelDia({servicios,onAgregar,onCerrar}){
   );
 }
 
-function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,servicios,sesion,upsertVenta,upsertCliente,cupones=[],setCupones,upsertCupon}){
+function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,servicios,sesion,upsertVenta,upsertCliente,cupones=[],setCupones,upsertCupon,promos}){
   const man=new Date();man.setDate(man.getDate()+1);
   const [cQ,setCQ]=useState("");const [cId,setCId]=useState(null);
   const [nC,setNC]=useState({nombre:"",tel:"",cedula:"",email:"",rfc:"",direccion:"",nacimiento:""});
@@ -669,8 +673,8 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
   const cerrarPromos=()=>setShowPromos(false);
   const posActual=()=>items.reduce((a,it)=>{const pr=it.custom?(parseFloat(it.pC)||0):(servicios.find(s=>s.id===it.servId)?.precio||0);const sub=pr*(it.piezas||1);return a+(sub>0?sub:0);},0);
   const agregarPromo=p=>{
-    if(p.tipo==="descuento"&&posActual()<CUPON_MIN_COMPRA_DESC){
-      alert(`El descuento de $${p.monto.toFixed(2)} aplica en compras desde $${CUPON_MIN_COMPRA_DESC.toFixed(2)}. Agrega primero los servicios del cliente. 🛒`);
+    if(p.tipo==="descuento"&&posActual()<(p.minCompra||CUPON_MIN_COMPRA_DESC)){
+      alert(`El descuento de $${p.monto.toFixed(2)} aplica en compras desde $${(p.minCompra||CUPON_MIN_COMPRA_DESC).toFixed(2)}. Agrega primero los servicios del cliente. 🛒`);
       return;
     }
     setImpulsos(prev=>[...prev,{promoId:p.id,titulo:p.titulo,fecha:new Date().toISOString()}]); // 🎯 impulsación registrada
@@ -690,7 +694,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
   };
   const reg=(saltarPromos=false)=>{
     // 🎁 Antes de cerrar la venta: recordar las promos del día (1 vez por venta)
-    if(!saltarPromos&&!promoOfrecida&&promosDeHoy(servicios).length>0){
+    if(!saltarPromos&&!promoOfrecida&&promosDeHoy(promos,servicios).length>0){
       setPromoOfrecida(true);setShowPromos(true);return;
     }
     if(!cId&&mC==="buscar"){setErr("Selecciona o crea un cliente");return;}
@@ -737,7 +741,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
   };
   const clienteCumple=(mC==="buscar"&&selC&&esCumpleHoy(selC.nacimiento))||(mC==="nuevo"&&esCumpleHoy(nC.nacimiento));
   const cuponClienteVig=(mC==="buscar"&&selC)?(cupones||[]).find(c=>String(c.clienteId)===String(selC.id)&&cuponVigente(c)&&(!cupApl||c.id!==cupApl.id)):null;
-  const promosHoy=promosDeHoy(servicios);
+  const promosHoy=promosDeHoy(promos,servicios);
   const nombreCumple=mC==="buscar"?selC?.nombre:nC.nombre||"el cliente";
   const totalBruto=calcT();
   const descMonto=clienteCumple&&descCumple?+(totalBruto*DESC_CUMPLE).toFixed(2):0;
@@ -855,7 +859,31 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
       </Card>
       </div>
       <div style={{flex:"1 1 300px",minWidth:290,maxWidth:360}}>
-        <div style={{position:"sticky",top:12,background:"linear-gradient(160deg,#1a3c5e,#2563a8)",borderRadius:16,padding:"18px",color:"#fff",boxShadow:"0 6px 20px rgba(26,60,94,.35)"}}>
+      <div style={{position:"sticky",top:12}}>
+        {/* 🔔 Caja de recordatorios: junto a los datos del cliente, arriba del resumen */}
+        <div style={{background:"#fff",borderRadius:14,padding:"14px 16px",boxShadow:"0 4px 14px rgba(0,0,0,.12)",border:"2px solid #f59e0b"}}>
+          <div style={{fontSize:13,fontWeight:800,color:"#b45309",textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>🔔 Recordatorios para el cliente</div>
+          {clienteCumple&&!descCumple&&(
+            <div style={{background:"#fff8e1",borderRadius:8,padding:"9px 11px",fontSize:13,marginBottom:7,color:"#7a4a00",fontWeight:600}}>🎂 <strong>{nombreCumple}</strong> cumple hoy — ¡ofrécele el 10% de descuento!</div>
+          )}
+          {cuponClienteVig&&(
+            <div style={{background:"#e6fffa",borderRadius:8,padding:"9px 11px",fontSize:13,marginBottom:7,color:"#00695c",fontWeight:600}}>🎟️ Tiene el cupón <strong>{cuponClienteVig.id}</strong> vigente (vence {fmtD(cuponClienteVig.caduca)}) — recuérdaselo</div>
+          )}
+          {promosHoy.length>0&&(<>
+            <div style={{fontSize:11,fontWeight:700,color:"#1a3c5e",textTransform:"uppercase",letterSpacing:0.5,margin:"4px 0 6px"}}>🎁 Promos que puedes ofrecer hoy</div>
+            {promosHoy.map(p=>(
+              <div key={p.id} style={{background:"#f0f7fc",borderRadius:8,padding:"9px 11px",fontSize:13,color:"#1a3c5e",marginBottom:6}}>
+                <div style={{fontWeight:700}}>{p.emoji} {p.titulo}</div>
+                {p.detalle&&<div style={{fontSize:11,color:"#5a7a95",marginTop:1}}>{p.detalle}</div>}
+              </div>
+            ))}
+          </>)}
+          {!(clienteCumple&&!descCumple)&&!cuponClienteVig&&promosHoy.length===0&&(
+            <div style={{fontSize:12,color:"#999"}}>Sin recordatorios activos por ahora.</div>
+          )}
+        </div>
+
+        <div style={{marginTop:12,background:"linear-gradient(160deg,#1a3c5e,#2563a8)",borderRadius:16,padding:"18px",color:"#fff",boxShadow:"0 6px 20px rgba(26,60,94,.35)"}}>
           <div style={{fontSize:11,fontWeight:700,color:"#a0c4da",textTransform:"uppercase",letterSpacing:1,marginBottom:10}}>🫧 Resumen de pago</div>
           <div style={{display:"flex",justifyContent:"space-between",fontSize:14,marginBottom:6}}>
             <span style={{color:"#cfe3f2"}}>Valor total</span><strong>${valorTotal.toFixed(2)}</strong>
@@ -892,33 +920,12 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
           {tPago==="retiro"&&<div style={{background:"rgba(255,255,255,.12)",borderRadius:8,padding:"8px 10px",marginTop:8,fontSize:12}}>⏳ Paga al retirar: <strong>${total.toFixed(2)}</strong></div>}
 
         </div>
-        {/* 🔔 Caja de recordatorios: separada del resumen para que resalte más */}
-        <div style={{marginTop:12,background:"#fff",borderRadius:14,padding:"14px 16px",boxShadow:"0 4px 14px rgba(0,0,0,.12)",border:"2px solid #f59e0b"}}>
-          <div style={{fontSize:13,fontWeight:800,color:"#b45309",textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>🔔 Recordatorios para el cliente</div>
-          {clienteCumple&&!descCumple&&(
-            <div style={{background:"#fff8e1",borderRadius:8,padding:"9px 11px",fontSize:13,marginBottom:7,color:"#7a4a00",fontWeight:600}}>🎂 <strong>{nombreCumple}</strong> cumple hoy — ¡ofrécele el 10% de descuento!</div>
-          )}
-          {cuponClienteVig&&(
-            <div style={{background:"#e6fffa",borderRadius:8,padding:"9px 11px",fontSize:13,marginBottom:7,color:"#00695c",fontWeight:600}}>🎟️ Tiene el cupón <strong>{cuponClienteVig.id}</strong> vigente (vence {fmtD(cuponClienteVig.caduca)}) — recuérdaselo</div>
-          )}
-          {promosHoy.length>0&&(<>
-            <div style={{fontSize:11,fontWeight:700,color:"#1a3c5e",textTransform:"uppercase",letterSpacing:0.5,margin:"4px 0 6px"}}>🎁 Promos que puedes ofrecer hoy</div>
-            {promosHoy.map(p=>(
-              <div key={p.id} style={{background:"#f0f7fc",borderRadius:8,padding:"9px 11px",fontSize:13,color:"#1a3c5e",marginBottom:6}}>
-                <div style={{fontWeight:700}}>{p.emoji} {p.titulo}</div>
-                {p.detalle&&<div style={{fontSize:11,color:"#5a7a95",marginTop:1}}>{p.detalle}</div>}
-              </div>
-            ))}
-          </>)}
-          {!(clienteCumple&&!descCumple)&&!cuponClienteVig&&promosHoy.length===0&&(
-            <div style={{fontSize:12,color:"#999"}}>Sin recordatorios activos por ahora.</div>
-          )}
-        </div>
         {err&&<div style={{background:"#ffebee",color:"#c62828",borderRadius:8,padding:"10px 12px",marginTop:12,fontSize:12,fontWeight:600}}>{err}</div>}
         <button style={{...S.btnP,width:"100%",marginTop:12}} onClick={()=>reg()}>🧾 Registrar Venta</button>
       </div>
       </div>
-      {showPromos&&!waVenta&&<PromosDelDia servicios={servicios} onAgregar={agregarPromo} onCerrar={()=>{setShowPromos(false);reg(true);}}/>}
+      </div>
+      {showPromos&&!waVenta&&<PromosDelDia promos={promos} servicios={servicios} onAgregar={agregarPromo} onCerrar={()=>{setShowPromos(false);reg(true);}}/>}
       {waVenta&&<WhatsAppObligatorio venta={waVenta} tipo="recibido" onConfirm={confirmarWaRecibido}/>}
     </div>
   );
@@ -1441,6 +1448,7 @@ function Configuracion({servicios,setServicios,exportarDatos,importarDatos,upser
             ["usuarios","ll_usuarios","id"],
             ["cajas","ll_cajas","id"],
             ["cupones","ll_cupones","id"],
+            ["promos","ll_promos","id"],
           ];
           let tot=0;
           for(const [col,key,idField] of cols){
@@ -1930,18 +1938,14 @@ export default function LavaListo(){
 // Caducidad: 10 días desde la emisión · Número único · Un solo uso
 // ═══════════════════════════════════════════════════════════════════
 const CUPON_DIAS_VALIDEZ=10;
-const CUPON_MIN_COMPRA_DESC=5.00; // 💵 Compra mínima para el descuento de $1 — EDITA AQUÍ el monto
-// 🎯 Targeting: qué palabras del historial indican que el cliente YA consume esa categoría
-const PROMO_CATEGORIAS={
-  promo_2zapatos:{claves:["zapato","tenis","calzado","sneaker","pares"],nombre:"zapatos"},
-  promo_sabanas:{claves:["sabana"],nombre:"sábanas"},
-  promo_edredon:{claves:["edredon","cobija","cobertor","plumon"],nombre:"edredones"},
-};
+const CUPON_MIN_COMPRA_DESC=5.00; // 💵 Compra mínima por defecto para promos de descuento (editable por promo desde el panel de Promos)
 const normTxt=s=>(s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
-const consumeCategoria=(vs,promoId)=>{
-  const cat=PROMO_CATEGORIAS[promoId];if(!cat)return false;
-  return vs.some(v=>(v.items||[]).some(it=>{const l=normTxt(it.label);return cat.claves.some(k=>l.includes(k));}));
+// 🎯 Targeting: usa las palabras clave configuradas en cada promo (panel de Promos) para saber si el cliente YA la consume
+const consumeCategoria=(vs,promo)=>{
+  const claves=promo?.claves;if(!claves||claves.length===0)return false;
+  return vs.some(v=>(v.items||[]).some(it=>{const l=normTxt(it.label);return claves.some(k=>l.includes(normTxt(k)));}));
 };
+const nombreCategoria=promo=>promo?.claves?.[0]||promo?.titulo||"este servicio";
 const CUPON_DIAS_INACTIVO=30; // cliente "poco frecuente": +30 días sin comprar (o sin compras)
 const genCodigoCupon=existentes=>{
   const abc="ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // sin caracteres confusos (0/O, 1/I/L)
@@ -2003,27 +2007,27 @@ const construirCupon=(cli,p,motivo,existentes,sesion)=>{
     promoPrecio:p.tipo==="custom"?p.precio:null,promoMonto:p.tipo==="descuento"?p.monto:null,
     clienteId:cli.id,clienteNombre:cli.nombre,clienteTel:cli.tel||"",
     emitido,caduca:cad.toISOString().slice(0,10),
-    motivo:motivo||"",minCompra:p.tipo==="descuento"?CUPON_MIN_COMPRA_DESC:null,
+    motivo:motivo||"",minCompra:p.tipo==="descuento"?(p.minCompra||CUPON_MIN_COMPRA_DESC):null,
     estado:"vigente",generadoPor:sesion?.nombre||"",fecha:new Date().toISOString()
   };
 };
-function CuponSugerido({venta,clientes,ventas,cupones,setCupones,upsertCupon,sesion,onClose}){
+function CuponSugerido({venta,clientes,ventas,cupones,setCupones,upsertCupon,sesion,promos,onClose}){
+  const listaPromos=(promos&&promos.length?promos:DEFAULT_PROMOS).filter(p=>p.activa!==false);
   const [sug]=useState(()=>{
     const cli=clientes.find(c=>String(c.id)===String(venta.clienteId)&&!c.eliminada);
     if(!cli)return null;
     if(venta.cuponId)return null; // acaba de canjear uno: no regalar otro de inmediato
     if(cupones.some(c=>String(c.clienteId)===String(cli.id)&&cuponVigente(c)))return null; // ya tiene uno vigente
     const vsCli=ventas.filter(v=>String(v.clienteId)===String(cli.id)&&!v.anulada);
-    const usos=PROMOS_DEL_DIA.map(p=>{
-      const claves=PROMO_CATEGORIAS[p.id]?.claves||[];
-      const n=vsCli.filter(v=>(v.items||[]).some(it=>{const l=normTxt(it.label);return claves.some(k=>l.includes(k));})).length;
+    if(listaPromos.length===0)return null;
+    const usos=listaPromos.map(p=>{
+      const n=vsCli.filter(v=>(v.items||[]).some(it=>{const l=normTxt(it.label);return(p.claves||[]).some(k=>l.includes(normTxt(k)));})).length;
       return{p,n};
     });
-    if(usos.length===0)return null;
     const minN=Math.min(...usos.map(u=>u.n));
     const cand=usos.filter(u=>u.n===minN);
     const eleg=cand[Math.floor(Math.random()*cand.length)];
-    const cat=PROMO_CATEGORIAS[eleg.p.id]?.nombre||"este servicio";
+    const cat=nombreCategoria(eleg.p);
     const motivo=minN===0?`Nunca ha llevado ${cat} — ¡venta cruzada!`:`Es el servicio que menos ocupa: solo ${minN} ${minN===1?"vez":"veces"} (${cat})`;
     return{cli,promo:eleg.p,motivo};
   });
@@ -2052,7 +2056,7 @@ function CuponSugerido({venta,clientes,ventas,cupones,setCupones,upsertCupon,ses
             <div style={{fontWeight:700,fontSize:15,color:"#1a3c5e"}}>{sug.promo.emoji} {sug.promo.titulo}</div>
             <div style={{fontSize:11,color:"#888"}}>{sug.promo.detalle}</div>
             <div style={{fontSize:11,color:"#c0392b",fontWeight:600,marginTop:4}}>⏰ Caducará en {CUPON_DIAS_VALIDEZ} días</div>
-            {sug.promo.tipo==="descuento"&&<div style={{fontSize:11,color:"#1a3c5e",fontWeight:600}}>🛒 Compra mínima ${CUPON_MIN_COMPRA_DESC.toFixed(2)}</div>}
+            {sug.promo.tipo==="descuento"&&<div style={{fontSize:11,color:"#1a3c5e",fontWeight:600}}>🛒 Compra mínima ${(sug.promo.minCompra||CUPON_MIN_COMPRA_DESC).toFixed(2)}</div>}
             {generado&&<div style={{marginTop:6,fontWeight:800,letterSpacing:2,color:"#00a887",fontSize:16}}>Nº {generado.id} ✓</div>}
           </div>
           <div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>
@@ -2066,9 +2070,128 @@ function CuponSugerido({venta,clientes,ventas,cupones,setCupones,upsertCupon,ses
   );
 }
 
-function Cupones({cupones,setCupones,upsertCupon,clientes,ventas,sesion}){
+// ═══════════════════════════════════════════════════════════════════
+// 🎁 PROMOS: administración completa (crear, editar, activar/desactivar,
+// eliminar) — reemplaza la lista fija; todo se guarda en la nube.
+// ═══════════════════════════════════════════════════════════════════
+const PROMO_VACIA={tipo:"custom",emoji:"🎁",titulo:"",detalle:"",precio:"",antes:"",monto:"",minCompra:"",claves:"",dias:[]};
+function PromosAdmin({promos,setPromos,upsertPromo,servicios}){
+  const [form,setForm]=useState(PROMO_VACIA);
+  const [editId,setEditId]=useState(null);
+  const lista=(promos&&promos.length?promos:DEFAULT_PROMOS);
+  const guardar=()=>{
+    if(!form.titulo.trim()){alert("Escribe el título de la promo");return;}
+    if(form.tipo==="custom"&&!form.precio){alert("Escribe el precio de la promo");return;}
+    if(form.tipo==="descuento"&&!form.monto){alert("Escribe el monto del descuento");return;}
+    const claves=form.claves.split(",").map(s=>s.trim()).filter(Boolean);
+    const base={
+      id:editId||("promo_"+Date.now()),
+      tipo:form.tipo,emoji:form.emoji||"🎁",titulo:form.titulo.trim(),detalle:form.detalle.trim(),
+      dias:form.dias&&form.dias.length?form.dias:null,activa:true,claves,
+      precio:form.tipo==="custom"?parseFloat(form.precio)||0:null,
+      antes:form.tipo==="custom"&&form.antes?parseFloat(form.antes):null,
+      label:form.tipo==="custom"?`🎁 PROMO: ${form.titulo.toUpperCase()}`:null,
+      monto:form.tipo==="descuento"?parseFloat(form.monto)||0:null,
+      minCompra:form.tipo==="descuento"&&form.minCompra?parseFloat(form.minCompra):null,
+      labelDescuento:form.tipo==="descuento"?`🎁 PROMO: -$${(parseFloat(form.monto)||0).toFixed(2)} · ${form.titulo.toUpperCase()}`:null,
+      _updatedAt:new Date().toISOString()
+    };
+    setPromos(prev=>{
+      const existe=prev.some(p=>p.id===base.id);
+      const next=existe?prev.map(p=>p.id===base.id?{...p,...base}:p):[...prev,base];
+      return next;
+    });
+    if(upsertPromo)upsertPromo(base); // ☁️ a la nube
+    setForm(PROMO_VACIA);setEditId(null);
+  };
+  const editar=p=>{
+    setEditId(p.id);
+    setForm({
+      tipo:p.tipo,emoji:p.emoji||"🎁",titulo:p.titulo||"",detalle:p.detalle||"",
+      precio:p.precio!=null?String(p.precio):"",antes:p.antes!=null?String(p.antes):"",
+      monto:p.monto!=null?String(p.monto):"",minCompra:p.minCompra!=null?String(p.minCompra):"",
+      claves:(p.claves||[]).join(", "),dias:p.dias||[]
+    });
+  };
+  const cancelar=()=>{setEditId(null);setForm(PROMO_VACIA);};
+  const toggleActiva=p=>{
+    const upd={...p,activa:p.activa===false,_updatedAt:new Date().toISOString()};
+    setPromos(prev=>prev.map(x=>x.id===p.id?upd:x));
+    if(upsertPromo)upsertPromo(upd);
+  };
+  const eliminar=p=>{
+    if(!window.confirm(`¿Eliminar la promo "${p.titulo}"? Esta acción no se puede deshacer.`))return;
+    setPromos(prev=>prev.filter(x=>x.id!==p.id));
+    if(upsertPromo)upsertPromo({...p,activa:false,eliminada:true,_updatedAt:new Date().toISOString()});
+  };
+  const toggleDia=d=>setForm(f=>({...f,dias:f.dias.includes(d)?f.dias.filter(x=>x!==d):[...f.dias,d]}));
+  return(<div style={S.panel}>
+    <h2 style={S.ptitle}>🎁 Promos</h2>
+    <Card title={editId?"✏️ Editar promo":"➕ Nueva promo"}>
+      <div style={{display:"flex",gap:6,marginBottom:10}}>
+        <button style={{...S.pill,flex:1,...(form.tipo==="custom"?S.pillA:{})}} onClick={()=>setForm({...form,tipo:"custom"})}>💲 Precio especial</button>
+        <button style={{...S.pill,flex:1,...(form.tipo==="descuento"?S.pillA:{})}} onClick={()=>setForm({...form,tipo:"descuento"})}>➖ Descuento en $</button>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"60px 1fr",gap:8,marginBottom:8}}>
+        <input style={{...S.inp,textAlign:"center",fontSize:20}} placeholder="🎁" value={form.emoji} onChange={e=>setForm({...form,emoji:e.target.value})}/>
+        <input style={S.inp} placeholder="Título (ej. 2 pares de zapatos por $5.99)" value={form.titulo} onChange={e=>setForm({...form,titulo:e.target.value})}/>
+      </div>
+      <input style={{...S.inp,marginBottom:8}} placeholder="Detalle (ej. Antes $7.00 · elige el perfumado)" value={form.detalle} onChange={e=>setForm({...form,detalle:e.target.value})}/>
+      {form.tipo==="custom"?(
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+          <div><label style={S.lbl}>Precio de la promo</label><input type="number" style={S.inp} placeholder="5.99" value={form.precio} onChange={e=>setForm({...form,precio:e.target.value})}/></div>
+          <div><label style={S.lbl}>Precio antes (tachado, opcional)</label><input type="number" style={S.inp} placeholder="7.00" value={form.antes} onChange={e=>setForm({...form,antes:e.target.value})}/></div>
+        </div>
+      ):(
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+          <div><label style={S.lbl}>Monto del descuento</label><input type="number" style={S.inp} placeholder="1.00" value={form.monto} onChange={e=>setForm({...form,monto:e.target.value})}/></div>
+          <div><label style={S.lbl}>Compra mínima (opcional)</label><input type="number" style={S.inp} placeholder={`Por defecto $${CUPON_MIN_COMPRA_DESC.toFixed(2)}`} value={form.minCompra} onChange={e=>setForm({...form,minCompra:e.target.value})}/></div>
+        </div>
+      )}
+      <label style={S.lbl}>¿Qué días aplica?</label>
+      <div style={{display:"flex",gap:5,marginBottom:8,flexWrap:"wrap"}}>
+        {DOW_LBL.map((l,i)=>(
+          <button key={i} style={{...S.pill,fontSize:11,padding:"5px 10px",...(form.dias.includes(i)?S.pillA:{})}} onClick={()=>toggleDia(i)}>{l}</button>
+        ))}
+      </div>
+      <div style={{fontSize:11,color:"#888",marginBottom:8}}>{form.dias.length===0?"Sin días marcados = aplica todos los días":`Solo aplica: ${form.dias.map(d=>DOW_LBL[d]).join(", ")}`}</div>
+      <label style={S.lbl}>Palabras clave para detectar consumo (opcional, separadas por coma)</label>
+      <input style={{...S.inp,marginBottom:4}} placeholder="ej. zapato, tenis, calzado" value={form.claves} onChange={e=>setForm({...form,claves:e.target.value})}/>
+      <div style={{fontSize:11,color:"#888",marginBottom:10}}>Se usan para el sorteo de cupones: si el cliente nunca ha comprado algo con estas palabras, se le sugiere esta promo.</div>
+      <div style={{display:"flex",gap:8}}>
+        <button style={{...S.btnP,flex:1}} onClick={guardar}>{editId?"✓ Guardar cambios":"➕ Agregar promo"}</button>
+        {editId&&<button style={S.btnC} onClick={cancelar}>Cancelar</button>}
+      </div>
+    </Card>
+    <Card title={`📋 Promos configuradas (${lista.length})`}>
+      {lista.length===0?<div style={S.empty}>Sin promos configuradas.</div>:lista.map(p=>(
+        <div key={p.id} style={{...S.vcard,borderLeft:`4px solid ${p.activa===false?"#bbb":"#4db6e4"}`,opacity:p.activa===false?0.6:1}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+            <div style={{minWidth:0}}>
+              <div style={{fontWeight:700,fontSize:14}}>{p.emoji} {p.titulo} {p.activa===false&&<span style={{...S.badge,background:"#eee",color:"#888",fontSize:10}}>Inactiva</span>}</div>
+              <div style={{fontSize:11,color:"#888"}}>{p.detalle}</div>
+              <div style={{fontSize:11,color:"#4db6e4",marginTop:3}}>
+                {p.tipo==="descuento"?`Descuento -$${(p.monto||0).toFixed(2)}${p.minCompra?` · mín. $${p.minCompra.toFixed(2)}`:""}`:`$${(p.precio||0).toFixed(2)}${p.antes?` (antes $${p.antes.toFixed(2)})`:""}`}
+                {" · "}{(!p.dias||p.dias.length===0)?"Todos los días":p.dias.map(d=>DOW_LBL[d]).join(", ")}
+              </div>
+              {p.claves&&p.claves.length>0&&<div style={{fontSize:10,color:"#aaa",marginTop:2}}>🎯 {p.claves.join(", ")}</div>}
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:5,alignItems:"flex-end",flexShrink:0}}>
+              <button style={S.btnS} onClick={()=>editar(p)}>✏️</button>
+              <button style={{...S.btnS,background:p.activa===false?"#e8f5e9":"#fff3e0",color:p.activa===false?"#2e7d32":"#e65100"}} onClick={()=>toggleActiva(p)}>{p.activa===false?"▶️ Activar":"⏸️ Pausar"}</button>
+              <button style={S.btnR} onClick={()=>eliminar(p)}>🗑️</button>
+            </div>
+          </div>
+        </div>
+      ))}
+    </Card>
+  </div>);
+}
+
+function Cupones({cupones,setCupones,upsertCupon,clientes,ventas,sesion,promos}){
   const [prev,setPrev]=useState(null); // preview del sorteo antes de generar
   const [soloInactivos,setSoloInactivos]=useState(true);
+  const listaPromos=(promos&&promos.length?promos:DEFAULT_PROMOS).filter(p=>p.activa!==false);
   const activos=clientes.filter(c=>!c.eliminada);
   const hoy=fechaHoyLocal();
   const conUltima=activos.map(c=>{
@@ -2080,12 +2203,13 @@ function Cupones({cupones,setCupones,upsertCupon,clientes,ventas,sesion}){
   const elegibles=soloInactivos?conUltima.filter(c=>c.diasSin>=CUPON_DIAS_INACTIVO):conUltima;
   const sortear=()=>{
     if(elegibles.length===0){alert(soloInactivos?"No hay clientes con más de 30 días sin comprar. Prueba incluyendo a todos.":"No hay clientes registrados.");return;}
+    if(listaPromos.length===0){alert("No hay promos activas en tu listado. Ve a la pestaña 🎁 Promos y crea o activa alguna.");return;}
     const cli=elegibles[Math.floor(Math.random()*elegibles.length)];
-    // 🎯 Solo promos del listado, dirigidas a lo que el cliente NO consume
-    const noConsume=PROMOS_DEL_DIA.filter(p=>!consumeCategoria(cli.vs,p.id));
-    const pool=noConsume.length>0?noConsume:PROMOS_DEL_DIA;
+    // 🎯 Solo promos del listado (activas), dirigidas a lo que el cliente NO consume
+    const noConsume=listaPromos.filter(p=>!consumeCategoria(cli.vs,p));
+    const pool=noConsume.length>0?noConsume:listaPromos;
     const p=pool[Math.floor(Math.random()*pool.length)];
-    const cat=PROMO_CATEGORIAS[p.id]?.nombre||"este servicio";
+    const cat=nombreCategoria(p);
     const motivo=noConsume.some(x=>x.id===p.id)
       ?(cli.vs.length===0?`Cliente nuevo sin compras — ideal para estrenar ${cat}`:`Nunca ha llevado ${cat} — ¡venta cruzada!`)
       :`Ya consume todo el listado — cupón de refuerzo`;
@@ -2103,7 +2227,7 @@ function Cupones({cupones,setCupones,upsertCupon,clientes,ventas,sesion}){
       promoPrecio:p.tipo==="custom"?p.precio:null,promoMonto:p.tipo==="descuento"?p.monto:null,
       clienteId:prev.cli.id,clienteNombre:prev.cli.nombre,clienteTel:prev.cli.tel||"",
       emitido,caduca:cad.toISOString().slice(0,10),
-      motivo:prev.motivo||"",minCompra:p.tipo==="descuento"?CUPON_MIN_COMPRA_DESC:null,
+      motivo:prev.motivo||"",minCompra:p.tipo==="descuento"?(p.minCompra||CUPON_MIN_COMPRA_DESC):null,
       estado:"vigente",generadoPor:sesion?.nombre||"",fecha:new Date().toISOString()
     };
     setCupones(pv=>[cup,...pv]);
@@ -2135,7 +2259,7 @@ function Cupones({cupones,setCupones,upsertCupon,clientes,ventas,sesion}){
             <div style={{fontWeight:700,fontSize:14,color:"#1a3c5e",marginTop:8}}>{prev.promo.emoji} {prev.promo.titulo}</div>
             <div style={{fontSize:11,color:"#888"}}>{prev.promo.detalle}</div>
             <div style={{background:"#fff8e1",borderRadius:8,padding:"6px 10px",marginTop:6,fontSize:12,color:"#b45309",fontWeight:600}}>🎯 {prev.motivo}</div>
-            {prev.promo.tipo==="descuento"&&<div style={{fontSize:11,color:"#1a3c5e",fontWeight:600,marginTop:4}}>🛒 Válido en compras desde ${CUPON_MIN_COMPRA_DESC.toFixed(2)}</div>}
+            {prev.promo.tipo==="descuento"&&<div style={{fontSize:11,color:"#1a3c5e",fontWeight:600,marginTop:4}}>🛒 Válido en compras desde ${(prev.promo.minCompra||CUPON_MIN_COMPRA_DESC).toFixed(2)}</div>}
             <div style={{fontSize:11,color:"#c0392b",fontWeight:600,marginTop:6}}>⏰ Caducará en {CUPON_DIAS_VALIDEZ} días si lo generas hoy</div>
             <div style={{display:"flex",gap:8,marginTop:10}}>
               <button style={{...S.btnP,flex:1}} onClick={generar}>✓ Generar cupón</button>
@@ -2692,7 +2816,9 @@ const { data: gastos, setData: setGastos, upsert: upsertGasto } = useCollection(
 const { data: depositos, setData: setDepositos, upsert: upsertDeposito } = useCollection("depositos", "ll_depositos", []);
 const { data: salidasCaja, setData: setSalidasCaja, upsert: upsertSalida } = useCollection("salidasCaja", "ll_salidas_caja", []);
 const { data: cajas, upsert: upsertCaja, nube } = useCollection("cajas", "ll_cajas", []);
-const { data: cupones, setData: setCupones, upsert: upsertCupon } = useCollection("cupones", "ll_cupones", []);  const [showSalida,setShowSalida]=useState(false);
+const { data: cupones, setData: setCupones, upsert: upsertCupon } = useCollection("cupones", "ll_cupones", []);
+const { data: promos, setData: setPromos, upsert: upsertPromo } = useCollection("promos", "ll_promos", []);
+const [showSalida,setShowSalida]=useState(false);
   const [ticketV,setTicketV]=useState(null);
   const [cuponSug,setCuponSug]=useState(null); // 🎟️ cupón sugerido tras imprimir la venta
   // Servicios visibles (excluye los eliminados, que quedan marcados en la nube)
@@ -2705,8 +2831,38 @@ const { data: cupones, setData: setCupones, upsert: upsertCupon } = useCollectio
     setCajaOk(false);
     setEsperandoApertura(true);
   };
-  const exportarDatos=()=>{const d={ventas,clientes,empleadas,inventario,servicios,gastos,depositos,salidasCaja,cajas,cupones};const blob=new Blob([JSON.stringify(d,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="respaldo-"+hoy+".json";a.click();};
-  const importarDatos=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>{try{const d=JSON.parse(ev.target.result);if(d.ventas)setVentas(d.ventas);if(d.clientes)setClientes(d.clientes);if(d.empleadas)setEmpleadas(d.empleadas);if(d.inventario)setInventario(d.inventario);if(d.servicios)setServicios(d.servicios);if(d.gastos)setGastos(d.gastos);if(d.depositos)setDepositos(d.depositos);if(d.salidasCaja)setSalidasCaja(d.salidasCaja);alert("✅ Datos importados");}catch{alert("❌ Error al importar");}};r.readAsText(f);};
+  const exportarDatos=()=>{const d={ventas,clientes,empleadas,inventario,servicios,gastos,depositos,salidasCaja,cajas,cupones,promos};const blob=new Blob([JSON.stringify(d,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="respaldo-"+hoy+".json";a.click();};
+  // Importa un respaldo .json Y lo sube a Firestore (antes solo quedaba en este dispositivo)
+  const importarDatos=e=>{
+    const f=e.target.files[0];if(!f)return;
+    const r=new FileReader();
+    r.onload=ev=>{
+      try{
+        const d=JSON.parse(ev.target.result);
+        const cols=[
+          [d.ventas,setVentas,upsertVenta],
+          [d.clientes,setClientes,upsertCliente],
+          [d.empleadas,setEmpleadas,upsertEmpleada],
+          [d.inventario,setInventario,upsertInventario],
+          [d.servicios,setServicios,upsertServicio],
+          [d.gastos,setGastos,upsertGasto],
+          [d.depositos,setDepositos,upsertDeposito],
+          [d.salidasCaja,setSalidasCaja,upsertSalida],
+          [d.cajas,null,upsertCaja],
+          [d.cupones,setCupones,upsertCupon],
+          [d.promos,setPromos,upsertPromo],
+        ];
+        let tot=0;
+        cols.forEach(([arr,setter,upsertFn])=>{
+          if(!arr)return;
+          if(setter)setter(arr);
+          if(upsertFn)arr.forEach(item=>{upsertFn({...item,_updatedAt:new Date().toISOString()});tot++;}); // ☁️ sube cada registro a Firestore
+        });
+        alert(`✅ Datos importados y subidos a la nube (${tot} registros)`);
+      }catch{alert("❌ Error al importar");}
+    };
+    r.readAsText(f);
+  };
   const pCount=ventas.filter(v=>(!pagada(v)&&!v.anulada)||(pagada(v)&&!v.anulada&&(v.estado||"recibido")!=="entregado")).length;
 
   // Si cerró caja y quiere seguir trabajando, DEBE abrir caja nuevamente
@@ -2721,11 +2877,11 @@ const { data: cupones, setData: setCupones, upsert: upsertCupon } = useCollectio
     empleadas={empleadas}
     upsertCaja={upsertCaja}
   />;
-  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={serviciosActivos} sesion={sesion} addAbono={addAbono} onLogout={onLogout} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} upsertVenta={upsertVenta} upsertSalida={upsertSalida} upsertCliente={upsertCliente} upsertCaja={upsertCaja} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon}/>;
+  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={serviciosActivos} sesion={sesion} addAbono={addAbono} onLogout={onLogout} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} upsertVenta={upsertVenta} upsertSalida={upsertSalida} upsertCliente={upsertCliente} upsertCaja={upsertCaja} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos}/>;
   const tabs=[
     {id:"ventas",icon:"🧾",l:"Venta"},{id:"historial",icon:"📋",l:"Historial"},
     {id:"pendientes",icon:"⏳",l:"Pendientes",b:pCount},{id:"bi",icon:"🚀",l:"Dashboard"},
-    {id:"clientes",icon:"👥",l:"Clientes"},{id:"cupones",icon:"🎟️",l:"Cupones"},{id:"resumen",icon:"📈",l:"Resumen día"},
+    {id:"clientes",icon:"👥",l:"Clientes"},{id:"promosAdmin",icon:"🎁",l:"Promos"},{id:"cupones",icon:"🎟️",l:"Cupones"},{id:"resumen",icon:"📈",l:"Resumen día"},
     {id:"reportes",icon:"📊",l:"Reportes"},{id:"depositos",icon:"🏦",l:"Depósitos"},
     {id:"conciliacion",icon:"🏛️",l:"Conciliación"},
     {id:"gastos",icon:"🛒",l:"Gastos"},{id:"inventario",icon:"📦",l:"Inventario"},
@@ -2749,12 +2905,13 @@ const { data: cupones, setData: setCupones, upsert: upsertCupon } = useCollectio
       </button>))}
     </div>
     <div style={S.content}>
-      {tab==="ventas"&&<NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={setTicketV} servicios={serviciosActivos} sesion={sesion} upsertVenta={upsertVenta} upsertCliente={upsertCliente} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon}/>}
+      {tab==="ventas"&&<NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={setTicketV} servicios={serviciosActivos} sesion={sesion} upsertVenta={upsertVenta} upsertCliente={upsertCliente} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos}/>}
       {tab==="historial"&&<Historial ventas={ventas} setVentas={setVentas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} esAdmin={esAdmin} upsertVenta={upsertVenta}/>}
       {tab==="pendientes"&&<Pendientes ventas={ventas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} setVentas={setVentas} upsertVenta={upsertVenta}/>}
       {tab==="bi"&&<DashboardBI ventas={ventas} empleadas={empleadas} gastos={gastos}/>}
       {tab==="clientes"&&<Clientes clientes={clientes} setClientes={setClientes} upsertCliente={upsertCliente} ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta}/>}
-      {tab==="cupones"&&<Cupones cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} clientes={clientes} ventas={ventas} sesion={sesion}/>}
+      {tab==="promosAdmin"&&<PromosAdmin promos={promos} setPromos={setPromos} upsertPromo={upsertPromo} servicios={servicios}/>}
+      {tab==="cupones"&&<Cupones cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} clientes={clientes} ventas={ventas} sesion={sesion} promos={promos}/>}
       {tab==="resumen"&&<ResumenDia ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja}/>}
       {tab==="reportes"&&<Reportes ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja}/>}
       {tab==="depositos"&&<Depositos depositos={depositos} setDepositos={setDepositos} ventas={ventas} salidasCaja={salidasCaja} upsertDeposito={upsertDeposito}/>}
@@ -2767,7 +2924,7 @@ const { data: cupones, setData: setCupones, upsert: upsertCupon } = useCollectio
       {tab==="usuarios"&&<GestionUsuarios/>}
     </div>
     {ticketV&&<TicketModal venta={ticketV} empleadas={empleadas} onClose={()=>{setCuponSug(ticketV);setTicketV(null);}}/>}
-    {cuponSug&&<CuponSugerido venta={cuponSug} clientes={clientes} ventas={ventas} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} sesion={sesion} onClose={()=>setCuponSug(null)}/>}
+    {cuponSug&&<CuponSugerido venta={cuponSug} clientes={clientes} ventas={ventas} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} sesion={sesion} promos={promos} onClose={()=>setCuponSug(null)}/>}
     {showSalida&&<SalidaCaja sesion={sesion} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} onClose={()=>setShowSalida(false)} upsertSalida={upsertSalida}/>}
   </div>);
 }
