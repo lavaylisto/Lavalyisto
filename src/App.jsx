@@ -751,10 +751,10 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
   const descPromos=+(-detItems.filter(d=>d.sub<0).reduce((a,d)=>a+d.sub,0)).toFixed(2);
   const descTotal=+(descPromos+descMonto).toFixed(2);
   return(
-    <div style={{...S.panel,maxWidth:1200,width:"100%"}}>
+    <div style={{...S.panel,maxWidth:1500,width:"100%"}}>
       <h2 style={S.ptitle}>Nueva Venta</h2>
       <div style={{display:"flex",gap:14,alignItems:"flex-start",flexWrap:"wrap"}}>
-      <div style={{flex:"2 1 340px",minWidth:300}}>
+      <div style={{flex:"2 1 380px",minWidth:320}}>
       <Card title="👤 Cliente">
         <div style={{display:"flex",gap:8,marginBottom:10}}>
           {["buscar","nuevo"].map(m=><button key={m} style={{...S.pill,...(mC===m?S.pillA:{})}} onClick={()=>setMC(m)}>{m==="buscar"?"Buscar":"Nuevo cliente"}</button>)}
@@ -854,7 +854,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
         <div style={{marginTop:8}}><label style={S.lbl}>Notas</label><textarea style={{...S.inp,minHeight:56,resize:"vertical"}} placeholder="Instrucciones..." value={notas} onChange={e=>setNotas(e.target.value)}/></div>
       </Card>
       </div>
-      <div style={{flex:"1 1 260px",minWidth:260}}>
+      <div style={{flex:"1 1 300px",minWidth:290,maxWidth:360}}>
         <div style={{position:"sticky",top:12,background:"linear-gradient(160deg,#1a3c5e,#2563a8)",borderRadius:16,padding:"18px",color:"#fff",boxShadow:"0 6px 20px rgba(26,60,94,.35)"}}>
           <div style={{fontSize:11,fontWeight:700,color:"#a0c4da",textTransform:"uppercase",letterSpacing:1,marginBottom:10}}>🫧 Resumen de pago</div>
           <div style={{display:"flex",justifyContent:"space-between",fontSize:14,marginBottom:6}}>
@@ -891,25 +891,31 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
           )}
           {tPago==="retiro"&&<div style={{background:"rgba(255,255,255,.12)",borderRadius:8,padding:"8px 10px",marginTop:8,fontSize:12}}>⏳ Paga al retirar: <strong>${total.toFixed(2)}</strong></div>}
 
-          {(clienteCumple&&!descCumple||cuponClienteVig||promosHoy.length>0)&&(
-            <div style={{marginTop:12,paddingTop:10,borderTop:"1px dashed rgba(255,255,255,.25)"}}>
-              <div style={{fontSize:10,fontWeight:700,color:"#a0c4da",textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>🔔 Recordatorios</div>
-              {clienteCumple&&!descCumple&&(
-                <div style={{background:"rgba(245,158,11,.18)",borderRadius:8,padding:"7px 10px",fontSize:12,marginBottom:6}}>🎂 <strong>{nombreCumple}</strong> cumple hoy — ¡ofrécele el 10%!</div>
-              )}
-              {cuponClienteVig&&(
-                <div style={{background:"rgba(0,229,184,.15)",borderRadius:8,padding:"7px 10px",fontSize:12,marginBottom:6}}>🎟️ Tiene el cupón <strong>{cuponClienteVig.id}</strong> vigente (vence {fmtD(cuponClienteVig.caduca)}) — recuérdaselo</div>
-              )}
-              {promosHoy.length>0&&(
-                <div style={{background:"rgba(255,255,255,.12)",borderRadius:8,padding:"7px 10px",fontSize:12}}>
-                  🎁 Promos de hoy: {promosHoy.map(p=>p.emoji).join(" ")} — coméntaselas al cliente
-                </div>
-              )}
-            </div>
-          )}
-          {err&&<div style={{background:"#ffebee",color:"#c62828",borderRadius:8,padding:"8px 10px",marginTop:10,fontSize:12,fontWeight:600}}>{err}</div>}
-          <button style={{...S.btnP,width:"100%",marginTop:12}} onClick={()=>reg()}>🧾 Registrar Venta</button>
         </div>
+        {/* 🔔 Caja de recordatorios: separada del resumen para que resalte más */}
+        <div style={{marginTop:12,background:"#fff",borderRadius:14,padding:"14px 16px",boxShadow:"0 4px 14px rgba(0,0,0,.12)",border:"2px solid #f59e0b"}}>
+          <div style={{fontSize:13,fontWeight:800,color:"#b45309",textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>🔔 Recordatorios para el cliente</div>
+          {clienteCumple&&!descCumple&&(
+            <div style={{background:"#fff8e1",borderRadius:8,padding:"9px 11px",fontSize:13,marginBottom:7,color:"#7a4a00",fontWeight:600}}>🎂 <strong>{nombreCumple}</strong> cumple hoy — ¡ofrécele el 10% de descuento!</div>
+          )}
+          {cuponClienteVig&&(
+            <div style={{background:"#e6fffa",borderRadius:8,padding:"9px 11px",fontSize:13,marginBottom:7,color:"#00695c",fontWeight:600}}>🎟️ Tiene el cupón <strong>{cuponClienteVig.id}</strong> vigente (vence {fmtD(cuponClienteVig.caduca)}) — recuérdaselo</div>
+          )}
+          {promosHoy.length>0&&(<>
+            <div style={{fontSize:11,fontWeight:700,color:"#1a3c5e",textTransform:"uppercase",letterSpacing:0.5,margin:"4px 0 6px"}}>🎁 Promos que puedes ofrecer hoy</div>
+            {promosHoy.map(p=>(
+              <div key={p.id} style={{background:"#f0f7fc",borderRadius:8,padding:"9px 11px",fontSize:13,color:"#1a3c5e",marginBottom:6}}>
+                <div style={{fontWeight:700}}>{p.emoji} {p.titulo}</div>
+                {p.detalle&&<div style={{fontSize:11,color:"#5a7a95",marginTop:1}}>{p.detalle}</div>}
+              </div>
+            ))}
+          </>)}
+          {!(clienteCumple&&!descCumple)&&!cuponClienteVig&&promosHoy.length===0&&(
+            <div style={{fontSize:12,color:"#999"}}>Sin recordatorios activos por ahora.</div>
+          )}
+        </div>
+        {err&&<div style={{background:"#ffebee",color:"#c62828",borderRadius:8,padding:"10px 12px",marginTop:12,fontSize:12,fontWeight:600}}>{err}</div>}
+        <button style={{...S.btnP,width:"100%",marginTop:12}} onClick={()=>reg()}>🧾 Registrar Venta</button>
       </div>
       </div>
       {showPromos&&!waVenta&&<PromosDelDia servicios={servicios} onAgregar={agregarPromo} onCerrar={()=>{setShowPromos(false);reg(true);}}/>}
