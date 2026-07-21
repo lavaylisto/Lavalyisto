@@ -736,6 +736,8 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
     setPromoOfrecida(false); // 🎁 la siguiente venta volverá a recordar las promos al guardar
   };
   const clienteCumple=(mC==="buscar"&&selC&&esCumpleHoy(selC.nacimiento))||(mC==="nuevo"&&esCumpleHoy(nC.nacimiento));
+  const cuponClienteVig=(mC==="buscar"&&selC)?(cupones||[]).find(c=>String(c.clienteId)===String(selC.id)&&cuponVigente(c)&&(!cupApl||c.id!==cupApl.id)):null;
+  const promosHoy=promosDeHoy(servicios);
   const nombreCumple=mC==="buscar"?selC?.nombre:nC.nombre||"el cliente";
   const totalBruto=calcT();
   const descMonto=clienteCumple&&descCumple?+(totalBruto*DESC_CUMPLE).toFixed(2):0;
@@ -888,6 +890,23 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
             </div>
           )}
           {tPago==="retiro"&&<div style={{background:"rgba(255,255,255,.12)",borderRadius:8,padding:"8px 10px",marginTop:8,fontSize:12}}>⏳ Paga al retirar: <strong>${total.toFixed(2)}</strong></div>}
+
+          {(clienteCumple&&!descCumple||cuponClienteVig||promosHoy.length>0)&&(
+            <div style={{marginTop:12,paddingTop:10,borderTop:"1px dashed rgba(255,255,255,.25)"}}>
+              <div style={{fontSize:10,fontWeight:700,color:"#a0c4da",textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>🔔 Recordatorios</div>
+              {clienteCumple&&!descCumple&&(
+                <div style={{background:"rgba(245,158,11,.18)",borderRadius:8,padding:"7px 10px",fontSize:12,marginBottom:6}}>🎂 <strong>{nombreCumple}</strong> cumple hoy — ¡ofrécele el 10%!</div>
+              )}
+              {cuponClienteVig&&(
+                <div style={{background:"rgba(0,229,184,.15)",borderRadius:8,padding:"7px 10px",fontSize:12,marginBottom:6}}>🎟️ Tiene el cupón <strong>{cuponClienteVig.id}</strong> vigente (vence {fmtD(cuponClienteVig.caduca)}) — recuérdaselo</div>
+              )}
+              {promosHoy.length>0&&(
+                <div style={{background:"rgba(255,255,255,.12)",borderRadius:8,padding:"7px 10px",fontSize:12}}>
+                  🎁 Promos de hoy: {promosHoy.map(p=>p.emoji).join(" ")} — coméntaselas al cliente
+                </div>
+              )}
+            </div>
+          )}
           {err&&<div style={{background:"#ffebee",color:"#c62828",borderRadius:8,padding:"8px 10px",marginTop:10,fontSize:12,fontWeight:600}}>{err}</div>}
           <button style={{...S.btnP,width:"100%",marginTop:12}} onClick={()=>reg()}>🧾 Registrar Venta</button>
         </div>
