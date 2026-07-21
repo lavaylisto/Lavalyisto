@@ -435,7 +435,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
   const hoy=fechaHoyLocal();
   const [tab,setTab]=useState("hoy");const [busq,setBusq]=useState("");
   const [fecha,setFecha]=useState(hoy);const [showNueva,setShowNueva]=useState(false);
-  const [showCaja,setShowCaja]=useState(false);const [ticket,setTicket]=useState(null);const [showSalidaEmp,setShowSalidaEmp]=useState(false);  const vFecha=ventas.filter(v=>fechaLocal(v.fecha)===fecha&&!v.anulada);
+  const [showCaja,setShowCaja]=useState(false);const [ticket,setTicket]=useState(null);const [cuponSugE,setCuponSugE]=useState(null);const [showSalidaEmp,setShowSalidaEmp]=useState(false);  const vFecha=ventas.filter(v=>fechaLocal(v.fecha)===fecha&&!v.anulada);
   const vHoy=ventas.filter(v=>fechaLocal(v.fecha)===hoy&&!v.anulada);
   const porCob=ventas.filter(v=>!pagada(v)&&!v.anulada);
   const porEnt=ventas.filter(v=>pagada(v)&&!v.anulada&&(v.estado||"recibido")!=="entregado");
@@ -512,7 +512,8 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
           </div>
         </div>
       )}
-      {ticket&&<TicketModal venta={ticket} empleadas={empleadas} onClose={()=>setTicket(null)}/>}
+      {ticket&&<TicketModal venta={ticket} empleadas={empleadas} onClose={()=>{setCuponSugE(ticket);setTicket(null);}}/>}
+      {cuponSugE&&<CuponSugerido venta={cuponSugE} clientes={clientes} ventas={ventas} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} sesion={sesion} onClose={()=>setCuponSugE(null)}/>}
       {showSalidaEmp&&<SalidaCaja sesion={sesion} salidasCaja={salidasCaja||[]} setSalidasCaja={setSalidasCaja} onClose={()=>setShowSalidaEmp(false)} upsertSalida={upsertSalida}/>}
     </div>
   );
@@ -1965,6 +1966,81 @@ const imprimirCupon=c=>{
   w.document.close();
 };
 
+// 🎟️ Al imprimir la venta: cupón sugerido según el historial del cliente
+// (la promo del listado cuya categoría MENOS ocupa)
+const construirCupon=(cli,p,motivo,existentes,sesion)=>{
+  const emitido=fechaHoyLocal();
+  const cad=new Date();cad.setDate(cad.getDate()+CUPON_DIAS_VALIDEZ);
+  return{
+    id:genCodigoCupon(existentes),
+    promoId:p.id,promoTipo:p.tipo,promoTitulo:p.titulo,promoDetalle:p.detalle||"",promoEmoji:p.emoji,
+    promoLabel:p.tipo==="descuento"?p.labelDescuento:p.label,
+    promoPrecio:p.tipo==="custom"?p.precio:null,promoMonto:p.tipo==="descuento"?p.monto:null,
+    clienteId:cli.id,clienteNombre:cli.nombre,clienteTel:cli.tel||"",
+    emitido,caduca:cad.toISOString().slice(0,10),
+    motivo:motivo||"",minCompra:p.tipo==="descuento"?CUPON_MIN_COMPRA_DESC:null,
+    estado:"vigente",generadoPor:sesion?.nombre||"",fecha:new Date().toISOString()
+  };
+};
+function CuponSugerido({venta,clientes,ventas,cupones,setCupones,upsertCupon,sesion,onClose}){
+  const [sug]=useState(()=>{
+    const cli=clientes.find(c=>String(c.id)===String(venta.clienteId)&&!c.eliminada);
+    if(!cli)return null;
+    if(venta.cuponId)return null; // acaba de canjear uno: no regalar otro de inmediato
+    if(cupones.some(c=>String(c.clienteId)===String(cli.id)&&cuponVigente(c)))return null; // ya tiene uno vigente
+    const vsCli=ventas.filter(v=>String(v.clienteId)===String(cli.id)&&!v.anulada);
+    const usos=PROMOS_DEL_DIA.map(p=>{
+      const claves=PROMO_CATEGORIAS[p.id]?.claves||[];
+      const n=vsCli.filter(v=>(v.items||[]).some(it=>{const l=normTxt(it.label);return claves.some(k=>l.includes(k));})).length;
+      return{p,n};
+    });
+    if(usos.length===0)return null;
+    const minN=Math.min(...usos.map(u=>u.n));
+    const cand=usos.filter(u=>u.n===minN);
+    const eleg=cand[Math.floor(Math.random()*cand.length)];
+    const cat=PROMO_CATEGORIAS[eleg.p.id]?.nombre||"este servicio";
+    const motivo=minN===0?`Nunca ha llevado ${cat} — ¡venta cruzada!`:`Es el servicio que menos ocupa: solo ${minN} ${minN===1?"vez":"veces"} (${cat})`;
+    return{cli,promo:eleg.p,motivo};
+  });
+  const [generado,setGenerado]=useState(null);
+  if(!sug)return null;
+  const generar=()=>{
+    if(generado)return generado;
+    const cup=construirCupon(sug.cli,sug.promo,sug.motivo,cupones,sesion);
+    if(setCupones)setCupones(pv=>[cup,...pv]);
+    if(upsertCupon)upsertCupon(cup); // ☁️ a la nube
+    setGenerado(cup);
+    return cup;
+  };
+  return(
+    <div style={{...S.ov,zIndex:95}}>
+      <div style={{background:"#fff",borderRadius:18,width:"100%",maxWidth:380,boxShadow:"0 20px 60px rgba(0,0,0,.35)",overflow:"hidden"}}>
+        <div style={{background:"linear-gradient(135deg,#00a887,#00E5B8)",padding:"16px 20px",textAlign:"center"}}>
+          <div style={{fontSize:34}}>🎟️</div>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:19,fontWeight:700,color:"#fff"}}>Cupón sugerido para este cliente</div>
+          <div style={{fontSize:12,color:"#e6fffa"}}>Imprímelo y entrégalo junto con su pedido 🫧</div>
+        </div>
+        <div style={{padding:"16px 18px"}}>
+          <div style={{fontWeight:800,fontSize:16,color:"#001847"}}>👤 {sug.cli.nombre}</div>
+          <div style={{background:"#fff8e1",borderRadius:8,padding:"6px 10px",margin:"8px 0",fontSize:12,color:"#b45309",fontWeight:600}}>🎯 {sug.motivo}</div>
+          <div style={{background:"#f8fbfd",border:"1.5px dashed #4db6e4",borderRadius:12,padding:"12px 14px"}}>
+            <div style={{fontWeight:700,fontSize:15,color:"#1a3c5e"}}>{sug.promo.emoji} {sug.promo.titulo}</div>
+            <div style={{fontSize:11,color:"#888"}}>{sug.promo.detalle}</div>
+            <div style={{fontSize:11,color:"#c0392b",fontWeight:600,marginTop:4}}>⏰ Caducará en {CUPON_DIAS_VALIDEZ} días</div>
+            {sug.promo.tipo==="descuento"&&<div style={{fontSize:11,color:"#1a3c5e",fontWeight:600}}>🛒 Compra mínima ${CUPON_MIN_COMPRA_DESC.toFixed(2)}</div>}
+            {generado&&<div style={{marginTop:6,fontWeight:800,letterSpacing:2,color:"#00a887",fontSize:16}}>Nº {generado.id} ✓</div>}
+          </div>
+          <div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>
+            <button style={{...S.btnP,flex:"1 1 100%"}} onClick={()=>{const c=generar();imprimirCupon(c);}}>🖨️ Generar e imprimir cupón</button>
+            {sug.cli.tel&&<a href="#" style={{background:"#25d366",color:"#fff",borderRadius:10,padding:"10px 12px",fontSize:13,fontWeight:700,textDecoration:"none",flex:1,textAlign:"center"}} onClick={e=>{e.preventDefault();const c=generar();window.open(`https://wa.me/${telWa(c.clienteTel)}?text=${encodeURIComponent(msgWaCupon(c))}`,"_blank");}}>💬 Enviar WhatsApp</a>}
+            <button style={{...S.btnC,flex:1}} onClick={onClose}>{generado?"✓ Listo":"Omitir"}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Cupones({cupones,setCupones,upsertCupon,clientes,ventas,sesion}){
   const [prev,setPrev]=useState(null); // preview del sorteo antes de generar
   const [soloInactivos,setSoloInactivos]=useState(true);
@@ -2266,9 +2342,11 @@ function DashboardBI({ventas,empleadas,gastos}){
   const diasTranscurridos=esMesActual?diaMes:diasMes;
   let meta,origenMeta;
   if(ult3.length>0){
-    const prom=ult3.reduce((a,b)=>a+b,0)/ult3.length;
+    // Ponderado: el mes más reciente pesa más (50/30/20) — refleja mejor la tendencia real
+    const pesos=ult3.length===3?[0.2,0.3,0.5]:ult3.length===2?[0.4,0.6]:[1];
+    const prom=ult3.reduce((a,b,i)=>a+b*pesos[i],0);
     meta=Math.max(10,Math.ceil((prom*1.10)/10)*10);
-    origenMeta=`Promedio de ${ult3.length} mes${ult3.length>1?"es":""} anterior${ult3.length>1?"es":""} ($${prom.toFixed(0)}) + 10% de crecimiento`;
+    origenMeta=`Promedio ponderado de ${ult3.length} mes${ult3.length>1?"es":""} (los recientes pesan más: $${prom.toFixed(0)}) + 10% de crecimiento`;
   }else{
     const proy=(ventaMes/Math.max(1,diasTranscurridos))*diasMes;
     meta=Math.max(10,Math.ceil(proy/10)*10);
@@ -2277,11 +2355,53 @@ function DashboardBI({ventas,empleadas,gastos}){
   const pct=Math.min(100,meta>0?(ventaMes/meta)*100:0);
   const pctReal=meta>0?(ventaMes/meta)*100:0;
   const pctEsperado=(diasTranscurridos/diasMes)*100;
-  const proyeccion=(ventaMes/Math.max(1,diasTranscurridos))*diasMes;
   const faltante=Math.max(0,meta-ventaMes);
   const diasRestantes=Math.max(0,diasMes-diasTranscurridos);
   const ritmoNecesario=diasRestantes>0?faltante/diasRestantes:0;
   const adelantada=pctReal>=pctEsperado;
+  const ritmoActual=ventaMes/Math.max(1,diasTranscurridos);
+  // ── Patrón por día de la semana (últimos 90 días, incluye días en cero) ──
+  const diario={};vOk.forEach(v=>{const f=fechaLocal(v.fecha);diario[f]=(diario[f]||0)+v.total;});
+  const fechasCon=Object.keys(diario).sort();
+  const sumDow=[0,0,0,0,0,0,0],cntDow=[0,0,0,0,0,0,0];
+  if(fechasCon.length){
+    const lim=new Date(hoyD);lim.setDate(lim.getDate()-90);
+    let d0=new Date(fechasCon[0]+"T12:00:00");if(d0<lim)d0=lim;
+    const ayer=new Date(hoyD);ayer.setDate(ayer.getDate()-1);
+    for(let d=new Date(d0);d<=ayer;d.setDate(d.getDate()+1)){
+      const k=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+      sumDow[d.getDay()]+=diario[k]||0;cntDow[d.getDay()]++;
+    }
+  }
+  const histDias=cntDow.reduce((a,b)=>a+b,0);
+  const promDow=sumDow.map((s,i)=>cntDow[i]>0?s/cntDow[i]:0);
+  // Proyección: patrón semanal escalado por el ritmo del mes actual
+  const proySimple=ritmoActual*diasMes;
+  let proyeccion=proySimple,proyMetodo="simple",fechaMetaEst=null;
+  const dowDe=dia=>new Date(hoyD.getFullYear(),hoyD.getMonth(),dia).getDay();
+  if(esMesActual&&histDias>=14){
+    let expMTD=0;for(let d=1;d<=diasTranscurridos;d++)expMTD+=promDow[dowDe(d)];
+    const factor=expMTD>0?Math.min(1.8,Math.max(0.6,ventaMes/expMTD)):1;
+    let acum=ventaMes;
+    for(let d=diasTranscurridos+1;d<=diasMes;d++){
+      acum+=promDow[dowDe(d)]*factor;
+      if(!fechaMetaEst&&acum>=meta)fechaMetaEst=new Date(hoyD.getFullYear(),hoyD.getMonth(),d);
+    }
+    proyeccion=acum;proyMetodo="inteligente";
+    if(ventaMes>=meta)fechaMetaEst=null;
+  }else if(ritmoActual>0){
+    const dpm=Math.ceil(meta/ritmoActual);
+    if(dpm<=diasMes&&ventaMes<meta)fechaMetaEst=new Date(hoyD.getFullYear(),hoyD.getMonth(),dpm);
+  }
+  const brechaProy=+(proyeccion-meta).toFixed(2);
+  // Comparativa vs mes pasado a la misma altura + mejor día
+  const [aY,aM]=mesSel.split("-").map(Number);
+  const prevK=`${aM===1?aY-1:aY}-${String(aM===1?12:aM-1).padStart(2,"0")}`;
+  const prevMTD=vOk.filter(v=>{const f=fechaLocal(v.fecha);return f.startsWith(prevK)&&parseInt(f.slice(8))<=diasTranscurridos;}).reduce((a,v)=>a+v.total,0);
+  const varMTD=prevMTD>0?((ventaMes-prevMTD)/prevMTD)*100:null;
+  const DOWN=["domingo","lunes","martes","miércoles","jueves","viernes","sábado"];
+  const mejorDow=promDow.some(x=>x>0)?promDow.indexOf(Math.max(...promDow)):null;
+  let quedanMejor=0;if(mejorDow!==null&&esMesActual)for(let d=diasTranscurridos+1;d<=diasMes;d++)if(dowDe(d)===mejorDow)quedanMejor++;
   // Serie de meses para la gráfica (hasta 12)
   const serieKeys=[...new Set([...Object.keys(porMes),mesAct])].sort().slice(-12);
   const serie=serieKeys.map(k=>({k,l:k.slice(5)+"/"+k.slice(2,4),v:porMes[k]?.tot||0}));
@@ -2349,6 +2469,44 @@ function DashboardBI({ventas,empleadas,gastos}){
         </div>
       )}
     </div>
+
+    <Card title="🔎 Camino a la meta (detalle)">
+      {esMesActual?(<>
+        {[
+          ["📆 Días transcurridos",`${diasTranscurridos} de ${diasMes} (${((diasTranscurridos/diasMes)*100).toFixed(0)}% del mes)`],
+          ["⏳ Días restantes",`${diasRestantes} día${diasRestantes!==1?"s":""}`],
+          ["💵 Vendido hasta hoy",`$${ventaMes.toFixed(2)} (${pctReal.toFixed(1)}% de la meta)`],
+          ["🎯 Meta del mes",`$${meta.toFixed(2)}`],
+          ["🧗 Falta para la meta",`$${faltante.toFixed(2)} (${Math.max(0,100-pctReal).toFixed(1)}%)`],
+          ["🏃 Ritmo actual",`$${ritmoActual.toFixed(2)} por día`],
+          ["⚡ Ritmo necesario",faltante<=0?"¡Ya llegaste! 🎉":`$${ritmoNecesario.toFixed(2)} por día los próximos ${diasRestantes} día${diasRestantes!==1?"s":""}`],
+          ...(varMTD!==null?[["📊 vs mes pasado (a esta altura)",`${varMTD>=0?"▲ +":"▼ "}${varMTD.toFixed(1)}% ($${ventaMes.toFixed(0)} vs $${prevMTD.toFixed(0)})`]]:[]),
+          ...(mejorDow!==null?[["🌟 Tu mejor día de venta",`${DOWN[mejorDow]} (prom. $${promDow[mejorDow].toFixed(2)})${quedanMejor>0?` · quedan ${quedanMejor} este mes 💪`:""}`]]:[]),
+        ].map(([l,v])=>(
+          <div key={l} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"6px 0",borderBottom:"1px solid #f0f4f8"}}>
+            <span style={{color:"#666"}}>{l}</span><strong style={{textAlign:"right"}}>{v}</strong>
+          </div>
+        ))}
+        <div style={{background:brechaProy>=0?"#e8f5e9":"#fff3e0",border:`1.5px solid ${brechaProy>=0?"#4caf50":"#ff9800"}`,borderRadius:10,padding:"10px 12px",marginTop:10}}>
+          <div style={{fontSize:11,fontWeight:700,color:brechaProy>=0?"#2e7d32":"#e65100",textTransform:"uppercase",letterSpacing:0.5}}>🔮 Proyección de cierre {proyMetodo==="inteligente"?"· inteligente":"· simple"}</div>
+          <div style={{fontWeight:800,fontSize:20,color:brechaProy>=0?"#2e7d32":"#e65100"}}>${proyeccion.toFixed(2)}</div>
+          <div style={{fontSize:12,color:brechaProy>=0?"#2e7d32":"#b45309",marginTop:2}}>
+            {brechaProy>=0
+              ?`Al ritmo actual cerrarías $${brechaProy.toFixed(2)} POR ENCIMA de la meta 🎉${fechaMetaEst?` · La alcanzarías el ${fechaMetaEst.toLocaleDateString("es-EC",{day:"numeric",month:"long"})}`:""}`
+              :`Al ritmo actual cerrarías $${Math.abs(brechaProy).toFixed(2)} por debajo de la meta. Sube el ritmo a $${ritmoNecesario.toFixed(2)}/día para lograrla 💪`}
+          </div>
+          <div style={{fontSize:10,color:"#888",marginTop:5}}>{proyMetodo==="inteligente"
+            ?"Calculada con tu patrón real por día de la semana (últimos 90 días) ajustado al ritmo de este mes — más precisa que un promedio simple."
+            :"Promedio diario simple — se volverá más precisa cuando haya al menos 2 semanas de historial."}</div>
+        </div>
+      </>):(
+        <div style={{textAlign:"center",padding:"8px 0"}}>
+          <div style={{fontSize:32}}>{pctReal>=100?"🏆":"📊"}</div>
+          <div style={{fontWeight:800,fontSize:18,color:pctReal>=100?"#2e7d32":"#1a3c5e"}}>{pctReal>=100?"¡Meta cumplida!":"Mes cerrado"}</div>
+          <div style={{fontSize:13,color:"#666",marginTop:4}}>Vendido: <strong>${ventaMes.toFixed(2)}</strong> de ${meta.toFixed(2)} ({pctReal.toFixed(1)}%){pctReal<100?` · Faltaron $${faltante.toFixed(2)}`:` · Superada por $${(ventaMes-meta).toFixed(2)}`}</div>
+        </div>
+      )}
+    </Card>
 
     <div style={S.kgrid}>
       <div style={{...S.kpi,borderLeft:"4px solid #4caf50"}}><div style={{fontSize:22}}>💚</div><div><div style={{fontWeight:800,fontSize:18,color:"#2e7d32"}}>${cobradoMes.toFixed(2)}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Cobrado en el mes</div></div></div>
@@ -2511,6 +2669,7 @@ const { data: salidasCaja, setData: setSalidasCaja, upsert: upsertSalida } = use
 const { data: cajas, upsert: upsertCaja, nube } = useCollection("cajas", "ll_cajas", []);
 const { data: cupones, setData: setCupones, upsert: upsertCupon } = useCollection("cupones", "ll_cupones", []);  const [showSalida,setShowSalida]=useState(false);
   const [ticketV,setTicketV]=useState(null);
+  const [cuponSug,setCuponSug]=useState(null); // 🎟️ cupón sugerido tras imprimir la venta
   // Servicios visibles (excluye los eliminados, que quedan marcados en la nube)
   const serviciosActivos=servicios.filter(s=>!s.eliminada);
 
@@ -2582,7 +2741,8 @@ const { data: cupones, setData: setCupones, upsert: upsertCupon } = useCollectio
       {tab==="config"&&<Configuracion servicios={servicios} setServicios={setServicios} exportarDatos={exportarDatos} importarDatos={importarDatos} upsertVenta={upsertVenta} upsertServicio={upsertServicio}/>}
       {tab==="usuarios"&&<GestionUsuarios/>}
     </div>
-    {ticketV&&<TicketModal venta={ticketV} empleadas={empleadas} onClose={()=>setTicketV(null)}/>}
+    {ticketV&&<TicketModal venta={ticketV} empleadas={empleadas} onClose={()=>{setCuponSug(ticketV);setTicketV(null);}}/>}
+    {cuponSug&&<CuponSugerido venta={cuponSug} clientes={clientes} ventas={ventas} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} sesion={sesion} onClose={()=>setCuponSug(null)}/>}
     {showSalida&&<SalidaCaja sesion={sesion} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} onClose={()=>setShowSalida(false)} upsertSalida={upsertSalida}/>}
   </div>);
 }
