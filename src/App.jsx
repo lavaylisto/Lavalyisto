@@ -38,6 +38,28 @@ const EMPLEADAS_DEFAULT = [
   {id:1,nombre:"Ana Garcia",activa:true,metaVentas:20,montoBonus:20},
   {id:2,nombre:"Maria Lopez",activa:true,metaVentas:20,montoBonus:20},
 ];
+// 🎯 INCENTIVOS: comisión por impulsación de promo + bonos por meta grupal (editable desde el panel admin)
+const INCENTIVOS_DEFAULT = [{id:"config",comisionImpulso:0.40,bonoMetaPct:1,bonoExcedentePct:10}];
+// Calcula la meta $ del mes (mismo criterio que el Dashboard BI: promedio ponderado de últimos 3 meses +10%)
+function calcMetaMes(ventas,mesSel){
+  const vOk=ventas.filter(v=>!v.anulada);
+  const porMes={};vOk.forEach(v=>{const k=mesK(v.fecha);porMes[k]=(porMes[k]||0)+v.total;});
+  const hoyD=new Date();const diaMes=hoyD.getDate();const diasMes=new Date(hoyD.getFullYear(),hoyD.getMonth()+1,0).getDate();
+  const vMes=vOk.filter(v=>mesK(v.fecha)===mesSel);
+  const ventaMes=vMes.reduce((a,v)=>a+v.total,0);
+  const cerrados=Object.keys(porMes).filter(k=>k<mesSel).sort();
+  const ult3=cerrados.slice(-3).map(k=>porMes[k]);
+  let meta;
+  if(ult3.length>0){
+    const pesos=ult3.length===3?[0.2,0.3,0.5]:ult3.length===2?[0.4,0.6]:[1];
+    const prom=ult3.reduce((a,b,i)=>a+b*pesos[i],0);
+    meta=Math.max(10,Math.ceil((prom*1.10)/10)*10);
+  }else{
+    const proy=(ventaMes/Math.max(1,diaMes))*diasMes;
+    meta=Math.max(10,Math.ceil(proy/10)*10);
+  }
+  return{meta,ventaMes,vMes};
+}
 const USUARIOS_DEFAULT = [
   {id:1,usuario:"admin",clave:"admin123",rol:"Administrador",nombre:"Administrador"},
   {id:2,usuario:"ana",clave:"1234",rol:"Empleada",nombre:"Ana Garcia"},
@@ -431,7 +453,105 @@ function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta}){
   );
 }
 
-function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta,upsertSalida,upsertCliente,upsertCaja,cupones,setCupones,upsertCupon,promos}){
+function MisIncentivos({ventas,empleadas,sesion,cfgInc}){
+  const mesAct=mesK(new Date());
+  const {meta,ventaMes,vMes}=calcMetaMes(ventas,mesAct);
+  const pct=meta>0?(ventaMes/meta)*100:0;
+  const pctBarra=Math.min(100,pct);
+  const excedente=Math.max(0,ventaMes-meta);
+  const grupoBono=empleadas.filter(e=>e.activa&&e.bonoGrupal);
+  const nActivas=Math.max(1,grupoBono.length);
+  const cumplida=ventaMes>=meta;
+  const bonoMetaTotal=cumplida?meta*((cfgInc.bonoMetaPct||0)/100):0;
+  const bonoExcedenteTotal=excedente>0?excedente*((cfgInc.bonoExcedentePct||0)/100):0;
+  const miBonoMeta=bonoMetaTotal/nActivas;
+  const miBonoExcedente=bonoExcedenteTotal/nActivas;
+  // Mis impulsaciones del mes (ventas donde YO impulsé una promo)
+  const misVentasConImp=vMes.filter(v=>v.empleadaId===sesion.id&&(v.impulsos||[]).length>0);
+  const misImpulsos=misVentasConImp.reduce((a,v)=>a+(v.impulsos||[]).length,0);
+  const comisionImpulso=cfgInc.comisionImpulso||0;
+  const miGananciaImpulsos=misImpulsos*comisionImpulso;
+  const colorBarra=pct>=100?"#4caf50":pct>=70?"#4db6e4":"#f59e0b";
+  return(<div style={{padding:"4px 4px 20px"}}>
+    <div style={{background:"linear-gradient(135deg,#1a3c5e,#2563a8)",borderRadius:14,padding:"18px",marginBottom:14,color:"#fff",boxShadow:"0 4px 16px rgba(26,60,94,.3)"}}>
+      <div style={{fontSize:12,fontWeight:600,color:"#a0c4da",textTransform:"uppercase",letterSpacing:0.5}}>🎯 Meta grupal del mes</div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginTop:4}}>
+        <div style={{fontFamily:"'Playfair Display',serif",fontSize:26,fontWeight:700}}>${ventaMes.toFixed(2)} <span style={{fontSize:14,fontWeight:400,color:"#a0c4da"}}>/ ${meta.toFixed(2)}</span></div>
+        <div style={{fontSize:22,fontWeight:800,color:pct>=100?"#a5d6a7":"#81d4fa"}}>{pct.toFixed(0)}%</div>
+      </div>
+      <div style={{marginTop:10,background:"rgba(255,255,255,.15)",borderRadius:8,height:12,overflow:"hidden"}}>
+        <div style={{width:`${pctBarra}%`,height:"100%",background:colorBarra,borderRadius:8,transition:"width .3s"}}/>
+      </div>
+      {!cumplida&&<div style={{fontSize:12,color:"#a0c4da",marginTop:8}}>Faltan ${(meta-ventaMes).toFixed(2)} para llegar a la meta 💪</div>}
+      {cumplida&&excedente===0&&<div style={{fontSize:12,color:"#a5d6a7",marginTop:8}}>¡Meta cumplida! 🎉</div>}
+      {excedente>0&&<div style={{fontSize:12,color:"#a5d6a7",marginTop:8}}>¡Superada por ${excedente.toFixed(2)}! 🚀</div>}
+    </div>
+
+    <Card title="💰 Mi bono grupal estimado (repartido solo entre Karen y Nicol)">
+      <div style={{display:"flex",gap:10}}>
+        <div style={{flex:1,background:"#f8fbfd",borderRadius:10,padding:"10px",textAlign:"center"}}>
+          <div style={{fontWeight:800,fontSize:18,color:cumplida?"#2e7d32":"#888"}}>${miBonoMeta.toFixed(2)}</div>
+          <div style={{fontSize:11,color:"#888"}}>Por llegar al 100%</div>
+        </div>
+        <div style={{flex:1,background:"#f8fbfd",borderRadius:10,padding:"10px",textAlign:"center"}}>
+          <div style={{fontWeight:800,fontSize:18,color:excedente>0?"#2e7d32":"#888"}}>${miBonoExcedente.toFixed(2)}</div>
+          <div style={{fontSize:11,color:"#888"}}>Por superar la meta</div>
+        </div>
+      </div>
+      <div style={{fontSize:11,color:"#aaa",marginTop:10,textAlign:"center"}}>Se actualiza en tiempo real según las ventas del mes. Se confirma al cierre de mes.</div>
+    </Card>
+
+    <Card title="🎁 Mis impulsaciones de promos este mes">
+      <div style={{display:"flex",gap:10,marginBottom:6}}>
+        <div style={{flex:1,background:"#f8fbfd",borderRadius:10,padding:"10px",textAlign:"center"}}>
+          <div style={{fontWeight:800,fontSize:20,color:"#1a3c5e"}}>{misImpulsos}</div>
+          <div style={{fontSize:11,color:"#888"}}>Impulsaciones</div>
+        </div>
+        <div style={{flex:1,background:"#f8fbfd",borderRadius:10,padding:"10px",textAlign:"center"}}>
+          <div style={{fontWeight:800,fontSize:20,color:"#2e7d32"}}>${miGananciaImpulsos.toFixed(2)}</div>
+          <div style={{fontSize:11,color:"#888"}}>Ganado por impulsar</div>
+        </div>
+      </div>
+      <div style={{fontSize:11,color:"#aaa",textAlign:"center"}}>${comisionImpulso.toFixed(2)} por cada promo que impulsas y se concreta en una venta 🎯</div>
+    </Card>
+  </div>);
+}
+
+function IncentivosAdmin({cfgInc,setIncentivosArr,upsertIncentivo,ventas,empleadas}){
+  const [ed,setEd]=useState({comisionImpulso:cfgInc.comisionImpulso,bonoMetaPct:cfgInc.bonoMetaPct,bonoExcedentePct:cfgInc.bonoExcedentePct});
+  const [guardado,setGuardado]=useState(false);
+  const guardar=()=>{
+    const nuevo={id:"config",comisionImpulso:parseFloat(ed.comisionImpulso)||0,bonoMetaPct:parseFloat(ed.bonoMetaPct)||0,bonoExcedentePct:parseFloat(ed.bonoExcedentePct)||0};
+    setIncentivosArr([nuevo]);
+    if(upsertIncentivo)upsertIncentivo({...nuevo,_updatedAt:new Date().toISOString()});
+    setGuardado(true);setTimeout(()=>setGuardado(false),2000);
+  };
+  const mesAct=mesK(new Date());
+  const {meta,ventaMes}=calcMetaMes(ventas,mesAct);
+  const grupoBono=empleadas.filter(e=>e.activa&&e.bonoGrupal);
+  const nActivas=Math.max(1,grupoBono.length);
+  const bonoMetaTotal=meta*((parseFloat(ed.bonoMetaPct)||0)/100);
+  const excedente=Math.max(0,ventaMes-meta);
+  const bonoExcedenteTotal=excedente*((parseFloat(ed.bonoExcedentePct)||0)/100);
+  return(<div style={S.panel}>
+    <h2 style={S.ptitle}>🎯 Incentivos y bonos</h2>
+    <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ Esto define lo que ven en su pestaña "📈 Bonos" las colaboradoras con usuario. La meta $ es la misma del Dashboard BI (automática). El bono grupal se reparte solo entre quienes tengan marcado "🎯 Participa en el bono grupal" en la pestaña Equipo.</div>
+    <Card title="⚙️ Configuración">
+      <div><label style={S.lbl}>Comisión por impulsación concretada ($) — aplica a todas las que facturan</label><input type="number" step="0.01" style={S.inp} value={ed.comisionImpulso} onChange={e=>setEd({...ed,comisionImpulso:e.target.value})}/></div>
+      <div style={{marginTop:10}}><label style={S.lbl}>Bono grupal por llegar al 100% de la meta (% de la meta)</label><input type="number" step="0.1" style={S.inp} value={ed.bonoMetaPct} onChange={e=>setEd({...ed,bonoMetaPct:e.target.value})}/></div>
+      <div style={{marginTop:10}}><label style={S.lbl}>Bono grupal por superar la meta (% del excedente)</label><input type="number" step="0.1" style={S.inp} value={ed.bonoExcedentePct} onChange={e=>setEd({...ed,bonoExcedentePct:e.target.value})}/></div>
+      <button style={{...S.btnP,marginTop:14}} onClick={guardar}>{guardado?"✅ Guardado":"💾 Guardar configuración"}</button>
+    </Card>
+    <Card title="👀 Vista previa del mes actual">
+      <div style={{fontSize:13,marginBottom:6}}>Meta: <strong>${meta.toFixed(2)}</strong> · Ventas: <strong>${ventaMes.toFixed(2)}</strong></div>
+      <div style={{fontSize:12,color:"#888",marginBottom:6}}>Reparten el bono grupal: {grupoBono.length?grupoBono.map(e=>e.nombre).join(", "):"nadie marcado todavía — ve a Equipo y marca a Karen y Nicol"}</div>
+      <div style={{fontSize:13,marginBottom:6}}>Bono por meta (si se cumple, entre {nActivas}): <strong>${bonoMetaTotal.toFixed(2)}</strong> total → <strong>${(bonoMetaTotal/nActivas).toFixed(2)}</strong> c/u</div>
+      <div style={{fontSize:13}}>Bono por excedente actual (${excedente.toFixed(2)} sobre la meta): <strong>${bonoExcedenteTotal.toFixed(2)}</strong> total → <strong>${(bonoExcedenteTotal/nActivas).toFixed(2)}</strong> c/u</div>
+    </Card>
+  </div>);
+}
+
+function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta,upsertSalida,upsertCliente,upsertCaja,cupones,setCupones,upsertCupon,promos,cfgInc}){
   const hoy=fechaHoyLocal();
   const [tab,setTab]=useState("hoy");const [busq,setBusq]=useState("");
   const [fecha,setFecha]=useState(hoy);const [showNueva,setShowNueva]=useState(false);
@@ -461,7 +581,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         </div>
       </div>
       <div style={{background:"#fff",display:"flex",borderBottom:"2px solid #e8f0f7",position:"sticky",top:0,zIndex:10}}>
-        {[{id:"hoy",l:"📋 Ordenes",c:vHoy.length},{id:"cobrar",l:"💸 Cobrar",c:porCob.length},{id:"entregar",l:"📦 Entregar",c:porEnt.length},{id:"nueva",l:"➕ Nueva"}].map(t=>(
+        {[{id:"hoy",l:"📋 Ordenes",c:vHoy.length},{id:"cobrar",l:"💸 Cobrar",c:porCob.length},{id:"entregar",l:"📦 Entregar",c:porEnt.length},{id:"bonos",l:"📈 Bonos"},{id:"nueva",l:"➕ Nueva"}].map(t=>(
           <button key={t.id} style={{flex:1,padding:"12px 4px",border:"none",background:"transparent",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:tab===t.id?700:500,color:tab===t.id?"#1a3c5e":"#888",borderBottom:tab===t.id?"2px solid #4db6e4":"none",marginBottom:-2,fontSize:11,position:"relative"}}
             onClick={()=>t.id==="nueva"?setShowNueva(true):setTab(t.id)}>
             {t.l}{t.c>0&&<span style={{position:"absolute",top:5,right:3,background:"#e53935",color:"#fff",borderRadius:10,fontSize:9,fontWeight:800,padding:"1px 4px"}}>{t.c}</span>}
@@ -469,10 +589,10 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         ))}
       </div>
       <div style={{padding:12}}>
-        <div style={{display:"flex",gap:8,marginBottom:12}}>
+        {tab!=="bonos"&&(<div style={{display:"flex",gap:8,marginBottom:12}}>
           <input style={{...S.inp,flex:1}} placeholder="🔍 Buscar cliente o folio..." value={busq} onChange={e=>setBusq(e.target.value)}/>
           {tab==="hoy"&&<input type="date" style={{...S.inp,width:140}} value={fecha} onChange={e=>setFecha(e.target.value)}/>}
-        </div>
+        </div>)}
         {tab==="hoy"&&(
           <div style={{display:"flex",gap:8,marginBottom:12,overflowX:"auto"}}>
             {ESTADOS.map(est=>{
@@ -485,9 +605,11 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
             })}
           </div>
         )}
-        {filtrados.length===0
-          ?<div style={{textAlign:"center",padding:"40px 20px",color:"#aaa"}}><div style={{fontSize:48,marginBottom:8}}>{tab==="cobrar"?"🎉":"📋"}</div><div>{tab==="cobrar"?"Todo cobrado":tab==="entregar"?"Todo entregado":"Sin ordenes"}</div></div>
-          :filtrados.map(v=><OrdenCard key={v.folio} v={v} setVentas={setVentas} addAbono={addAbono} setTicket={setTicket} upsertVenta={upsertVenta}/>)
+        {tab==="bonos"
+          ?<MisIncentivos ventas={ventas} empleadas={empleadas} sesion={sesion} cfgInc={cfgInc||INCENTIVOS_DEFAULT[0]}/>
+          :filtrados.length===0
+            ?<div style={{textAlign:"center",padding:"40px 20px",color:"#aaa"}}><div style={{fontSize:48,marginBottom:8}}>{tab==="cobrar"?"🎉":"📋"}</div><div>{tab==="cobrar"?"Todo cobrado":tab==="entregar"?"Todo entregado":"Sin ordenes"}</div></div>
+            :filtrados.map(v=><OrdenCard key={v.folio} v={v} setVentas={setVentas} addAbono={addAbono} setTicket={setTicket} upsertVenta={upsertVenta}/>)
         }
       </div>
       {showNueva&&(
@@ -637,7 +759,9 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
   const [cQ,setCQ]=useState("");const [cId,setCId]=useState(null);
   const [nC,setNC]=useState({nombre:"",tel:"",cedula:"",email:"",rfc:"",direccion:"",nacimiento:""});
   const [mC,setMC]=useState("buscar");
-  const empDef=empleadas.find(e=>String(e.id)===String(sesion?.id))||empleadas[0];
+  const empDef=empleadas.find(e=>e.nombre&&sesion?.nombre&&e.nombre.trim().toLowerCase()===sesion.nombre.trim().toLowerCase())
+    ||empleadas.find(e=>String(e.id)===String(sesion?.id))
+    ||empleadas[0];
   const [empId,setEmpId]=useState(empDef?.id||null);
   const [items,setItems]=useState([{servId:servicios[0]?.id,piezas:1,custom:false,lC:"",pC:""}]);
   const [entrega,setEntrega]=useState((()=>{const off=man.getTimezoneOffset();const l=new Date(man.getTime()-off*60000);return l.toISOString().split("T")[0];})());
@@ -1322,12 +1446,12 @@ function Inventario({inventario,setInventario,upsertInventario}){
 }
 
 function Equipo({empleadas,setEmpleadas,ventas,esAdmin,upsertEmpleada}){
-  const [nv,setNv]=useState({nombre:"",metaVentas:20,montoBonus:20});
+  const [nv,setNv]=useState({nombre:"",metaVentas:20,montoBonus:20,bonoGrupal:false});
   const [editId,setEditId]=useState(null);const [ed,setEd]=useState({});
   const mes=mesK(new Date());
-  const add=()=>{if(!nv.nombre.trim())return;const ne={id:Date.now(),nombre:nv.nombre,activa:true,metaVentas:parseInt(nv.metaVentas)||20,montoBonus:parseFloat(nv.montoBonus)||0};setEmpleadas(prev=>[...prev,ne]);if(upsertEmpleada)upsertEmpleada({...ne,_updatedAt:new Date().toISOString()});setNv({nombre:"",metaVentas:20,montoBonus:20});};
+  const add=()=>{if(!nv.nombre.trim())return;const ne={id:Date.now(),nombre:nv.nombre,activa:true,metaVentas:parseInt(nv.metaVentas)||20,montoBonus:parseFloat(nv.montoBonus)||0,bonoGrupal:!!nv.bonoGrupal};setEmpleadas(prev=>[...prev,ne]);if(upsertEmpleada)upsertEmpleada({...ne,_updatedAt:new Date().toISOString()});setNv({nombre:"",metaVentas:20,montoBonus:20,bonoGrupal:false});};
   const tog=id=>setEmpleadas(prev=>{const next=prev.map(e=>e.id===id?{...e,activa:!e.activa}:e);const updated=next.find(e=>e.id===id);if(updated&&upsertEmpleada)upsertEmpleada({...updated,_updatedAt:new Date().toISOString()});return next;});
-  const save2=()=>{setEmpleadas(prev=>{const next=prev.map(e=>e.id===editId?{...e,...ed,metaVentas:parseInt(ed.metaVentas)||20,montoBonus:parseFloat(ed.montoBonus)||0}:e);const updated=next.find(e=>e.id===editId);if(updated&&upsertEmpleada)upsertEmpleada({...updated,_updatedAt:new Date().toISOString()});return next;});setEditId(null);};
+  const save2=()=>{setEmpleadas(prev=>{const next=prev.map(e=>e.id===editId?{...e,...ed,metaVentas:parseInt(ed.metaVentas)||20,montoBonus:parseFloat(ed.montoBonus)||0,bonoGrupal:!!ed.bonoGrupal}:e);const updated=next.find(e=>e.id===editId);if(updated&&upsertEmpleada)upsertEmpleada({...updated,_updatedAt:new Date().toISOString()});return next;});setEditId(null);};
   const stats=empleadas.map(e=>{const mv=ventas.filter(v=>v.empleadaId===e.id&&mesK(v.fecha)===mes);return{...e,vm:mv.length,tm:mv.reduce((a,v)=>a+v.total,0)};});
   return(<div style={S.panel}>
     <h2 style={S.ptitle}>👩 Equipo & Bonos</h2>
@@ -1342,13 +1466,17 @@ function Equipo({empleadas,setEmpleadas,ventas,esAdmin,upsertEmpleada}){
                   <div><label style={S.lbl}>Meta ventas/mes</label><input type="number" style={S.inp} value={ed.metaVentas||20} onChange={ev=>setEd({...ed,metaVentas:ev.target.value})}/></div>
                   <div><label style={S.lbl}>Bono ($)</label><input type="number" style={S.inp} value={ed.montoBonus||0} onChange={ev=>setEd({...ed,montoBonus:ev.target.value})}/></div>
                 </div>
+                <label style={{display:"flex",alignItems:"center",gap:8,fontSize:13,marginTop:4,cursor:"pointer"}}>
+                  <input type="checkbox" checked={!!ed.bonoGrupal} onChange={ev=>setEd({...ed,bonoGrupal:ev.target.checked})}/>
+                  🎯 Participa en el bono grupal (meta mensual)
+                </label>
               </div>
               <div style={{display:"flex",gap:8}}><button style={{...S.btnP,flex:1}} onClick={save2}>✓ Guardar</button><button style={S.btnC} onClick={()=>setEditId(null)}>Cancelar</button></div>
             </div>
           ):(
             <>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div><div style={{fontWeight:700,fontSize:15}}>{e.nombre}</div><div style={{fontSize:12,color:"#888"}}>{e.vm} ventas este mes</div>{esAdmin&&<div style={{fontSize:11,color:"#4db6e4"}}>Meta: {meta} · Bono: ${e.montoBonus||0}</div>}</div>
+                <div><div style={{fontWeight:700,fontSize:15}}>{e.nombre}</div><div style={{fontSize:12,color:"#888"}}>{e.vm} ventas este mes</div>{esAdmin&&<div style={{fontSize:11,color:"#4db6e4"}}>Meta: {meta} · Bono: ${e.montoBonus||0}{e.bonoGrupal?" · 🎯 En bono grupal":""}</div>}</div>
                 <div style={{display:"flex",gap:6}}>
                   {bono&&<div style={{...S.badge,background:"#fff8e1",color:"#f59e0b"}}>🌟 {esAdmin?`$${e.montoBonus||0}`:"¡Bono!"}</div>}
                   {esAdmin&&<button style={S.btnS} onClick={()=>{setEditId(e.id);setEd({...e});}}>✏️</button>}
@@ -2818,6 +2946,8 @@ const { data: salidasCaja, setData: setSalidasCaja, upsert: upsertSalida } = use
 const { data: cajas, upsert: upsertCaja, nube } = useCollection("cajas", "ll_cajas", []);
 const { data: cupones, setData: setCupones, upsert: upsertCupon } = useCollection("cupones", "ll_cupones", []);
 const { data: promos, setData: setPromos, upsert: upsertPromo } = useCollection("promos", "ll_promos", []);
+const { data: incentivosArr, setData: setIncentivosArr, upsert: upsertIncentivo } = useCollection("configIncentivos", "ll_config_incentivos", INCENTIVOS_DEFAULT);
+const cfgInc = incentivosArr[0] || INCENTIVOS_DEFAULT[0];
 const [showSalida,setShowSalida]=useState(false);
   const [ticketV,setTicketV]=useState(null);
   const [cuponSug,setCuponSug]=useState(null); // 🎟️ cupón sugerido tras imprimir la venta
@@ -2877,7 +3007,7 @@ const [showSalida,setShowSalida]=useState(false);
     empleadas={empleadas}
     upsertCaja={upsertCaja}
   />;
-  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={serviciosActivos} sesion={sesion} addAbono={addAbono} onLogout={onLogout} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} upsertVenta={upsertVenta} upsertSalida={upsertSalida} upsertCliente={upsertCliente} upsertCaja={upsertCaja} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos}/>;
+  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={serviciosActivos} sesion={sesion} addAbono={addAbono} onLogout={onLogout} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} upsertVenta={upsertVenta} upsertSalida={upsertSalida} upsertCliente={upsertCliente} upsertCaja={upsertCaja} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos} cfgInc={cfgInc}/>;
   const tabs=[
     {id:"ventas",icon:"🧾",l:"Venta"},{id:"historial",icon:"📋",l:"Historial"},
     {id:"pendientes",icon:"⏳",l:"Pendientes",b:pCount},{id:"bi",icon:"🚀",l:"Dashboard"},
@@ -2885,7 +3015,7 @@ const [showSalida,setShowSalida]=useState(false);
     {id:"reportes",icon:"📊",l:"Reportes"},{id:"depositos",icon:"🏦",l:"Depósitos"},
     {id:"conciliacion",icon:"🏛️",l:"Conciliación"},
     {id:"gastos",icon:"🛒",l:"Gastos"},{id:"inventario",icon:"📦",l:"Inventario"},
-    {id:"equipo",icon:"👩",l:"Equipo"},{id:"caja",icon:"💰",l:"Caja"},
+    {id:"equipo",icon:"👩",l:"Equipo"},{id:"incentivosAdmin",icon:"🎯",l:"Incentivos"},{id:"caja",icon:"💰",l:"Caja"},
     {id:"config",icon:"⚙️",l:"Config"},{id:"usuarios",icon:"🔑",l:"Usuarios"},
   ];
   return(<div style={S.app}>
@@ -2919,6 +3049,7 @@ const [showSalida,setShowSalida]=useState(false);
       {tab==="gastos"&&<Gastos gastos={gastos} setGastos={setGastos} sesion={sesion} upsertGasto={upsertGasto}/>}
       {tab==="inventario"&&<Inventario inventario={inventario} setInventario={setInventario} upsertInventario={upsertInventario}/>}
       {tab==="equipo"&&<Equipo empleadas={empleadas} setEmpleadas={setEmpleadas} ventas={ventas} esAdmin={esAdmin} upsertEmpleada={upsertEmpleada}/>}
+      {tab==="incentivosAdmin"&&<IncentivosAdmin cfgInc={cfgInc} setIncentivosArr={setIncentivosArr} upsertIncentivo={upsertIncentivo} ventas={ventas} empleadas={empleadas}/>}
       {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={handleCierreListo} onResetCierre={()=>setCierreOk(false)} sesion={sesion} salidasCaja={salidasCaja} setVentas={setVentas} upsertVenta={upsertVenta} upsertCaja={upsertCaja}/>}
       {tab==="config"&&<Configuracion servicios={servicios} setServicios={setServicios} exportarDatos={exportarDatos} importarDatos={importarDatos} upsertVenta={upsertVenta} upsertServicio={upsertServicio}/>}
       {tab==="usuarios"&&<GestionUsuarios/>}
