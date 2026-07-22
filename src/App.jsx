@@ -986,6 +986,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
           <select style={S.inp} value={empId} onChange={e=>setEmpId(parseInt(e.target.value))}>
             {empleadas.filter(e=>e.activa).map(e=><option key={e.id} value={e.id}>{e.nombre}</option>)}
           </select>
+          <div style={{fontSize:10,color:"#c00",marginTop:4,fontFamily:"monospace"}}>🔧 DEBUG · sesion.nombre="{sesion?.nombre}" · empDef="{empDef?.nombre||"ninguno"}"</div>
         </div>
         <div style={{marginTop:8}}><label style={S.lbl}>Notas</label><textarea style={{...S.inp,minHeight:56,resize:"vertical"}} placeholder="Instrucciones..." value={notas} onChange={e=>setNotas(e.target.value)}/></div>
       </Card>
