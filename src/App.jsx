@@ -78,6 +78,8 @@ const fmt=d=>new Date(d).toLocaleString("es-MX",{day:"2-digit",month:"short",yea
 const fmtD=d=>new Date(d).toLocaleDateString("es-MX",{day:"2-digit",month:"short",year:"numeric"});
 const semISO=d=>{const dt=new Date(d);dt.setHours(0,0,0,0);dt.setDate(dt.getDate()+3-((dt.getDay()+6)%7));const w1=new Date(dt.getFullYear(),0,4);return dt.getFullYear()+"-W"+String(1+Math.round(((dt-w1)/86400000-3+((w1.getDay()+6)%7))/7)).padStart(2,"0");};
 const mesK=d=>{const dt=new Date(d);return dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0");};
+// 🔧 Normaliza nombres para comparar sin importar tildes, mayúsculas o espacios extra (usuario vs empleada)
+const normNombre=s=>(s||"").toString().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g," ").trim().toLowerCase();
 const saldo=v=>v.total-(v.abonos||[]).reduce((a,ab)=>a+ab.monto,0);
 const pagada=v=>saldo(v)<=0;
 const getEst=v=>ESTADOS.find(e=>e.id===(v.estado||"recibido"))||ESTADOS[0];
@@ -466,8 +468,13 @@ function MisIncentivos({ventas,empleadas,sesion,cfgInc}){
   const bonoExcedenteTotal=excedente>0?excedente*((cfgInc.bonoExcedentePct||0)/100):0;
   const miBonoMeta=bonoMetaTotal/nActivas;
   const miBonoExcedente=bonoExcedenteTotal/nActivas;
+  // 🔧 Mi registro real de empleada (el login/usuario y el registro de empleada usan IDs distintos, por eso se resuelve por nombre)
+  const miEmpleada=empleadas.find(e=>normNombre(e.nombre)&&normNombre(e.nombre)===normNombre(sesion?.nombre))
+    ||empleadas.find(e=>normNombre(e.nombre)&&(normNombre(sesion?.nombre).includes(normNombre(e.nombre))||normNombre(e.nombre).includes(normNombre(sesion?.nombre))))
+    ||empleadas.find(e=>String(e.id)===String(sesion?.id));
+  const miId=miEmpleada?miEmpleada.id:sesion?.id;
   // Mis impulsaciones del mes (ventas donde YO impulsé una promo)
-  const misVentasConImp=vMes.filter(v=>v.empleadaId===sesion.id&&(v.impulsos||[]).length>0);
+  const misVentasConImp=vMes.filter(v=>v.empleadaId===miId&&(v.impulsos||[]).length>0);
   const misImpulsos=misVentasConImp.reduce((a,v)=>a+(v.impulsos||[]).length,0);
   const comisionImpulso=cfgInc.comisionImpulso||0;
   const miGananciaImpulsos=misImpulsos*comisionImpulso;
@@ -759,7 +766,8 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
   const [cQ,setCQ]=useState("");const [cId,setCId]=useState(null);
   const [nC,setNC]=useState({nombre:"",tel:"",cedula:"",email:"",rfc:"",direccion:"",nacimiento:""});
   const [mC,setMC]=useState("buscar");
-  const empDef=empleadas.find(e=>e.nombre&&sesion?.nombre&&e.nombre.trim().toLowerCase()===sesion.nombre.trim().toLowerCase())
+  const empDef=empleadas.find(e=>normNombre(e.nombre)&&normNombre(e.nombre)===normNombre(sesion?.nombre))
+    ||empleadas.find(e=>normNombre(e.nombre)&&(normNombre(sesion?.nombre).includes(normNombre(e.nombre))||normNombre(e.nombre).includes(normNombre(sesion?.nombre))))
     ||empleadas.find(e=>String(e.id)===String(sesion?.id))
     ||empleadas[0];
   const [empId,setEmpId]=useState(empDef?.id||null);
