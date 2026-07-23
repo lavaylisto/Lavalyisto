@@ -717,6 +717,7 @@ const promosDeHoy=(promos,servicios)=>{
     if(p.activa===false)return null;
     if(p.tipo==="descuento")return{...p,precioTxt:`-$${(p.monto||0).toFixed(2)}`};
     if(p.tipo==="custom")return{...p,precioTxt:`$${(p.precio||0).toFixed(2)}`};
+    if(p.tipo==="segundo50")return{...p,precioTxt:`-${p.pct||50}% (2da unidad)`};
     const s=servicios.find(x=>x.id===p.servId&&!x.eliminada);
     if(!s)return null; // si el servicio ya no existe, la promo no se muestra
     return{...p,precioTxt:`$${s.precio.toFixed(2)}`,detalle:p.detalle};
@@ -726,6 +727,36 @@ const promosDeHoy=(promos,servicios)=>{
     .sort((a,b)=>((a.dias&&a.dias.length)?0:1)-((b.dias&&b.dias.length)?0:1)) // primero las exclusivas de hoy
     .map(resolver).filter(Boolean).slice(0,PROMOS_MAX);
 };
+
+function SegundaUnidadPicker({promo,servicios,onElegir,onCancelar}){
+  const filtro=(promo.filtro||"").toUpperCase().trim();
+  const opciones=servicios.filter(s=>!s.eliminada&&(!filtro||s.label.toUpperCase().includes(filtro)));
+  const pct=promo.pct||50;
+  return(
+    <div style={{...S.ov,zIndex:95}}>
+      <div style={{background:"#fff",borderRadius:18,width:"100%",maxWidth:380,maxHeight:"85vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,.35)"}}>
+        <div style={{background:"linear-gradient(135deg,#1a3c5e,#2563a8)",borderRadius:"18px 18px 0 0",padding:"18px 20px",textAlign:"center"}}>
+          <div style={{fontSize:36}}>{promo.emoji||"🎁"}</div>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:19,fontWeight:700,color:"#fff"}}>{promo.titulo}</div>
+          <div style={{fontSize:12,color:"#a0c4da"}}>¿Cuál es la segunda unidad? (-{pct}%)</div>
+        </div>
+        <div style={{padding:"14px 16px"}}>
+          {opciones.length===0&&<div style={{textAlign:"center",color:"#888",fontSize:13,padding:"10px 0"}}>No hay servicios que coincidan con "{promo.filtro}". Revisa la palabra clave de esta promo en el panel admin.</div>}
+          {opciones.map(s=>(
+            <button key={s.id} onClick={()=>onElegir(s)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",width:"100%",textAlign:"left",background:"#f8fbfd",border:"1.5px solid #e8f0f7",borderRadius:12,padding:"12px 14px",marginBottom:8,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+              <div style={{fontWeight:700,fontSize:14,color:"#1a3c5e"}}>{s.label}</div>
+              <div style={{textAlign:"right",flexShrink:0}}>
+                <div style={{fontSize:11,color:"#c62828",textDecoration:"line-through"}}>${s.precio.toFixed(2)}</div>
+                <div style={{fontWeight:800,fontSize:15,color:"#2e7d32"}}>${(s.precio*(1-pct/100)).toFixed(2)}</div>
+              </div>
+            </button>
+          ))}
+          <button style={{...S.btnC,width:"100%"}} onClick={onCancelar}>Cancelar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function PromosDelDia({promos,servicios,onAgregar,onCerrar}){
   const activas=promosDeHoy(promos,servicios);
@@ -779,6 +810,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
   const [showPromos,setShowPromos]=useState(false); // 🎁 sale al tocar "Registrar venta"
   const [promoOfrecida,setPromoOfrecida]=useState(false); // ya se ofreció en esta venta
   const [impulsos,setImpulsos]=useState([]); // 🎯 promos impulsadas en esta venta (para métricas por colaboradora)
+  const [segundaPromoActiva,setSegundaPromoActiva]=useState(null); // 🔁 promo "2da unidad al %" esperando que elijan el servicio
   const [cupInput,setCupInput]=useState("");const [cupApl,setCupApl]=useState(null);const [cupErr,setCupErr]=useState(""); // 🎟️ cupón
   const [descCumple,setDescCumple]=useState(false); // 🎂 10% cumpleaños
   const cFilt=clientes.filter(c=>c.nombre.toLowerCase().includes(cQ.toLowerCase())||(c.tel&&c.tel.includes(cQ))).slice(0,5);
@@ -805,6 +837,17 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
   const cerrarPromos=()=>setShowPromos(false);
   const posActual=()=>items.reduce((a,it)=>{const pr=it.custom?(parseFloat(it.pC)||0):(servicios.find(s=>s.id===it.servId)?.precio||0);const sub=pr*(it.piezas||1);return a+(sub>0?sub:0);},0);
   const agregarPromo=p=>{
+    if(p.tipo==="segundo50"){
+      const filtro=(p.filtro||"").toUpperCase().trim();
+      const hayBase=items.some(it=>!it.custom&&!it.deCupon&&(()=>{const s=servicios.find(x=>x.id===it.servId);return s&&(!filtro||s.label.toUpperCase().includes(filtro));})());
+      if(!hayBase){
+        alert(`Agrega primero el servicio (ej. edredón) a la venta antes de aplicar el descuento de la segunda unidad. 🛒`);
+        return;
+      }
+      cerrarPromos();
+      setSegundaPromoActiva(p);
+      return;
+    }
     if(p.tipo==="descuento"&&posActual()<(p.minCompra||CUPON_MIN_COMPRA_DESC)){
       alert(`El descuento de $${p.monto.toFixed(2)} aplica en compras desde $${(p.minCompra||CUPON_MIN_COMPRA_DESC).toFixed(2)}. Agrega primero los servicios del cliente. 🛒`);
       return;
@@ -823,6 +866,14 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
       });
     }
     cerrarPromos();
+  };
+  const elegirSegundaUnidad=s=>{
+    const p=segundaPromoActiva;if(!p)return;
+    const pct=p.pct||50;
+    const precioProm=s.precio*(1-pct/100);
+    setItems(prev=>[...prev,{servId:s.id,piezas:1,custom:true,lC:`🎉 ${p.titulo} · ${s.label}`,pC:precioProm.toFixed(2)}]);
+    setImpulsos(prev=>[...prev,{promoId:p.id,titulo:p.titulo,fecha:new Date().toISOString()}]); // 🎯 impulsación registrada
+    setSegundaPromoActiva(null);
   };
   const reg=(saltarPromos=false)=>{
     // 🎁 Antes de cerrar la venta: recordar las promos del día (1 vez por venta)
@@ -1059,6 +1110,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
       </div>
       </div>
       {showPromos&&!waVenta&&<PromosDelDia promos={promos} servicios={servicios} onAgregar={agregarPromo} onCerrar={()=>{setShowPromos(false);reg(true);}}/>}
+      {segundaPromoActiva&&<SegundaUnidadPicker promo={segundaPromoActiva} servicios={servicios} onElegir={elegirSegundaUnidad} onCancelar={()=>setSegundaPromoActiva(null)}/>}
       {waVenta&&<WhatsAppObligatorio venta={waVenta} tipo="recibido" onConfirm={confirmarWaRecibido}/>}
     </div>
   );
@@ -2211,7 +2263,7 @@ function CuponSugerido({venta,clientes,ventas,cupones,setCupones,upsertCupon,ses
 // 🎁 PROMOS: administración completa (crear, editar, activar/desactivar,
 // eliminar) — reemplaza la lista fija; todo se guarda en la nube.
 // ═══════════════════════════════════════════════════════════════════
-const PROMO_VACIA={tipo:"custom",emoji:"🎁",titulo:"",detalle:"",precio:"",antes:"",monto:"",minCompra:"",claves:"",dias:[]};
+const PROMO_VACIA={tipo:"custom",emoji:"🎁",titulo:"",detalle:"",precio:"",antes:"",monto:"",minCompra:"",claves:"",dias:[],filtro:"",pct:"50"};
 function PromosAdmin({promos,setPromos,upsertPromo,servicios}){
   const [form,setForm]=useState(PROMO_VACIA);
   const [editId,setEditId]=useState(null);
@@ -2220,6 +2272,7 @@ function PromosAdmin({promos,setPromos,upsertPromo,servicios}){
     if(!form.titulo.trim()){alert("Escribe el título de la promo");return;}
     if(form.tipo==="custom"&&!form.precio){alert("Escribe el precio de la promo");return;}
     if(form.tipo==="descuento"&&!form.monto){alert("Escribe el monto del descuento");return;}
+    if(form.tipo==="segundo50"&&!form.filtro.trim()){alert("Escribe la palabra clave del servicio (ej. EDREDON)");return;}
     const claves=form.claves.split(",").map(s=>s.trim()).filter(Boolean);
     const base={
       id:editId||("promo_"+Date.now()),
@@ -2231,6 +2284,8 @@ function PromosAdmin({promos,setPromos,upsertPromo,servicios}){
       monto:form.tipo==="descuento"?parseFloat(form.monto)||0:null,
       minCompra:form.tipo==="descuento"&&form.minCompra?parseFloat(form.minCompra):null,
       labelDescuento:form.tipo==="descuento"?`🎁 PROMO: -$${(parseFloat(form.monto)||0).toFixed(2)} · ${form.titulo.toUpperCase()}`:null,
+      filtro:form.tipo==="segundo50"?form.filtro.trim():null,
+      pct:form.tipo==="segundo50"?(parseFloat(form.pct)||50):null,
       _updatedAt:new Date().toISOString()
     };
     setPromos(prev=>{
@@ -2247,7 +2302,8 @@ function PromosAdmin({promos,setPromos,upsertPromo,servicios}){
       tipo:p.tipo,emoji:p.emoji||"🎁",titulo:p.titulo||"",detalle:p.detalle||"",
       precio:p.precio!=null?String(p.precio):"",antes:p.antes!=null?String(p.antes):"",
       monto:p.monto!=null?String(p.monto):"",minCompra:p.minCompra!=null?String(p.minCompra):"",
-      claves:(p.claves||[]).join(", "),dias:p.dias||[]
+      claves:(p.claves||[]).join(", "),dias:p.dias||[],
+      filtro:p.filtro||"",pct:p.pct!=null?String(p.pct):"50"
     });
   };
   const cancelar=()=>{setEditId(null);setForm(PROMO_VACIA);};
@@ -2268,6 +2324,7 @@ function PromosAdmin({promos,setPromos,upsertPromo,servicios}){
       <div style={{display:"flex",gap:6,marginBottom:10}}>
         <button style={{...S.pill,flex:1,...(form.tipo==="custom"?S.pillA:{})}} onClick={()=>setForm({...form,tipo:"custom"})}>💲 Precio especial</button>
         <button style={{...S.pill,flex:1,...(form.tipo==="descuento"?S.pillA:{})}} onClick={()=>setForm({...form,tipo:"descuento"})}>➖ Descuento en $</button>
+        <button style={{...S.pill,flex:1,...(form.tipo==="segundo50"?S.pillA:{})}} onClick={()=>setForm({...form,tipo:"segundo50"})}>🔁 2da unidad a %</button>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"60px 1fr",gap:8,marginBottom:8}}>
         <input style={{...S.inp,textAlign:"center",fontSize:20}} placeholder="🎁" value={form.emoji} onChange={e=>setForm({...form,emoji:e.target.value})}/>
@@ -2279,10 +2336,18 @@ function PromosAdmin({promos,setPromos,upsertPromo,servicios}){
           <div><label style={S.lbl}>Precio de la promo</label><input type="number" style={S.inp} placeholder="5.99" value={form.precio} onChange={e=>setForm({...form,precio:e.target.value})}/></div>
           <div><label style={S.lbl}>Precio antes (tachado, opcional)</label><input type="number" style={S.inp} placeholder="7.00" value={form.antes} onChange={e=>setForm({...form,antes:e.target.value})}/></div>
         </div>
-      ):(
+      ):form.tipo==="descuento"?(
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
           <div><label style={S.lbl}>Monto del descuento</label><input type="number" style={S.inp} placeholder="1.00" value={form.monto} onChange={e=>setForm({...form,monto:e.target.value})}/></div>
           <div><label style={S.lbl}>Compra mínima (opcional)</label><input type="number" style={S.inp} placeholder={`Por defecto $${CUPON_MIN_COMPRA_DESC.toFixed(2)}`} value={form.minCompra} onChange={e=>setForm({...form,minCompra:e.target.value})}/></div>
+        </div>
+      ):(
+        <div style={{marginBottom:8}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:6}}>
+            <div><label style={S.lbl}>Palabra clave del servicio</label><input style={S.inp} placeholder="ej. EDREDON" value={form.filtro} onChange={e=>setForm({...form,filtro:e.target.value})}/></div>
+            <div><label style={S.lbl}>% de descuento (2da unidad)</label><input type="number" style={S.inp} placeholder="50" value={form.pct} onChange={e=>setForm({...form,pct:e.target.value})}/></div>
+          </div>
+          <div style={{fontSize:11,color:"#888"}}>Aplica al 2do servicio de cualquier precio cuyo nombre contenga esa palabra (ej. "EDREDON" agrupa las 3 opciones de edredón sin importar el tamaño). La empleada elige cuál es la 2da unidad al momento de la venta, y solo se habilita si ya agregó la primera unidad a la venta.</div>
         </div>
       )}
       <label style={S.lbl}>¿Qué días aplica?</label>
@@ -2308,7 +2373,7 @@ function PromosAdmin({promos,setPromos,upsertPromo,servicios}){
               <div style={{fontWeight:700,fontSize:14}}>{p.emoji} {p.titulo} {p.activa===false&&<span style={{...S.badge,background:"#eee",color:"#888",fontSize:10}}>Inactiva</span>}</div>
               <div style={{fontSize:11,color:"#888"}}>{p.detalle}</div>
               <div style={{fontSize:11,color:"#4db6e4",marginTop:3}}>
-                {p.tipo==="descuento"?`Descuento -$${(p.monto||0).toFixed(2)}${p.minCompra?` · mín. $${p.minCompra.toFixed(2)}`:""}`:`$${(p.precio||0).toFixed(2)}${p.antes?` (antes $${p.antes.toFixed(2)})`:""}`}
+                {p.tipo==="descuento"?`Descuento -$${(p.monto||0).toFixed(2)}${p.minCompra?` · mín. $${p.minCompra.toFixed(2)}`:""}`:p.tipo==="segundo50"?`2da unidad "${p.filtro}" a -${p.pct||50}%`:`$${(p.precio||0).toFixed(2)}${p.antes?` (antes $${p.antes.toFixed(2)})`:""}`}
                 {" · "}{(!p.dias||p.dias.length===0)?"Todos los días":p.dias.map(d=>DOW_LBL[d]).join(", ")}
               </div>
               {p.claves&&p.claves.length>0&&<div style={{fontSize:10,color:"#aaa",marginTop:2}}>🎯 {p.claves.join(", ")}</div>}
