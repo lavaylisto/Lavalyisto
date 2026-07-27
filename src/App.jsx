@@ -559,14 +559,19 @@ function IncentivosAdmin({cfgInc,setIncentivosArr,upsertIncentivo,ventas,emplead
 }
 
 function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta,upsertSalida,upsertCliente,upsertCaja,cupones,setCupones,upsertCupon,promos,cfgInc}){
-  const hoy=fechaHoyLocal();
   const [tab,setTab]=useState("hoy");const [busq,setBusq]=useState("");
-  const [fecha,setFecha]=useState(hoy);const [showNueva,setShowNueva]=useState(false);
-  const [showCaja,setShowCaja]=useState(false);const [ticket,setTicket]=useState(null);const [cuponSugE,setCuponSugE]=useState(null);const [showSalidaEmp,setShowSalidaEmp]=useState(false);  const vFecha=ventas.filter(v=>fechaLocal(v.fecha)===fecha&&!v.anulada);
-  const vHoy=ventas.filter(v=>fechaLocal(v.fecha)===hoy&&!v.anulada);
+  const [showNueva,setShowNueva]=useState(false);
+  const [showCaja,setShowCaja]=useState(false);const [ticket,setTicket]=useState(null);const [cuponSugE,setCuponSugE]=useState(null);const [showSalidaEmp,setShowSalidaEmp]=useState(false);
+  // 📋 Todas las órdenes pendientes del negocio (sin importar fecha ni empleada), ordenadas Recibido → En proceso → Listo
+  const pendientes=ventas.filter(v=>!v.anulada&&(v.estado||"recibido")!=="entregado").sort((a,b)=>{
+    const oa=ESTADOS.findIndex(e=>e.id===(a.estado||"recibido"));
+    const ob=ESTADOS.findIndex(e=>e.id===(b.estado||"recibido"));
+    if(oa!==ob)return oa-ob;
+    return new Date(b.fecha)-new Date(a.fecha);
+  });
   const porCob=ventas.filter(v=>!pagada(v)&&!v.anulada);
   const porEnt=ventas.filter(v=>pagada(v)&&!v.anulada&&(v.estado||"recibido")!=="entregado");
-  const lista=tab==="cobrar"?porCob:tab==="entregar"?porEnt:vFecha;
+  const lista=tab==="cobrar"?porCob:tab==="entregar"?porEnt:pendientes;
   const filtrados=busq?lista.filter(v=>v.clienteNombre?.toLowerCase().includes(busq.toLowerCase())||v.folio.toLowerCase().includes(busq.toLowerCase())):lista;
   return(
     <div style={{fontFamily:"'DM Sans',sans-serif",minHeight:"100vh",background:"#f0f4f8",paddingBottom:40}}>
@@ -588,7 +593,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         </div>
       </div>
       <div style={{background:"#fff",display:"flex",borderBottom:"2px solid #e8f0f7",position:"sticky",top:0,zIndex:10}}>
-        {[{id:"hoy",l:"📋 Ordenes",c:vHoy.length},{id:"cobrar",l:"💸 Cobrar",c:porCob.length},{id:"entregar",l:"📦 Entregar",c:porEnt.length},{id:"bonos",l:"📈 Bonos"},{id:"nueva",l:"➕ Nueva"}].map(t=>(
+        {[{id:"hoy",l:"📋 Ordenes",c:pendientes.length},{id:"cobrar",l:"💸 Cobrar",c:porCob.length},{id:"entregar",l:"📦 Entregar",c:porEnt.length},{id:"bonos",l:"📈 Bonos"},{id:"nueva",l:"➕ Nueva"}].map(t=>(
           <button key={t.id} style={{flex:1,padding:"12px 4px",border:"none",background:"transparent",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:tab===t.id?700:500,color:tab===t.id?"#1a3c5e":"#888",borderBottom:tab===t.id?"2px solid #4db6e4":"none",marginBottom:-2,fontSize:11,position:"relative"}}
             onClick={()=>t.id==="nueva"?setShowNueva(true):setTab(t.id)}>
             {t.l}{t.c>0&&<span style={{position:"absolute",top:5,right:3,background:"#e53935",color:"#fff",borderRadius:10,fontSize:9,fontWeight:800,padding:"1px 4px"}}>{t.c}</span>}
@@ -598,12 +603,11 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
       <div style={{padding:12}}>
         {tab!=="bonos"&&(<div style={{display:"flex",gap:8,marginBottom:12}}>
           <input style={{...S.inp,flex:1}} placeholder="🔍 Buscar cliente o folio..." value={busq} onChange={e=>setBusq(e.target.value)}/>
-          {tab==="hoy"&&<input type="date" style={{...S.inp,width:140}} value={fecha} onChange={e=>setFecha(e.target.value)}/>}
         </div>)}
         {tab==="hoy"&&(
           <div style={{display:"flex",gap:8,marginBottom:12,overflowX:"auto"}}>
-            {ESTADOS.map(est=>{
-              const cnt=vFecha.filter(v=>(v.estado||"recibido")===est.id).length;
+            {ESTADOS.filter(est=>est.id!=="entregado").map(est=>{
+              const cnt=pendientes.filter(v=>(v.estado||"recibido")===est.id).length;
               return <div key={est.id} style={{background:est.bg,borderRadius:10,padding:"8px 10px",textAlign:"center",minWidth:70,border:`1.5px solid ${est.color}`,flexShrink:0}}>
                 <div style={{fontSize:16}}>{est.icon}</div>
                 <div style={{fontWeight:800,fontSize:18,color:est.color}}>{cnt}</div>
