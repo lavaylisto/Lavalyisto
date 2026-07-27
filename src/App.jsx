@@ -561,21 +561,25 @@ function IncentivosAdmin({cfgInc,setIncentivosArr,upsertIncentivo,ventas,emplead
 function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta,upsertSalida,upsertCliente,upsertCaja,cupones,setCupones,upsertCupon,promos,cfgInc}){
   const [tab,setTab]=useState("hoy");const [busq,setBusq]=useState("");
   const [showNueva,setShowNueva]=useState(false);
+  const [filtroTile,setFiltroTile]=useState(null); // 🔎 filtro rápido al tocar un contador (recibido/proceso/listo/entregado_pend)
   const [showCaja,setShowCaja]=useState(false);const [ticket,setTicket]=useState(null);const [cuponSugE,setCuponSugE]=useState(null);const [showSalidaEmp,setShowSalidaEmp]=useState(false);
   // 📋 Todas las órdenes pendientes del negocio (sin importar fecha ni empleada), ordenadas Recibido → En proceso → Listo → Entregado (sin cobrar)
   // 🔒 Solo desaparece cuando está Entregada Y además pagada por completo — si falta cobrar, se queda visible como pendiente
-  const pendientes=ventas.filter(v=>!v.anulada&&!((v.estado||"recibido")==="entregado"&&pagada(v))).sort((a,b)=>{
+  const pendientesRaw=ventas.filter(v=>!v.anulada&&!((v.estado||"recibido")==="entregado"&&pagada(v))).sort((a,b)=>{
     const oa=ESTADOS.findIndex(e=>e.id===(a.estado||"recibido"));
     const ob=ESTADOS.findIndex(e=>e.id===(b.estado||"recibido"));
     if(oa!==ob)return oa-ob;
     return new Date(b.fecha)-new Date(a.fecha);
   });
+  // 🔎 Si tocaron un contador (tile), filtra la lista de Ordenes solo a ese grupo
+  const pendientes=!filtroTile?pendientesRaw:pendientesRaw.filter(v=>filtroTile==="entregado_pend"?(v.estado||"recibido")==="entregado":(v.estado||"recibido")===filtroTile);
   // 💸 Pestaña "Recibido" = solo estado "recibido"
   const porCob=ventas.filter(v=>!v.anulada&&(v.estado||"recibido")==="recibido");
   // 🔄 Pestaña "En proceso" = solo estado "proceso"
   const porProc=ventas.filter(v=>!v.anulada&&(v.estado||"recibido")==="proceso");
   // 📦 Pestaña "Listo para retirar" = órdenes cuyo estado ya es "listo"
   const porEnt=ventas.filter(v=>!v.anulada&&(v.estado||"recibido")==="listo");
+  const porEntregadoPend=pendientesRaw.filter(v=>(v.estado||"recibido")==="entregado");
   const lista=tab==="cobrar"?porCob:tab==="proceso"?porProc:tab==="entregar"?porEnt:pendientes;
   const filtrados=busq?lista.filter(v=>v.clienteNombre?.toLowerCase().includes(busq.toLowerCase())||v.folio.toLowerCase().includes(busq.toLowerCase())):lista;
   return(
@@ -598,7 +602,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         </div>
       </div>
       <div style={{background:"#fff",display:"flex",borderBottom:"2px solid #e8f0f7",position:"sticky",top:0,zIndex:10}}>
-        {[{id:"hoy",l:"📋 Ordenes",c:pendientes.length},{id:"cobrar",l:"💸 Recibido",c:porCob.length},{id:"proceso",l:"🔄 En proceso",c:porProc.length},{id:"entregar",l:"📦 Listo para retirar",c:porEnt.length},{id:"bonos",l:"📈 Bonos"},{id:"nueva",l:"➕ Nuevo"}].map(t=>(
+        {[{id:"hoy",l:"📋 Ordenes",c:pendientesRaw.length},{id:"cobrar",l:"💸 Recibido",c:porCob.length},{id:"proceso",l:"🔄 En proceso",c:porProc.length},{id:"entregar",l:"📦 Listo para retirar",c:porEnt.length},{id:"bonos",l:"📈 Bonos"},{id:"nueva",l:"➕ Nuevo"}].map(t=>(
           <button key={t.id} style={{flex:1,padding:"12px 4px",border:"none",background:"transparent",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:tab===t.id?700:500,color:tab===t.id?"#1a3c5e":"#888",borderBottom:tab===t.id?"2px solid #4db6e4":"none",marginBottom:-2,fontSize:11,position:"relative"}}
             onClick={()=>t.id==="nueva"?setShowNueva(true):setTab(t.id)}>
             {t.l}{t.c>0&&<span style={{position:"absolute",top:5,right:3,background:"#e53935",color:"#fff",borderRadius:10,fontSize:9,fontWeight:800,padding:"1px 4px"}}>{t.c}</span>}
@@ -609,25 +613,27 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         {tab!=="bonos"&&(<div style={{display:"flex",gap:8,marginBottom:12}}>
           <input style={{...S.inp,flex:1}} placeholder="🔍 Buscar cliente o folio..." value={busq} onChange={e=>setBusq(e.target.value)}/>
         </div>)}
-        {tab==="hoy"&&(
-          <div style={{display:"flex",gap:8,marginBottom:12,overflowX:"auto"}}>
+        {tab==="hoy"&&(<>
+          <div style={{display:"flex",gap:8,marginBottom:6,overflowX:"auto"}}>
             {ESTADOS.filter(est=>est.id!=="entregado").map(est=>{
-              const cnt=pendientes.filter(v=>(v.estado||"recibido")===est.id).length;
-              return <div key={est.id} style={{background:est.bg,borderRadius:10,padding:"8px 10px",textAlign:"center",minWidth:70,border:`1.5px solid ${est.color}`,flexShrink:0}}>
+              const cnt=pendientesRaw.filter(v=>(v.estado||"recibido")===est.id).length;
+              const activo=filtroTile===est.id;
+              return <button key={est.id} onClick={()=>setFiltroTile(activo?null:est.id)} style={{background:est.bg,borderRadius:10,padding:"8px 10px",textAlign:"center",minWidth:70,border:`1.5px solid ${est.color}`,flexShrink:0,cursor:"pointer",boxShadow:activo?`0 0 0 2px ${est.color}`:"none",fontFamily:"'DM Sans',sans-serif"}}>
                 <div style={{fontSize:16}}>{est.icon}</div>
                 <div style={{fontWeight:800,fontSize:18,color:est.color}}>{cnt}</div>
                 <div style={{fontSize:9,color:est.color}}>{est.label}</div>
-              </div>;
+              </button>;
             })}
-            {(()=>{const cnt=pendientes.filter(v=>(v.estado||"recibido")==="entregado").length;return cnt>0?(
-              <div style={{background:"#fff3e0",borderRadius:10,padding:"8px 10px",textAlign:"center",minWidth:80,border:"1.5px solid #e65100",flexShrink:0}}>
+            {porEntregadoPend.length>0&&(()=>{const cnt=porEntregadoPend.length;const activo=filtroTile==="entregado_pend";return(
+              <button onClick={()=>setFiltroTile(activo?null:"entregado_pend")} style={{background:"#fff3e0",borderRadius:10,padding:"8px 10px",textAlign:"center",minWidth:80,border:"1.5px solid #e65100",flexShrink:0,cursor:"pointer",boxShadow:activo?"0 0 0 2px #e65100":"none",fontFamily:"'DM Sans',sans-serif"}}>
                 <div style={{fontSize:16}}>💸</div>
                 <div style={{fontWeight:800,fontSize:18,color:"#e65100"}}>{cnt}</div>
                 <div style={{fontSize:9,color:"#e65100"}}>Entregado, falta cobrar</div>
-              </div>
-            ):null;})()}
+              </button>
+            );})()}
           </div>
-        )}
+          {filtroTile&&<div style={{marginBottom:10}}><button onClick={()=>setFiltroTile(null)} style={{background:"none",border:"none",color:"#4db6e4",fontSize:12,fontWeight:700,cursor:"pointer",padding:0}}>✕ Quitar filtro · ver todas</button></div>}
+        </>)}
         {tab==="bonos"
           ?<MisIncentivos ventas={ventas} empleadas={empleadas} sesion={sesion} cfgInc={cfgInc||INCENTIVOS_DEFAULT[0]}/>
           :filtrados.length===0
