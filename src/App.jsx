@@ -562,8 +562,9 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
   const [tab,setTab]=useState("hoy");const [busq,setBusq]=useState("");
   const [showNueva,setShowNueva]=useState(false);
   const [showCaja,setShowCaja]=useState(false);const [ticket,setTicket]=useState(null);const [cuponSugE,setCuponSugE]=useState(null);const [showSalidaEmp,setShowSalidaEmp]=useState(false);
-  // 📋 Todas las órdenes pendientes del negocio (sin importar fecha ni empleada), ordenadas Recibido → En proceso → Listo
-  const pendientes=ventas.filter(v=>!v.anulada&&(v.estado||"recibido")!=="entregado").sort((a,b)=>{
+  // 📋 Todas las órdenes pendientes del negocio (sin importar fecha ni empleada), ordenadas Recibido → En proceso → Listo → Entregado (sin cobrar)
+  // 🔒 Solo desaparece cuando está Entregada Y además pagada por completo — si falta cobrar, se queda visible como pendiente
+  const pendientes=ventas.filter(v=>!v.anulada&&!((v.estado||"recibido")==="entregado"&&pagada(v))).sort((a,b)=>{
     const oa=ESTADOS.findIndex(e=>e.id===(a.estado||"recibido"));
     const ob=ESTADOS.findIndex(e=>e.id===(b.estado||"recibido"));
     if(oa!==ob)return oa-ob;
@@ -618,6 +619,13 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
                 <div style={{fontSize:9,color:est.color}}>{est.label}</div>
               </div>;
             })}
+            {(()=>{const cnt=pendientes.filter(v=>(v.estado||"recibido")==="entregado").length;return cnt>0?(
+              <div style={{background:"#fff3e0",borderRadius:10,padding:"8px 10px",textAlign:"center",minWidth:80,border:"1.5px solid #e65100",flexShrink:0}}>
+                <div style={{fontSize:16}}>💸</div>
+                <div style={{fontWeight:800,fontSize:18,color:"#e65100"}}>{cnt}</div>
+                <div style={{fontSize:9,color:"#e65100"}}>Entregado, falta cobrar</div>
+              </div>
+            ):null;})()}
           </div>
         )}
         {tab==="bonos"
