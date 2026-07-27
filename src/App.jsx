@@ -569,9 +569,13 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
     if(oa!==ob)return oa-ob;
     return new Date(b.fecha)-new Date(a.fecha);
   });
-  const porCob=ventas.filter(v=>!pagada(v)&&!v.anulada);
-  const porEnt=ventas.filter(v=>pagada(v)&&!v.anulada&&(v.estado||"recibido")!=="entregado");
-  const lista=tab==="cobrar"?porCob:tab==="entregar"?porEnt:pendientes;
+  // 💸 Pestaña "Recibido" = solo estado "recibido"
+  const porCob=ventas.filter(v=>!v.anulada&&(v.estado||"recibido")==="recibido");
+  // 🔄 Pestaña "En proceso" = solo estado "proceso"
+  const porProc=ventas.filter(v=>!v.anulada&&(v.estado||"recibido")==="proceso");
+  // 📦 Pestaña "Listo para retirar" = órdenes cuyo estado ya es "listo"
+  const porEnt=ventas.filter(v=>!v.anulada&&(v.estado||"recibido")==="listo");
+  const lista=tab==="cobrar"?porCob:tab==="proceso"?porProc:tab==="entregar"?porEnt:pendientes;
   const filtrados=busq?lista.filter(v=>v.clienteNombre?.toLowerCase().includes(busq.toLowerCase())||v.folio.toLowerCase().includes(busq.toLowerCase())):lista;
   return(
     <div style={{fontFamily:"'DM Sans',sans-serif",minHeight:"100vh",background:"#f0f4f8",paddingBottom:40}}>
@@ -593,7 +597,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         </div>
       </div>
       <div style={{background:"#fff",display:"flex",borderBottom:"2px solid #e8f0f7",position:"sticky",top:0,zIndex:10}}>
-        {[{id:"hoy",l:"📋 Ordenes",c:pendientes.length},{id:"cobrar",l:"💸 Recibido",c:porCob.length},{id:"entregar",l:"📦 Listo para retirar",c:porEnt.length},{id:"bonos",l:"📈 Bonos"},{id:"nueva",l:"➕ Nuevo"}].map(t=>(
+        {[{id:"hoy",l:"📋 Ordenes",c:pendientes.length},{id:"cobrar",l:"💸 Recibido",c:porCob.length},{id:"proceso",l:"🔄 En proceso",c:porProc.length},{id:"entregar",l:"📦 Listo para retirar",c:porEnt.length},{id:"bonos",l:"📈 Bonos"},{id:"nueva",l:"➕ Nuevo"}].map(t=>(
           <button key={t.id} style={{flex:1,padding:"12px 4px",border:"none",background:"transparent",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:tab===t.id?700:500,color:tab===t.id?"#1a3c5e":"#888",borderBottom:tab===t.id?"2px solid #4db6e4":"none",marginBottom:-2,fontSize:11,position:"relative"}}
             onClick={()=>t.id==="nueva"?setShowNueva(true):setTab(t.id)}>
             {t.l}{t.c>0&&<span style={{position:"absolute",top:5,right:3,background:"#e53935",color:"#fff",borderRadius:10,fontSize:9,fontWeight:800,padding:"1px 4px"}}>{t.c}</span>}
@@ -619,7 +623,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         {tab==="bonos"
           ?<MisIncentivos ventas={ventas} empleadas={empleadas} sesion={sesion} cfgInc={cfgInc||INCENTIVOS_DEFAULT[0]}/>
           :filtrados.length===0
-            ?<div style={{textAlign:"center",padding:"40px 20px",color:"#aaa"}}><div style={{fontSize:48,marginBottom:8}}>{tab==="cobrar"?"🎉":"📋"}</div><div>{tab==="cobrar"?"Todo cobrado":tab==="entregar"?"Todo entregado":"Sin ordenes"}</div></div>
+            ?<div style={{textAlign:"center",padding:"40px 20px",color:"#aaa"}}><div style={{fontSize:48,marginBottom:8}}>{tab==="entregar"?"🎉":"📋"}</div><div>{tab==="cobrar"?"Sin órdenes en Recibido":tab==="proceso"?"Nada en proceso":tab==="entregar"?"Nada listo para retirar":"Sin ordenes"}</div></div>
             :filtrados.map(v=><OrdenCard key={v.folio} v={v} setVentas={setVentas} addAbono={addAbono} setTicket={setTicket} upsertVenta={upsertVenta}/>)
         }
       </div>
