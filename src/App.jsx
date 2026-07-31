@@ -75,7 +75,15 @@ const BILLETES=[100,50,20,10,5,1];
 const MONEDAS=[0.50,0.25,0.10,0.05,0.01];
 const folio=()=>"LL-"+Date.now().toString(36).toUpperCase();
 const fmt=d=>new Date(d).toLocaleString("es-MX",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});
-const fmtD=d=>new Date(d).toLocaleDateString("es-MX",{day:"2-digit",month:"short",year:"numeric"});
+// 🔧 Si es una fecha "pura" (ej. "2026-08-01", como v.entrega) se arma como fecha LOCAL en vez de UTC,
+// para que no se recorra un día hacia atrás en husos horarios negativos como Ecuador (UTC-5).
+const fmtD=d=>{
+  if(typeof d==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(d)){
+    const[y,m,day]=d.split("-").map(Number);
+    return new Date(y,m-1,day).toLocaleDateString("es-MX",{day:"2-digit",month:"short",year:"numeric"});
+  }
+  return new Date(d).toLocaleDateString("es-MX",{day:"2-digit",month:"short",year:"numeric"});
+};
 const semISO=d=>{const dt=new Date(d);dt.setHours(0,0,0,0);dt.setDate(dt.getDate()+3-((dt.getDay()+6)%7));const w1=new Date(dt.getFullYear(),0,4);return dt.getFullYear()+"-W"+String(1+Math.round(((dt-w1)/86400000-3+((w1.getDay()+6)%7))/7)).padStart(2,"0");};
 const mesK=d=>{const dt=new Date(d);return dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0");};
 // 🔧 Normaliza nombres para comparar sin importar tildes, mayúsculas o espacios extra (usuario vs empleada)
@@ -190,6 +198,7 @@ const fechaHoyLocal = () => {
 // Convierte cualquier fecha ISO (UTC) a fecha local para comparar
 const fechaLocal = (isoStr) => {
   if (!isoStr) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(isoStr)) return isoStr; // 🔧 ya es fecha local pura (ej. v.entrega) — no convertir, o se recorre un día
   const dt = new Date(isoStr);
   const offset = dt.getTimezoneOffset();
   const local = new Date(dt.getTime() - offset * 60000);
@@ -1077,12 +1086,20 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
           {cupErr&&<div style={{fontSize:12,color:"#c62828",fontWeight:600,marginTop:5}}>{cupErr}</div>}
         </div>
         <div style={{marginTop:10}}><label style={S.lbl}>Fecha de entrega</label><input type="date" style={S.inp} value={entrega} onChange={e=>setEntrega(e.target.value)}/></div>
-        <div style={{marginTop:8}}><label style={S.lbl}>Empleada</label>
-          <select style={S.inp} value={empId} onChange={e=>setEmpId(parseInt(e.target.value))}>
-            {empleadas.filter(e=>e.activa).map(e=><option key={e.id} value={e.id}>{e.nombre}</option>)}
-          </select>
-          <div style={{fontSize:10,color:"#c00",marginTop:4,fontFamily:"monospace"}}>🔧 DEBUG · sesion.nombre="{sesion?.nombre}" · empDef="{empDef?.nombre||"NINGUNO (sin match seguro)"}" · empleadas=[{empleadas.map(e=>e.nombre).join(" | ")}]</div>
-          {!empDef&&<div style={{fontSize:11,color:"#c00",fontWeight:700,marginTop:2}}>⚠️ No se encontró coincidencia automática — selecciona manualmente a la persona correcta abajo.</div>}
+        <div style={{marginTop:8}}><label style={S.lbl}>Empleada (quien abrió sesión)</label>
+          {empDef?(
+            <div style={{...S.inp,display:"flex",alignItems:"center",gap:8,background:"#f0f4f8",color:"#1a3c5e",fontWeight:700,cursor:"not-allowed"}}>
+              🔒 {empDef.nombre}
+            </div>
+          ):(
+            <>
+              <div style={{fontSize:12,color:"#c62828",fontWeight:700,marginBottom:4}}>⚠️ No se pudo identificar automáticamente tu usuario. Selecciona tu nombre manualmente:</div>
+              <select style={S.inp} value={empId||""} onChange={e=>setEmpId(parseInt(e.target.value))}>
+                <option value="" disabled>Selecciona quién atiende...</option>
+                {empleadas.map(e=><option key={e.id} value={e.id}>{e.nombre}</option>)}
+              </select>
+            </>
+          )}
         </div>
         <div style={{marginTop:8}}><label style={S.lbl}>Notas</label><textarea style={{...S.inp,minHeight:56,resize:"vertical"}} placeholder="Instrucciones..." value={notas} onChange={e=>setNotas(e.target.value)}/></div>
       </Card>
