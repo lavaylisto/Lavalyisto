@@ -15,7 +15,7 @@ const SERVICIOS_DEFAULT = [
   {id:"011",label:"LAVADO EDREDON 2 PLAZAS",precio:6.00},{id:"012",label:"LAVADO EDREDON 2.5 PLAZAS",precio:8.00},
   {id:"013",label:"LAVADO EDREDON 3 PLAZAS",precio:8.00},{id:"014",label:"LAVADO 2 COBIJAS PEQUENAS",precio:4.00},
   {id:"015",label:"LAVADO 2 COBIJAS GRANDES",precio:6.00},{id:"016",label:"LAVADO 1 COBIJA GRANDE",precio:6.00},
-  {id:"017",label:"LIBRA ADICIONAL",precio:0.30},{id:"018",label:"LAVADO EN SECO TERNO",precio:10.50},
+  {id:"017",label:"LIBRA ADICIONAL",precio:0.30,limite:3},{id:"018",label:"LAVADO EN SECO TERNO",precio:10.50},
   {id:"019",label:"LAVADO EN SECO SACO",precio:5.50},{id:"020",label:"PRELAVADO BASICO",precio:1.00},
   {id:"021",label:"LAVADO ALMOHADA ESTANDAR",precio:3.50},{id:"022",label:"SOLO SECADO",precio:5.00},
   {id:"023",label:"LAVADO ROPA + COBIJAS 16LB",precio:6.50},{id:"024",label:"SERVICIO EXPRESS",precio:1.50},
@@ -471,8 +471,12 @@ function MisIncentivos({ventas,empleadas,sesion,cfgInc}){
   // 🔧 Mi registro real de empleada (el login/usuario y el registro de empleada usan IDs distintos, por eso se resuelve por nombre)
   const miEmpleada=empleadas.find(e=>normNombre(e.nombre)&&normNombre(e.nombre)===normNombre(sesion?.nombre))
     ||empleadas.find(e=>normNombre(e.nombre)&&(normNombre(sesion?.nombre).includes(normNombre(e.nombre))||normNombre(e.nombre).includes(normNombre(sesion?.nombre))))
-    ||empleadas.find(e=>String(e.id)===String(sesion?.id));
-  const miId=miEmpleada?miEmpleada.id:sesion?.id;
+    ||empleadas.find(e=>{
+        const enom=normNombre(e.nombre).split(" ")[0];
+        const snom=normNombre(sesion?.nombre).split(" ")[0];
+        return enom&&snom&&enom===snom;
+      });
+  const miId=miEmpleada?miEmpleada.id:null; // 🔒 sin match seguro, no atribuir impulsaciones a la persona equivocada
   // Mis impulsaciones del mes (ventas donde YO impulsé una promo)
   const misVentasConImp=vMes.filter(v=>v.empleadaId===miId&&(v.impulsos||[]).length>0);
   const misImpulsos=misVentasConImp.reduce((a,v)=>a+(v.impulsos||[]).length,0);
@@ -700,7 +704,10 @@ function ServicioBuscador({servId,piezas,servicios,onServChange,onPiezasChange})
           </div>
         )}
       </div>
-      <input type="number" min={1} style={{...S.inp,width:56,textAlign:"center"}} value={piezas} onChange={e=>onPiezasChange(e.target.value)}/>
+      <div style={{display:"flex",flexDirection:"column",alignItems:"center"}}>
+        <input type="number" min={1} max={selSrv?.limite||undefined} style={{...S.inp,width:56,textAlign:"center"}} value={piezas} onChange={e=>onPiezasChange(e.target.value)}/>
+        {selSrv?.limite&&<div style={{fontSize:9,color:"#e65100",marginTop:2,whiteSpace:"nowrap"}}>máx {selSrv.limite}</div>}
+      </div>
     </div>
   );
 }
@@ -821,9 +828,13 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
   const [mC,setMC]=useState("buscar");
   const empDef=empleadas.find(e=>normNombre(e.nombre)&&normNombre(e.nombre)===normNombre(sesion?.nombre))
     ||empleadas.find(e=>normNombre(e.nombre)&&(normNombre(sesion?.nombre).includes(normNombre(e.nombre))||normNombre(e.nombre).includes(normNombre(sesion?.nombre))))
-    ||empleadas.find(e=>String(e.id)===String(sesion?.id))
-    ||empleadas[0];
-  const [empId,setEmpId]=useState(empDef?.id||null);
+    ||empleadas.find(e=>{
+        const enom=normNombre(e.nombre).split(" ")[0];
+        const snom=normNombre(sesion?.nombre).split(" ")[0];
+        return enom&&snom&&enom===snom;
+      })
+    ||null; // 🔒 si no hay coincidencia segura por nombre, NO adivinar por ID (eso causaba el bug de mostrar a la persona equivocada)
+  const [empId,setEmpId]=useState(empDef?.id||empleadas[0]?.id||null);
   const [items,setItems]=useState([{servId:servicios[0]?.id,piezas:1,custom:false,lC:"",pC:""}]);
   const [entrega,setEntrega]=useState((()=>{const off=man.getTimezoneOffset();const l=new Date(man.getTime()-off*60000);return l.toISOString().split("T")[0];})());
   const [notas,setNotas]=useState("");const [err,setErr]=useState("");
@@ -840,7 +851,18 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
   const calcT=()=>items.reduce((a,it)=>{if(it.custom)return a+(parseFloat(it.pC)||0)*(it.piezas||1);const s=servicios.find(s=>s.id===it.servId);return a+(s?s.precio*(it.piezas||1):0);},0);
   const addIt=()=>setItems([...items,{servId:servicios[0]?.id,piezas:1,custom:false,lC:"",pC:""}]);
   const remIt=i=>setItems(items.filter((_,idx)=>idx!==i));
-  const updIt=(i,f,v)=>{const c=[...items];c[i]={...c[i],[f]:v};setItems(c);};
+  const updIt=(i,f,v)=>{
+    const c=[...items];
+    if(f==="piezas"){
+      const s=servicios.find(x=>x.id===c[i].servId);
+      if(s?.limite&&v>s.limite){
+        alert(`⚠️ "${s.label}" tiene un máximo de ${s.limite} por venta.`);
+        v=s.limite;
+      }
+    }
+    c[i]={...c[i],[f]:v};
+    setItems(c);
+  };
   const validarCupon=()=>{
     const code=cupInput.trim().toUpperCase();
     if(!code){setCupErr("Escribe el número del cupón");return;}
@@ -1059,7 +1081,8 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
           <select style={S.inp} value={empId} onChange={e=>setEmpId(parseInt(e.target.value))}>
             {empleadas.filter(e=>e.activa).map(e=><option key={e.id} value={e.id}>{e.nombre}</option>)}
           </select>
-          <div style={{fontSize:10,color:"#c00",marginTop:4,fontFamily:"monospace"}}>🔧 DEBUG · sesion.nombre="{sesion?.nombre}" · empDef="{empDef?.nombre||"ninguno"}"</div>
+          <div style={{fontSize:10,color:"#c00",marginTop:4,fontFamily:"monospace"}}>🔧 DEBUG · sesion.nombre="{sesion?.nombre}" · empDef="{empDef?.nombre||"NINGUNO (sin match seguro)"}" · empleadas=[{empleadas.map(e=>e.nombre).join(" | ")}]</div>
+          {!empDef&&<div style={{fontSize:11,color:"#c00",fontWeight:700,marginTop:2}}>⚠️ No se encontró coincidencia automática — selecciona manualmente a la persona correcta abajo.</div>}
         </div>
         <div style={{marginTop:8}}><label style={S.lbl}>Notas</label><textarea style={{...S.inp,minHeight:56,resize:"vertical"}} placeholder="Instrucciones..." value={notas} onChange={e=>setNotas(e.target.value)}/></div>
       </Card>
@@ -1637,7 +1660,7 @@ function Configuracion({servicios,setServicios,exportarDatos,importarDatos,upser
   const activos=servicios.filter(s=>!s.eliminada);
   const add=()=>{if(!nv.label.trim()||!nv.precio)return;const ns={id:"c-"+Date.now(),label:nv.label.toUpperCase(),precio:parseFloat(nv.precio)};setServicios(prev=>[...prev,ns]);if(upsertServicio)upsertServicio({...ns,_updatedAt:new Date().toISOString()});setNv({label:"",precio:""});};
   const del=id=>{if(!window.confirm("¿Eliminar este servicio?"))return;setServicios(prev=>{const next=prev.map(s=>s.id===id?{...s,eliminada:true}:s);const borrado=next.find(s=>s.id===id);if(borrado&&upsertServicio)upsertServicio({...borrado,_updatedAt:new Date().toISOString()});return next;});};
-  const sav=()=>{setServicios(prev=>{const next=prev.map(s=>s.id===editId?{...s,label:ed.label.toUpperCase(),precio:parseFloat(ed.precio)}:s);const updated=next.find(s=>s.id===editId);if(updated&&upsertServicio)upsertServicio({...updated,_updatedAt:new Date().toISOString()});return next;});setEditId(null);};
+  const sav=()=>{setServicios(prev=>{const next=prev.map(s=>s.id===editId?{...s,label:ed.label.toUpperCase(),precio:parseFloat(ed.precio),limite:ed.limite?parseInt(ed.limite):null}:s);const updated=next.find(s=>s.id===editId);if(updated&&upsertServicio)upsertServicio({...updated,_updatedAt:new Date().toISOString()});return next;});setEditId(null);};
   const fil=activos.filter(s=>s.label.toLowerCase().includes(busq.toLowerCase()));
   return(<div style={S.panel}>
     <h2 style={S.ptitle}>⚙️ Configuracion</h2>
@@ -1687,16 +1710,17 @@ function Configuracion({servicios,setServicios,exportarDatos,importarDatos,upser
       <input style={{...S.inp,marginBottom:10}} placeholder="Buscar..." value={busq} onChange={e=>setBusq(e.target.value)}/>
       {fil.map(s=>(<div key={s.id} style={{...S.vcard,padding:"8px 12px"}}>
         {editId===s.id?(
-          <div style={{display:"grid",gridTemplateColumns:"1fr auto auto",gap:6,alignItems:"center"}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr auto auto auto",gap:6,alignItems:"center"}}>
             <input style={S.inp} value={ed.label||""} onChange={e=>setEd({...ed,label:e.target.value})}/>
             <input type="number" style={{...S.inp,width:80}} value={ed.precio||""} onChange={e=>setEd({...ed,precio:e.target.value})}/>
+            <input type="number" min="1" style={{...S.inp,width:70}} placeholder="Máx." value={ed.limite||""} onChange={e=>setEd({...ed,limite:e.target.value})}/>
             <button style={{...S.btnS,background:"#e8f5e9",color:"#2e7d32"}} onClick={sav}>✓</button>
           </div>
         ):(
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <div><div style={{fontSize:13,fontWeight:600}}>{s.label}</div><div style={{fontSize:12,color:"#4db6e4",fontWeight:700}}>${s.precio.toFixed(2)}</div></div>
+            <div><div style={{fontSize:13,fontWeight:600}}>{s.label}</div><div style={{fontSize:12,color:"#4db6e4",fontWeight:700}}>${s.precio.toFixed(2)}{s.limite?<span style={{color:"#e65100",fontWeight:600}}> · máx {s.limite}/venta</span>:""}</div></div>
             <div style={{display:"flex",gap:6}}>
-              <button style={S.btnS} onClick={()=>{setEditId(s.id);setEd({label:s.label,precio:s.precio});}}>✏️</button>
+              <button style={S.btnS} onClick={()=>{setEditId(s.id);setEd({label:s.label,precio:s.precio,limite:s.limite||""});}}>✏️</button>
               <button style={S.btnR} onClick={()=>del(s.id)}>✕</button>
             </div>
           </div>
