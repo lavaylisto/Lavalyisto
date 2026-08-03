@@ -528,9 +528,10 @@ function ProduccionScreen({sesion,onVolver,onLogout,ventas,setVentas,upsertVenta
 }
 
 // OrdenCard es componente SEPARADO (no dentro de map ni de PantallaEmpleada)
-function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta}){
+function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta,clientes,setClientes,upsertCliente,sesion}){
   const [showAb,setShowAb]=useState(false);
   const [waListo,setWaListo]=useState(false);
+  const [showEditCliente,setShowEditCliente]=useState(false);
   const est=getEst(v);const sig=sigEst(v.estado||"recibido");
   const esPag=pagada(v);const pend=saldo(v);
   const aplicarEstado=(nuevoEstado,extra={})=>setVentas(prev=>{const next=prev.map(vv=>vv.folio===v.folio?{...vv,estado:nuevoEstado,...extra}:vv);const updated=next.find(vv=>vv.folio===v.folio);if(updated&&upsertVenta)upsertVenta(updated);return next;});
@@ -540,6 +541,35 @@ function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta}){
     aplicarEstado(sig.id);
   };
   const toggle=f=>setVentas(prev=>{const next=prev.map(vv=>vv.folio===v.folio?{...vv,[f]:!vv[f]}:vv);const updated=next.find(vv=>vv.folio===v.folio);if(updated&&upsertVenta)upsertVenta(updated);return next;});
+  const anular=()=>{
+    const m=window.prompt("Motivo de anulación:");
+    if(m===null||!m.trim())return;
+    if(!confirm(`¿Confirmas anular la orden ${v.folio}? Esta acción queda registrada.`))return;
+    setVentas(prev=>{
+      const next=prev.map(vv=>vv.folio===v.folio?{...vv,anulada:true,motivoAnulacion:m,anuladaPor:sesion?.nombre||"—",anuladaEn:new Date().toISOString()}:vv);
+      const updated=next.find(vv=>vv.folio===v.folio);
+      if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+  };
+  const guardarEdicionCliente=datos=>{
+    setVentas(prev=>{
+      const next=prev.map(vv=>vv.folio===v.folio?{...vv,clienteNombre:datos.nombre,clienteTel:datos.tel,clienteDireccion:datos.direccion}:vv);
+      const updated=next.find(vv=>vv.folio===v.folio);
+      if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+    // ☁️ Si el cliente ya existe en la agenda, también se actualiza ahí para que quede igual en próximas órdenes
+    if(v.clienteId&&clientes&&setClientes){
+      setClientes(prev=>{
+        const next=prev.map(c=>c.id===v.clienteId?{...c,nombre:datos.nombre,tel:datos.tel,direccion:datos.direccion}:c);
+        const updated=next.find(c=>c.id===v.clienteId);
+        if(updated&&upsertCliente)upsertCliente({...updated,_updatedAt:new Date().toISOString()});
+        return next;
+      });
+    }
+    setShowEditCliente(false);
+  };
   return(
     <div style={{borderRadius:14,border:`2px solid ${est.color}`,background:"#fff",marginBottom:12,overflow:"hidden",boxShadow:"0 2px 8px rgba(0,0,0,.06)"}}>
       <div style={{background:est.bg,padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -547,8 +577,12 @@ function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta}){
         <div style={{fontSize:11,color:"#888"}}>{v.folio}</div>
       </div>
       <div style={{padding:"12px 14px"}}>
-        <div style={{fontWeight:700,fontSize:16,color:"#1a3c5e"}}>{v.clienteNombre}</div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+          <div style={{fontWeight:700,fontSize:16,color:"#1a3c5e"}}>{v.clienteNombre}</div>
+          {!v.anulada&&<button style={{background:"none",border:"none",color:"#4db6e4",fontSize:12,fontWeight:700,cursor:"pointer",padding:0}} onClick={()=>setShowEditCliente(true)}>✏️ Editar</button>}
+        </div>
         {v.clienteTel&&<div style={{fontSize:12,color:"#888",marginTop:2}}>📱 {v.clienteTel}</div>}
+        {v.clienteDireccion&&<div style={{fontSize:12,color:"#888",marginTop:2}}>📍 {v.clienteDireccion}</div>}
         <div style={{fontSize:13,color:"#555",margin:"6px 0"}}>{v.items.map((it,i)=><span key={i}>{it.label}{it.piezas>1?` x${it.piezas}`:""}{i<v.items.length-1?" · ":""}</span>)}</div>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:4}}>
           <div>
@@ -567,9 +601,38 @@ function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta}){
           {!esPag&&<button style={{flex:1,padding:"10px",background:"#e8f5e9",color:"#2e7d32",border:"1.5px solid #2e7d32",borderRadius:10,fontWeight:700,fontSize:13,cursor:"pointer"}} onClick={()=>setShowAb(true)}>💰 Cobrar</button>}
           <button style={{padding:"10px 14px",background:"#f0f4f8",color:"#1a3c5e",border:"none",borderRadius:10,fontSize:12,cursor:"pointer"}} onClick={()=>setTicket(v)}>🧾</button>
         </div>
+        {!v.anulada&&<button style={{width:"100%",marginTop:8,padding:"8px",background:"#ffebee",color:"#c62828",border:"1px solid #ffcdd2",borderRadius:10,fontSize:12,fontWeight:700,cursor:"pointer"}} onClick={anular}>❌ Anular orden</button>}
       </div>
       {showAb&&<AbonoModal venta={v} onSave={ab=>{addAbono(v.folio,ab);setShowAb(false);}} onClose={()=>setShowAb(false)}/>}
       {waListo&&<WhatsAppObligatorio venta={v} tipo="listo" onConfirm={info=>{aplicarEstado("listo",{checkMsgRetiro:info.enviado,msgListo:info});setWaListo(false);}} onCancel={()=>setWaListo(false)}/>}
+      {showEditCliente&&<EditarClienteModal v={v} onGuardar={guardarEdicionCliente} onCancelar={()=>setShowEditCliente(false)}/>}
+    </div>
+  );
+}
+
+// ✏️ Modal para que las empleadas editen los datos del cliente directamente en la orden (sin necesitar acceso de administrador)
+function EditarClienteModal({v,onGuardar,onCancelar}){
+  const [nombre,setNombre]=useState(v.clienteNombre||"");
+  const [tel,setTel]=useState(v.clienteTel||"");
+  const [direccion,setDireccion]=useState(v.clienteDireccion||"");
+  const [err,setErr]=useState("");
+  const guardar=()=>{
+    if(!nombre.trim()){setErr("El nombre no puede quedar vacío");return;}
+    onGuardar({nombre:nombre.trim(),tel:tel.trim(),direccion:direccion.trim()});
+  };
+  return(
+    <div style={S.ov}>
+      <div style={{background:"#fff",borderRadius:18,width:"100%",maxWidth:380,padding:20}}>
+        <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e",marginBottom:14,textAlign:"center"}}>✏️ Editar datos del cliente</div>
+        <div style={{marginBottom:10}}><label style={S.lbl}>Nombre</label><input style={S.inp} value={nombre} onChange={e=>{setNombre(e.target.value);setErr("");}}/></div>
+        <div style={{marginBottom:10}}><label style={S.lbl}>Teléfono</label><input style={S.inp} value={tel} onChange={e=>setTel(e.target.value)}/></div>
+        <div style={{marginBottom:10}}><label style={S.lbl}>Dirección</label><input style={S.inp} value={direccion} onChange={e=>setDireccion(e.target.value)}/></div>
+        {err&&<div style={{color:"#c62828",fontSize:12,fontWeight:600,marginBottom:8}}>{err}</div>}
+        <div style={{display:"flex",gap:8,marginTop:10}}>
+          <button style={{...S.btnP,flex:1}} onClick={guardar}>✓ Guardar</button>
+          <button style={{...S.btnS,flex:1}} onClick={onCancelar}>Cancelar</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1381,7 +1444,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
           ?<MisIncentivos ventas={ventas} empleadas={empleadas} sesion={sesion} cfgInc={cfgInc||INCENTIVOS_DEFAULT[0]}/>
           :filtrados.length===0
             ?<div style={{textAlign:"center",padding:"40px 20px",color:"#aaa"}}><div style={{fontSize:48,marginBottom:8}}>{tab==="entregar"?"🎉":"📋"}</div><div>{tab==="cobrar"?"Sin órdenes en Recibido":tab==="proceso"?"Nada en proceso":tab==="entregar"?"Nada listo para retirar":"Sin ordenes"}</div></div>
-            :filtrados.map(v=><OrdenCard key={v.folio} v={v} setVentas={setVentas} addAbono={addAbono} setTicket={setTicket} upsertVenta={upsertVenta}/>)
+            :filtrados.map(v=><OrdenCard key={v.folio} v={v} setVentas={setVentas} addAbono={addAbono} setTicket={setTicket} upsertVenta={upsertVenta} clientes={clientes} setClientes={setClientes} upsertCliente={upsertCliente} sesion={sesion}/>)
         }
       </div>
       {showNueva&&(
@@ -1979,7 +2042,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
   );
 }
 
-function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertVenta}){
+function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertVenta,sesion}){
   const [showAb,setShowAb]=useState(false);
   const [waListo,setWaListo]=useState(false);
   const emp=empleadas.find(e=>e.id===v.empleadaId);
@@ -2009,7 +2072,7 @@ function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertV
         </div>
         <div style={{fontSize:12,color:"#555",marginTop:6}}>{v.items.map((it,i)=><span key={i}>{it.label}{it.piezas>1?` x${it.piezas}`:""}{esLavadoSeco(it.label)&&<span style={{color:"#ff9800",fontSize:10}}> (20%)</span>}{i<v.items.length-1?" · ":""}</span>)}</div>
         <div style={{fontSize:12,color:"#555",marginTop:2}}>📅 {fmtD(v.entrega)}</div>
-        {v.anulada&&<div style={{background:"#ffebee",borderRadius:6,padding:"6px 10px",marginTop:6,fontSize:12,color:"#c62828"}}>❌ ANULADA — {v.motivoAnulacion}</div>}
+        {v.anulada&&<div style={{background:"#ffebee",borderRadius:6,padding:"6px 10px",marginTop:6,fontSize:12,color:"#c62828"}}>❌ ANULADA por <strong>{v.anuladaPor||"—"}</strong> — Motivo: {v.motivoAnulacion}{v.anuladaEn?` · ${fmt(v.anuladaEn)}`:""}</div>}
         {abs.length>0&&<div style={{marginTop:8,background:"#f0faf4",borderRadius:8,padding:"8px 10px"}}>
           {abs.map((ab,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#2e7d32"}}><span>{ab.metodo} · {fmtD(ab.fecha)}{ab.cobradoPorNombre?` · ${ab.cobradoPorNombre}`:""}</span><strong>+${ab.monto.toFixed(2)}</strong></div>)}
           <div style={{display:"flex",justifyContent:"space-between",fontSize:12,borderTop:"1px dashed #c8e6c9",marginTop:4,paddingTop:4}}><span style={{color:"#888"}}>Pagado</span><span style={{color:"#2e7d32",fontWeight:700}}>${totAb.toFixed(2)} / ${v.total.toFixed(2)}</span></div>
@@ -2028,7 +2091,7 @@ function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertV
         <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
           <button style={S.btnT} onClick={()=>setTicket(v)}>🧾 Ticket</button>
           {!esPag&&!v.anulada&&<button style={{...S.btnT,background:"#fff3e0",color:"#e65100"}} onClick={()=>setShowAb(true)}>💰 Pago</button>}
-          {!v.anulada&&esAdmin&&setVentas&&<button style={{...S.btnT,background:"#ffebee",color:"#c62828"}} onClick={()=>{const m=window.prompt("Motivo de anulacion:");if(m===null)return;setVentas(prev=>{const next=prev.map(vv=>vv.folio===v.folio?{...vv,anulada:true,motivoAnulacion:m}:vv);const updated=next.find(vv=>vv.folio===v.folio);if(updated&&upsertVenta)upsertVenta(updated);return next;});}}>❌ Anular</button>}
+          {!v.anulada&&esAdmin&&setVentas&&<button style={{...S.btnT,background:"#ffebee",color:"#c62828"}} onClick={()=>{const m=window.prompt("Motivo de anulacion:");if(m===null||!m.trim())return;setVentas(prev=>{const next=prev.map(vv=>vv.folio===v.folio?{...vv,anulada:true,motivoAnulacion:m,anuladaPor:sesion?.nombre||"Administrador",anuladaEn:new Date().toISOString()}:vv);const updated=next.find(vv=>vv.folio===v.folio);if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});return next;});}}>❌ Anular</button>}
         </div>
       </div>
       {showAb&&<AbonoModal venta={v} onSave={ab=>{addAbono(v.folio,ab);setShowAb(false);}} onClose={()=>setShowAb(false)}/>}
@@ -2037,7 +2100,7 @@ function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertV
   );
 }
 
-function Historial({ventas,setVentas,empleadas,setTicket,addAbono,esAdmin,upsertVenta}){
+function Historial({ventas,setVentas,empleadas,setTicket,addAbono,esAdmin,upsertVenta,sesion}){
   const [fP,setFP]=useState("Todos");const [fE,setFE]=useState("Todos");
   const [fEmp,setFEmp]=useState("Todos");const [fF,setFF]=useState("");const [busq,setBusq]=useState("");
   const filtered=ventas.filter(v=>{
@@ -2062,7 +2125,7 @@ function Historial({ventas,setVentas,empleadas,setTicket,addAbono,esAdmin,upsert
         </div>
       </Card>
       <div style={{fontSize:12,color:"#888",marginBottom:8}}>{filtered.length} ventas — Total: ${filtered.reduce((a,v)=>a+v.total,0).toFixed(2)}</div>
-      {filtered.length===0?<div style={S.empty}>Sin resultados</div>:filtered.map(v=><VentaCardItem key={v.folio} v={v} empleadas={empleadas} setTicket={setTicket} addAbono={addAbono} setVentas={setVentas} esAdmin={esAdmin} upsertVenta={upsertVenta}/>)}
+      {filtered.length===0?<div style={S.empty}>Sin resultados</div>:filtered.map(v=><VentaCardItem key={v.folio} v={v} empleadas={empleadas} setTicket={setTicket} addAbono={addAbono} setVentas={setVentas} esAdmin={esAdmin} upsertVenta={upsertVenta} sesion={sesion}/>)}
     </div>
   );
 }
@@ -4156,7 +4219,7 @@ const [showSalida,setShowSalida]=useState(false);
     </div>
     <div style={S.content}>
       {tab==="ventas"&&<NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={setTicketV} servicios={serviciosActivos} sesion={sesion} upsertVenta={upsertVenta} upsertCliente={upsertCliente} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos}/>}
-      {tab==="historial"&&<Historial ventas={ventas} setVentas={setVentas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} esAdmin={esAdmin} upsertVenta={upsertVenta}/>}
+      {tab==="historial"&&<Historial ventas={ventas} setVentas={setVentas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} esAdmin={esAdmin} upsertVenta={upsertVenta} sesion={sesion}/>}
       {tab==="pendientes"&&<Pendientes ventas={ventas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} setVentas={setVentas} upsertVenta={upsertVenta}/>}
       {tab==="bi"&&<DashboardBI ventas={ventas} empleadas={empleadas} gastos={gastos}/>}
       {tab==="clientes"&&<Clientes clientes={clientes} setClientes={setClientes} upsertCliente={upsertCliente} ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta}/>}
