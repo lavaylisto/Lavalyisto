@@ -541,17 +541,6 @@ function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta,clientes,setClien
     aplicarEstado(sig.id);
   };
   const toggle=f=>setVentas(prev=>{const next=prev.map(vv=>vv.folio===v.folio?{...vv,[f]:!vv[f]}:vv);const updated=next.find(vv=>vv.folio===v.folio);if(updated&&upsertVenta)upsertVenta(updated);return next;});
-  const anular=()=>{
-    const m=window.prompt("Motivo de anulación:");
-    if(m===null||!m.trim())return;
-    if(!confirm(`¿Confirmas anular la orden ${v.folio}? Esta acción queda registrada.`))return;
-    setVentas(prev=>{
-      const next=prev.map(vv=>vv.folio===v.folio?{...vv,anulada:true,motivoAnulacion:m,anuladaPor:sesion?.nombre||"—",anuladaEn:new Date().toISOString()}:vv);
-      const updated=next.find(vv=>vv.folio===v.folio);
-      if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
-      return next;
-    });
-  };
   const guardarEdicionCliente=datos=>{
     setVentas(prev=>{
       const next=prev.map(vv=>vv.folio===v.folio?{...vv,clienteNombre:datos.nombre,clienteTel:datos.tel,clienteDireccion:datos.direccion}:vv);
@@ -559,10 +548,10 @@ function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta,clientes,setClien
       if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
       return next;
     });
-    // ☁️ Si el cliente ya existe en la agenda, también se actualiza ahí para que quede igual en próximas órdenes
+    // ☁️ Si el cliente ya existe en la agenda, se actualizan TODOS sus datos ahí (incluida fecha de nacimiento)
     if(v.clienteId&&clientes&&setClientes){
       setClientes(prev=>{
-        const next=prev.map(c=>c.id===v.clienteId?{...c,nombre:datos.nombre,tel:datos.tel,direccion:datos.direccion}:c);
+        const next=prev.map(c=>c.id===v.clienteId?{...c,nombre:datos.nombre,tel:datos.tel,direccion:datos.direccion,cedula:datos.cedula,email:datos.email,rfc:datos.rfc,nacimiento:datos.nacimiento}:c);
         const updated=next.find(c=>c.id===v.clienteId);
         if(updated&&upsertCliente)upsertCliente({...updated,_updatedAt:new Date().toISOString()});
         return next;
@@ -601,32 +590,41 @@ function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta,clientes,setClien
           {!esPag&&<button style={{flex:1,padding:"10px",background:"#e8f5e9",color:"#2e7d32",border:"1.5px solid #2e7d32",borderRadius:10,fontWeight:700,fontSize:13,cursor:"pointer"}} onClick={()=>setShowAb(true)}>💰 Cobrar</button>}
           <button style={{padding:"10px 14px",background:"#f0f4f8",color:"#1a3c5e",border:"none",borderRadius:10,fontSize:12,cursor:"pointer"}} onClick={()=>setTicket(v)}>🧾</button>
         </div>
-        {!v.anulada&&<button style={{width:"100%",marginTop:8,padding:"8px",background:"#ffebee",color:"#c62828",border:"1px solid #ffcdd2",borderRadius:10,fontSize:12,fontWeight:700,cursor:"pointer"}} onClick={anular}>❌ Anular orden</button>}
       </div>
       {showAb&&<AbonoModal venta={v} onSave={ab=>{addAbono(v.folio,ab);setShowAb(false);}} onClose={()=>setShowAb(false)}/>}
       {waListo&&<WhatsAppObligatorio venta={v} tipo="listo" onConfirm={info=>{aplicarEstado("listo",{checkMsgRetiro:info.enviado,msgListo:info});setWaListo(false);}} onCancel={()=>setWaListo(false)}/>}
-      {showEditCliente&&<EditarClienteModal v={v} onGuardar={guardarEdicionCliente} onCancelar={()=>setShowEditCliente(false)}/>}
+      {showEditCliente&&<EditarClienteModal v={v} clientes={clientes} onGuardar={guardarEdicionCliente} onCancelar={()=>setShowEditCliente(false)}/>}
     </div>
   );
 }
 
 // ✏️ Modal para que las empleadas editen los datos del cliente directamente en la orden (sin necesitar acceso de administrador)
-function EditarClienteModal({v,onGuardar,onCancelar}){
+function EditarClienteModal({v,clientes,onGuardar,onCancelar}){
+  const clienteAgenda=v.clienteId?(clientes||[]).find(c=>c.id===v.clienteId):null;
   const [nombre,setNombre]=useState(v.clienteNombre||"");
-  const [tel,setTel]=useState(v.clienteTel||"");
-  const [direccion,setDireccion]=useState(v.clienteDireccion||"");
+  const [tel,setTel]=useState(v.clienteTel||clienteAgenda?.tel||"");
+  const [direccion,setDireccion]=useState(v.clienteDireccion||clienteAgenda?.direccion||"");
+  const [cedula,setCedula]=useState(clienteAgenda?.cedula||"");
+  const [email,setEmail]=useState(clienteAgenda?.email||"");
+  const [rfc,setRfc]=useState(clienteAgenda?.rfc||"");
+  const [nacimiento,setNacimiento]=useState(clienteAgenda?.nacimiento||"");
   const [err,setErr]=useState("");
   const guardar=()=>{
     if(!nombre.trim()){setErr("El nombre no puede quedar vacío");return;}
-    onGuardar({nombre:nombre.trim(),tel:tel.trim(),direccion:direccion.trim()});
+    onGuardar({nombre:nombre.trim(),tel:tel.trim(),direccion:direccion.trim(),cedula:cedula.trim(),email:email.trim(),rfc:rfc.trim(),nacimiento});
   };
   return(
     <div style={S.ov}>
-      <div style={{background:"#fff",borderRadius:18,width:"100%",maxWidth:380,padding:20}}>
+      <div style={{background:"#fff",borderRadius:18,width:"100%",maxWidth:380,maxHeight:"88vh",overflowY:"auto",padding:20}}>
         <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e",marginBottom:14,textAlign:"center"}}>✏️ Editar datos del cliente</div>
         <div style={{marginBottom:10}}><label style={S.lbl}>Nombre</label><input style={S.inp} value={nombre} onChange={e=>{setNombre(e.target.value);setErr("");}}/></div>
         <div style={{marginBottom:10}}><label style={S.lbl}>Teléfono</label><input style={S.inp} value={tel} onChange={e=>setTel(e.target.value)}/></div>
+        <div style={{marginBottom:10}}><label style={S.lbl}>Cédula</label><input style={S.inp} value={cedula} onChange={e=>setCedula(e.target.value)}/></div>
+        <div style={{marginBottom:10}}><label style={S.lbl}>Email</label><input style={S.inp} value={email} onChange={e=>setEmail(e.target.value)}/></div>
+        <div style={{marginBottom:10}}><label style={S.lbl}>RUC/RFC</label><input style={S.inp} value={rfc} onChange={e=>setRfc(e.target.value)}/></div>
         <div style={{marginBottom:10}}><label style={S.lbl}>Dirección</label><input style={S.inp} value={direccion} onChange={e=>setDireccion(e.target.value)}/></div>
+        <div style={{marginBottom:10}}><label style={S.lbl}>🎂 Fecha de nacimiento</label><input type="date" style={S.inp} value={nacimiento} onChange={e=>setNacimiento(e.target.value)}/></div>
+        {!v.clienteId&&<div style={{fontSize:11,color:"#e65100",marginBottom:8}}>⚠️ Este cliente no está guardado en la agenda — solo se actualizarán nombre, teléfono y dirección de esta orden.</div>}
         {err&&<div style={{color:"#c62828",fontSize:12,fontWeight:600,marginBottom:8}}>{err}</div>}
         <div style={{display:"flex",gap:8,marginTop:10}}>
           <button style={{...S.btnP,flex:1}} onClick={guardar}>✓ Guardar</button>
