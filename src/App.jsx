@@ -38,6 +38,16 @@ const EMPLEADAS_DEFAULT = [
   {id:1,nombre:"Ana Garcia",activa:true,metaVentas:20,montoBonus:20},
   {id:2,nombre:"Maria Lopez",activa:true,metaVentas:20,montoBonus:20},
 ];
+// 🏭 PRODUCCIÓN — Fase 1: catálogo semilla de máquinas del local
+const MAQUINAS_DEFAULT = [
+  {id:"L1",nombre:"Lavadora 1",tipo:"lavadora",capacidadKg:null,estado:"libre",cargaActualId:null,finProgramado:null},
+  {id:"L2",nombre:"Lavadora 2",tipo:"lavadora",capacidadKg:null,estado:"libre",cargaActualId:null,finProgramado:null},
+  {id:"L3",nombre:"Lavadora 3",tipo:"lavadora",capacidadKg:null,estado:"libre",cargaActualId:null,finProgramado:null},
+  {id:"S1",nombre:"Secadora 1",tipo:"secadora",capacidadKg:null,estado:"libre",cargaActualId:null,finProgramado:null},
+  {id:"S2",nombre:"Secadora 2",tipo:"secadora",capacidadKg:null,estado:"libre",cargaActualId:null,finProgramado:null},
+  {id:"S3",nombre:"Secadora 3",tipo:"secadora",capacidadKg:null,estado:"libre",cargaActualId:null,finProgramado:null},
+  {id:"S4",nombre:"Secadora 4",tipo:"secadora",capacidadKg:null,estado:"libre",cargaActualId:null,finProgramado:null},
+];
 // 🎯 INCENTIVOS: comisión por impulsación de promo + bonos por meta grupal (editable desde el panel admin)
 const INCENTIVOS_DEFAULT = [{id:"config",comisionImpulso:0.40,bonoMetaPct:1,bonoExcedentePct:10}];
 // Calcula la meta $ del mes (mismo criterio que el Dashboard BI: promedio ponderado de últimos 3 meses +10%)
@@ -206,6 +216,21 @@ const fechaLocal = (isoStr) => {
 };
 const semISO_local = (isoStr) => semISO(new Date(isoStr));
 const mesK_local = (isoStr) => mesK(new Date(isoStr));
+
+// 🏭 PRODUCCIÓN — Fase 2: PIN de 4 dígitos por empleada (hash SHA-256 + salt, sin backend)
+const randomSalt=()=>{const arr=new Uint8Array(8);crypto.getRandomValues(arr);return Array.from(arr).map(b=>b.toString(16).padStart(2,"0")).join("");};
+const hashPin=async(pin,salt)=>{
+  const enc=new TextEncoder();
+  const data=enc.encode(salt+":"+pin);
+  const buf=await crypto.subtle.digest("SHA-256",data);
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("");
+};
+// Etiquetas de cada etapa registrada en eventosProduccion (Fase 3)
+const ETAPA_PROD={
+  lavado_inicio:{label:"Inició lavado",icon:"🧺"},
+  doblado_inicio:{label:"Inició doblado",icon:"🪄"},
+  doblado_fin:{label:"Terminó doblado",icon:"✅"},
+};
 
 const expCSV=(ventas,titulo,empleadas)=>{
   const enc=["Folio","Fecha","Cliente","Servicios","Total","Pagado","Pendiente","Metodo","Estado","Notas"];
@@ -464,6 +489,99 @@ function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta}){
   );
 }
 
+// 🏭 PRODUCCIÓN — cronómetro en vivo (mm:ss) para saber cuánto lleva doblando
+function Cronometro({desde}){
+  const [, setTick]=useState(0);
+  useEffect(()=>{const id=setInterval(()=>setTick(t=>t+1),1000);return()=>clearInterval(id);},[]);
+  const segs=Math.max(0,Math.floor((Date.now()-new Date(desde).getTime())/1000));
+  const mm=String(Math.floor(segs/60)).padStart(2,"0");
+  const ss=String(segs%60).padStart(2,"0");
+  return <span>{mm}:{ss}</span>;
+}
+
+// 🏭 PRODUCCIÓN — Fase 3 (parcial): lavado y doblado con PIN, ligado al estado real de la orden
+function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProduccion,setEventosProduccion,upsertEvento}){
+  const [pinFor,setPinFor]=useState(null); // {folio, accion, label}
+  const activos=ventas.filter(v=>!v.anulada&&["recibido","proceso"].includes(v.estado||"recibido")).sort((a,b)=>new Date(a.fecha)-new Date(b.fecha));
+  const eventosDe=folio=>eventosProduccion.filter(ev=>ev.ventaFolio===folio);
+  const buscarEvento=(folio,etapa)=>eventosDe(folio).filter(ev=>ev.etapa===etapa).sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp))[0];
+  const nombreDe=id=>empleadas.find(e=>String(e.id)===String(id))?.nombre||"—";
+
+  const registrar=(folio,etapa,empleadaId)=>{
+    const ev={id:folio+"_"+etapa+"_"+Date.now(),ventaFolio:folio,etapa,empleadaId:empleadaId||null,timestamp:new Date().toISOString()};
+    setEventosProduccion(prev=>[...prev,ev]);
+    if(upsertEvento)upsertEvento(ev);
+  };
+  const cambiarEstadoVenta=(folio,estado)=>{
+    setVentas(prev=>{
+      const next=prev.map(v=>v.folio===folio?{...v,estado}:v);
+      const updated=next.find(v=>v.folio===folio);
+      if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+  };
+  const onPinOk=emp=>{
+    if(!pinFor)return;
+    const{folio,accion}=pinFor;
+    if(accion==="lavado"){registrar(folio,"lavado_inicio",emp?.id);cambiarEstadoVenta(folio,"proceso");}
+    else if(accion==="doblado_inicio"){registrar(folio,"doblado_inicio",emp?.id);}
+    else if(accion==="doblado_fin"){registrar(folio,"doblado_fin",emp?.id);cambiarEstadoVenta(folio,"listo");}
+    setPinFor(null);
+  };
+
+  const sinPins=pins.filter(p=>p.activo).length===0;
+
+  return(<div style={{padding:"4px 4px 20px"}}>
+    {sinPins&&<div style={{...S.alrt,background:"#fff3e0",color:"#e65100"}}>⚠️ Todavía no hay PINs asignados. Pídele al admin que configure los PINs en el panel de administración → 🔒 PINs.</div>}
+    {activos.length===0&&<div style={{textAlign:"center",padding:"40px 20px",color:"#aaa"}}><div style={{fontSize:48,marginBottom:8}}>🏭</div><div>No hay órdenes en producción ahora mismo</div></div>}
+    {activos.map(v=>{
+      const evLavInicio=buscarEvento(v.folio,"lavado_inicio");
+      const evDobInicio=buscarEvento(v.folio,"doblado_inicio");
+      const evDobFin=buscarEvento(v.folio,"doblado_fin");
+      let etapaActual="recibido",colorEt="#f59e0b",bgEt="#fff8e1";
+      if(evLavInicio&&!evDobInicio){etapaActual="Lavando / en proceso";colorEt="#1565c0";bgEt="#e3f2fd";}
+      if(evDobInicio&&!evDobFin){etapaActual="Doblando";colorEt="#7b1fa2";bgEt="#f3e5f5";}
+      if(evDobFin){etapaActual="Doblado, pasa a Listo";colorEt="#2e7d32";bgEt="#e8f5e9";}
+      return(
+        <div key={v.folio} style={{...S.vcard,borderLeft:`4px solid ${colorEt}`}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+            <div>
+              <div style={{fontWeight:700,fontSize:15}}>{v.clienteNombre}</div>
+              <div style={{fontSize:11,color:"#888"}}>{v.folio}</div>
+              <div style={{fontSize:12,color:colorEt,fontWeight:700,marginTop:2}}>{etapaActual}</div>
+            </div>
+          </div>
+          <div style={{fontSize:12,color:"#666",marginTop:6}}>{(v.items||[]).map(it=>it.label).join(" · ")}</div>
+
+          {!evLavInicio&&(
+            <button style={{...S.btnP,marginTop:10}} onClick={()=>setPinFor({folio:v.folio,accion:"lavado",label:"¿Quién inicia el lavado?"})}>🧺 Iniciar lavado</button>
+          )}
+
+          {evLavInicio&&!evDobInicio&&(
+            <>
+              <div style={{fontSize:11,color:"#888",marginTop:8}}>🧺 Lavado iniciado por {nombreDe(evLavInicio.empleadaId)} a las {new Date(evLavInicio.timestamp).toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"})}</div>
+              <button style={{...S.btnP,marginTop:10,background:"linear-gradient(135deg,#7b1fa2,#9c27b0)"}} onClick={()=>setPinFor({folio:v.folio,accion:"doblado_inicio",label:"¿Quién inicia el doblado?"})}>🪄 Iniciar doblado</button>
+            </>
+          )}
+
+          {evDobInicio&&!evDobFin&&(
+            <>
+              <div style={{fontSize:11,color:"#888",marginTop:8}}>🪄 Doblando desde las {new Date(evDobInicio.timestamp).toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"})} por {nombreDe(evDobInicio.empleadaId)}</div>
+              <div style={{fontSize:22,fontWeight:800,color:"#7b1fa2",textAlign:"center",margin:"8px 0",fontFamily:"monospace"}}><Cronometro desde={evDobInicio.timestamp}/></div>
+              <button style={{...S.btnP,background:"linear-gradient(135deg,#2e7d32,#4caf50)"}} onClick={()=>setPinFor({folio:v.folio,accion:"doblado_fin",label:"¿Quién termina el doblado?"})}>✅ Terminar doblado</button>
+            </>
+          )}
+
+          {evDobFin&&(
+            <div style={{fontSize:12,color:"#2e7d32",fontWeight:700,marginTop:8}}>✅ Doblado por {nombreDe(evDobFin.empleadaId)} en {Math.round((new Date(evDobFin.timestamp)-new Date(evDobInicio.timestamp))/60000)} min — pasando a Listo...</div>
+          )}
+        </div>
+      );
+    })}
+    {pinFor&&<PinModal pins={pins} empleadas={empleadas} titulo={pinFor.label} onConfirm={onPinOk} onCancelar={()=>setPinFor(null)}/>}
+  </div>);
+}
+
 function MisIncentivos({ventas,empleadas,sesion,cfgInc}){
   const mesAct=mesK(new Date());
   const {meta,ventaMes,vMes}=calcMetaMes(ventas,mesAct);
@@ -571,7 +689,69 @@ function IncentivosAdmin({cfgInc,setIncentivosArr,upsertIncentivo,ventas,emplead
   </div>);
 }
 
-function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta,upsertSalida,upsertCliente,upsertCaja,cupones,setCupones,upsertCupon,promos,cfgInc}){
+// 🏭 PRODUCCIÓN — Fase 2: administración de PINs por empleada (solo admin)
+function PinsAdmin({empleadas,pins,setPins,upsertPin}){
+  const [editId,setEditId]=useState(null);
+  const [p1,setP1]=useState("");
+  const [p2,setP2]=useState("");
+  const [msg,setMsg]=useState({});
+  const tienePin=id=>pins.some(p=>String(p.id)===String(id)&&p.activo);
+  const empezar=id=>{setEditId(id);setP1("");setP2("");setMsg({});};
+  const guardar=async id=>{
+    if(!/^\d{4}$/.test(p1)){setMsg({...msg,[id]:"El PIN debe ser de 4 dígitos"});return;}
+    if(p1!==p2){setMsg({...msg,[id]:"Los dos PIN no coinciden"});return;}
+    const salt=randomSalt();
+    const pinHash=await hashPin(p1,salt);
+    const nuevo={id,pinHash,salt,activo:true};
+    setPins(prev=>{const otros=prev.filter(p=>String(p.id)!==String(id));return[...otros,nuevo];});
+    if(upsertPin)upsertPin({...nuevo,_updatedAt:new Date().toISOString()});
+    setEditId(null);
+    setMsg({...msg,[id]:null});
+  };
+  const quitar=id=>{
+    if(!confirm("¿Quitar el PIN de esta empleada? Ya no podrá identificarse en el módulo de Producción hasta que le asignes uno nuevo."))return;
+    setPins(prev=>{const next=prev.map(p=>String(p.id)===String(id)?{...p,activo:false}:p);return next;});
+    const existente=pins.find(p=>String(p.id)===String(id));
+    if(existente&&upsertPin)upsertPin({...existente,activo:false,_updatedAt:new Date().toISOString()});
+  };
+  return(<div style={S.panel}>
+    <h2 style={S.ptitle}>🔒 PINs de Producción</h2>
+    <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ El PIN identifica quién ejecuta cada acción en el módulo de Producción (iniciar lavado, doblado, etc.), sin importar con qué usuario esté abierta la sesión del dispositivo.</div>
+    <Card title="👩 Empleadas">
+      {empleadas.map(e=>(
+        <div key={e.id} style={S.vcard}>
+          {editId===e.id?(
+            <div>
+              <div style={{fontWeight:700,fontSize:14,marginBottom:8}}>{e.nombre}</div>
+              <div style={{display:"grid",gap:8}}>
+                <div><label style={S.lbl}>Nuevo PIN (4 dígitos)</label><input type="password" inputMode="numeric" maxLength={4} style={S.inp} value={p1} onChange={ev=>setP1(ev.target.value.replace(/\D/g,"").slice(0,4))}/></div>
+                <div><label style={S.lbl}>Confirmar PIN</label><input type="password" inputMode="numeric" maxLength={4} style={S.inp} value={p2} onChange={ev=>setP2(ev.target.value.replace(/\D/g,"").slice(0,4))}/></div>
+              </div>
+              {msg[e.id]&&<div style={{color:"#c62828",fontSize:12,fontWeight:600,marginTop:6}}>{msg[e.id]}</div>}
+              <div style={{display:"flex",gap:8,marginTop:10}}>
+                <button style={{...S.btnS,flex:1,background:"#e8f5e9",color:"#2e7d32"}} onClick={()=>guardar(e.id)}>✓ Guardar PIN</button>
+                <button style={{...S.btnS,flex:1}} onClick={()=>setEditId(null)}>Cancelar</button>
+              </div>
+            </div>
+          ):(
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div>
+                <div style={{fontWeight:700,fontSize:15}}>{e.nombre}</div>
+                <div style={{fontSize:12,color:tienePin(e.id)?"#2e7d32":"#c62828",fontWeight:600}}>{tienePin(e.id)?"🔒 PIN configurado":"⚠️ Sin PIN asignado"}</div>
+              </div>
+              <div style={{display:"flex",gap:6}}>
+                <button style={S.btnS} onClick={()=>empezar(e.id)}>{tienePin(e.id)?"🔄 Cambiar":"➕ Asignar"}</button>
+                {tienePin(e.id)&&<button style={S.btnR} onClick={()=>quitar(e.id)}>✕</button>}
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+    </Card>
+  </div>);
+}
+
+function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta,upsertSalida,upsertCliente,upsertCaja,cupones,setCupones,upsertCupon,promos,cfgInc,maquinas,pins,eventosProduccion,setEventosProduccion,upsertEvento}){
   const [tab,setTab]=useState("hoy");const [busq,setBusq]=useState("");
   const [showNueva,setShowNueva]=useState(false);
   const [filtroTile,setFiltroTile]=useState(null); // 🔎 filtro rápido al tocar un contador (recibido/proceso/listo/entregado_pend)
@@ -615,7 +795,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         </div>
       </div>
       <div style={{background:"#fff",display:"flex",borderBottom:"2px solid #e8f0f7",position:"sticky",top:0,zIndex:10}}>
-        {[{id:"hoy",l:"📋 Ordenes",c:pendientesRaw.length},{id:"cobrar",l:"💸 Recibido",c:porCob.length},{id:"proceso",l:"🔄 En proceso",c:porProc.length},{id:"entregar",l:"📦 Listo para retirar",c:porEnt.length},{id:"bonos",l:"📈 Bonos"},{id:"nueva",l:"➕ Nuevo"}].map(t=>(
+        {[{id:"hoy",l:"📋 Ordenes",c:pendientesRaw.length},{id:"cobrar",l:"💸 Recibido",c:porCob.length},{id:"proceso",l:"🔄 En proceso",c:porProc.length},{id:"entregar",l:"📦 Listo para retirar",c:porEnt.length},{id:"produccion",l:"🏭 Producción"},{id:"bonos",l:"📈 Bonos"},{id:"nueva",l:"➕ Nuevo"}].map(t=>(
           <button key={t.id} style={{flex:1,padding:"12px 4px",border:"none",background:"transparent",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:tab===t.id?700:500,color:tab===t.id?"#1a3c5e":"#888",borderBottom:tab===t.id?"2px solid #4db6e4":"none",marginBottom:-2,fontSize:11,position:"relative"}}
             onClick={()=>t.id==="nueva"?setShowNueva(true):setTab(t.id)}>
             {t.l}{t.c>0&&<span style={{position:"absolute",top:5,right:3,background:"#e53935",color:"#fff",borderRadius:10,fontSize:9,fontWeight:800,padding:"1px 4px"}}>{t.c}</span>}
@@ -623,7 +803,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         ))}
       </div>
       <div style={{padding:12}}>
-        {tab!=="bonos"&&(<div style={{display:"flex",gap:8,marginBottom:12}}>
+        {tab!=="bonos"&&tab!=="produccion"&&(<div style={{display:"flex",gap:8,marginBottom:12}}>
           <input style={{...S.inp,flex:1}} placeholder="🔍 Buscar cliente o folio..." value={busq} onChange={e=>setBusq(e.target.value)}/>
         </div>)}
         {tab==="hoy"&&(<>
@@ -649,6 +829,8 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         </>)}
         {tab==="bonos"
           ?<MisIncentivos ventas={ventas} empleadas={empleadas} sesion={sesion} cfgInc={cfgInc||INCENTIVOS_DEFAULT[0]}/>
+          :tab==="produccion"
+            ?<Produccion ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} empleadas={empleadas} pins={pins||[]} eventosProduccion={eventosProduccion||[]} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento}/>
           :filtrados.length===0
             ?<div style={{textAlign:"center",padding:"40px 20px",color:"#aaa"}}><div style={{fontSize:48,marginBottom:8}}>{tab==="entregar"?"🎉":"📋"}</div><div>{tab==="cobrar"?"Sin órdenes en Recibido":tab==="proceso"?"Nada en proceso":tab==="entregar"?"Nada listo para retirar":"Sin ordenes"}</div></div>
             :filtrados.map(v=><OrdenCard key={v.folio} v={v} setVentas={setVentas} addAbono={addAbono} setTicket={setTicket} upsertVenta={upsertVenta}/>)
@@ -684,6 +866,77 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
 }
 
 // ─── BUSCADOR DE SERVICIOS ─────────────────────────────────────────
+// 🏭 PRODUCCIÓN — Fase 2: modal de teclado numérico para identificar quién ejecuta una acción por PIN
+function PinModal({pins,empleadas,onConfirm,onCancelar,titulo}){
+  const [valor,setValor]=useState("");
+  const [error,setError]=useState("");
+  const [intentos,setIntentos]=useState(0);
+  const [bloqueadoHasta,setBloqueadoHasta]=useState(null);
+  const [verificando,setVerificando]=useState(false);
+  const bloqueado=bloqueadoHasta&&Date.now()<bloqueadoHasta;
+  const segRestantes=bloqueado?Math.ceil((bloqueadoHasta-Date.now())/1000):0;
+  const tecla=n=>{if(bloqueado||verificando)return;if(valor.length>=4)return;setError("");setValor(valor+n);};
+  const borrar=()=>{if(bloqueado||verificando)return;setValor(valor.slice(0,-1));};
+  useEffect(()=>{
+    if(valor.length===4&&!bloqueado)verificar();
+    // eslint-disable-next-line
+  },[valor]);
+  const verificar=async()=>{
+    setVerificando(true);
+    let match=null;
+    for(const p of pins){
+      if(!p.activo)continue;
+      const h=await hashPin(valor,p.salt);
+      if(h===p.pinHash){match=p;break;}
+    }
+    if(match){
+      const emp=empleadas.find(e=>String(e.id)===String(match.id));
+      onConfirm(emp||null);
+    }else{
+      const nuevo=intentos+1;
+      setIntentos(nuevo);
+      setValor("");
+      if(nuevo>=5){
+        setBloqueadoHasta(Date.now()+60000);
+        setError("⛔ Demasiados intentos. Espera 1 minuto.");
+        setIntentos(0);
+      }else{
+        setError(`PIN incorrecto (${nuevo}/5 intentos)`);
+      }
+    }
+    setVerificando(false);
+  };
+  return(
+    <div style={S.ov}>
+      <div style={{background:"#fff",borderRadius:18,width:"100%",maxWidth:340,padding:"24px 20px",textAlign:"center",boxShadow:"0 20px 60px rgba(0,0,0,.35)"}}>
+        <div style={{fontSize:32,marginBottom:6}}>🔒</div>
+        <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e",marginBottom:4}}>{titulo||"Ingresa tu PIN"}</div>
+        <div style={{display:"flex",justifyContent:"center",gap:10,margin:"16px 0"}}>
+          {[0,1,2,3].map(i=>(
+            <div key={i} style={{width:16,height:16,borderRadius:"50%",background:valor.length>i?"#1a3c5e":"#e0e8f0"}}/>
+          ))}
+        </div>
+        {bloqueado?(
+          <div style={{color:"#c62828",fontWeight:700,fontSize:13,marginBottom:10}}>⛔ Bloqueado {segRestantes}s</div>
+        ):error?(
+          <div style={{color:"#c62828",fontWeight:700,fontSize:13,marginBottom:10}}>{error}</div>
+        ):verificando?(
+          <div style={{color:"#888",fontSize:13,marginBottom:10}}>Verificando...</div>
+        ):<div style={{height:22,marginBottom:10}}/>}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:12}}>
+          {[1,2,3,4,5,6,7,8,9].map(n=>(
+            <button key={n} onClick={()=>tecla(String(n))} disabled={bloqueado||verificando} style={{padding:"16px 0",fontSize:20,fontWeight:700,borderRadius:12,border:"1.5px solid #e8f0f7",background:"#f8fbfd",color:"#1a3c5e",cursor:bloqueado?"not-allowed":"pointer"}}>{n}</button>
+          ))}
+          <div/>
+          <button onClick={()=>tecla("0")} disabled={bloqueado||verificando} style={{padding:"16px 0",fontSize:20,fontWeight:700,borderRadius:12,border:"1.5px solid #e8f0f7",background:"#f8fbfd",color:"#1a3c5e",cursor:bloqueado?"not-allowed":"pointer"}}>0</button>
+          <button onClick={borrar} disabled={bloqueado||verificando} style={{padding:"16px 0",fontSize:16,fontWeight:700,borderRadius:12,border:"1.5px solid #e8f0f7",background:"#f8fbfd",color:"#c62828",cursor:"pointer"}}>⌫</button>
+        </div>
+        <button style={{...S.btnC,width:"100%"}} onClick={onCancelar}>Cancelar</button>
+      </div>
+    </div>
+  );
+}
+
 function ServicioBuscador({servId,piezas,servicios,onServChange,onPiezasChange}){
   const selSrv=servicios.find(s=>s.id===servId)||servicios[0];
   const [busq,setBusq]=useState("");
@@ -1623,6 +1876,117 @@ function Equipo({empleadas,setEmpleadas,ventas,esAdmin,upsertEmpleada}){
       </div>
       <button style={{...S.btnP,marginTop:10}} onClick={add}>Agregar empleada</button>
     </Card>}
+  </div>);
+}
+
+// 🏭 PRODUCCIÓN — Fase 1: CRUD de máquinas + datos semilla
+const ESTADO_MAQ = {
+  libre:{label:"Libre",color:"#2e7d32",bg:"#e8f5e9",icon:"🟢"},
+  ocupada:{label:"Ocupada",color:"#1565c0",bg:"#e3f2fd",icon:"🔵"},
+  mantenimiento:{label:"Mantenimiento",color:"#e65100",bg:"#fff3e0",icon:"🛠️"},
+};
+function MaquinasAdmin({maquinas,setMaquinas,upsertMaquina}){
+  const [editId,setEditId]=useState(null);const [ed,setEd]=useState({});
+  const [nv,setNv]=useState({nombre:"",tipo:"lavadora",capacidadKg:""});
+  const [showAdd,setShowAdd]=useState(false);
+  const guardarCambio=(id,cambios)=>{
+    setMaquinas(prev=>{
+      const next=prev.map(m=>m.id===id?{...m,...cambios}:m);
+      const updated=next.find(m=>m.id===id);
+      if(updated&&upsertMaquina)upsertMaquina({...updated,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+  };
+  const guardarEdicion=()=>{
+    guardarCambio(editId,{nombre:ed.nombre.trim()||editId,tipo:ed.tipo,capacidadKg:ed.capacidadKg?parseFloat(ed.capacidadKg):null});
+    setEditId(null);
+  };
+  const toggleMantenimiento=m=>{
+    guardarCambio(m.id,{estado:m.estado==="mantenimiento"?"libre":"mantenimiento"});
+  };
+  const agregar=()=>{
+    if(!nv.nombre.trim())return;
+    const id=nv.tipo==="lavadora"?"L"+(maquinas.filter(m=>m.tipo==="lavadora").length+1)+"_"+Date.now().toString(36).slice(-3):"S"+(maquinas.filter(m=>m.tipo==="secadora").length+1)+"_"+Date.now().toString(36).slice(-3);
+    const nm={id,nombre:nv.nombre.trim(),tipo:nv.tipo,capacidadKg:nv.capacidadKg?parseFloat(nv.capacidadKg):null,estado:"libre",cargaActualId:null,finProgramado:null};
+    setMaquinas(prev=>[...prev,nm]);
+    if(upsertMaquina)upsertMaquina({...nm,_updatedAt:new Date().toISOString()});
+    setNv({nombre:"",tipo:"lavadora",capacidadKg:""});
+    setShowAdd(false);
+  };
+  const eliminar=id=>{
+    if(!confirm("¿Eliminar esta máquina? Si tiene historial de cargas asociadas, ese historial se conserva igual."))return;
+    setMaquinas(prev=>prev.filter(m=>m.id!==id));
+  };
+  const lavadoras=maquinas.filter(m=>m.tipo==="lavadora");
+  const secadoras=maquinas.filter(m=>m.tipo==="secadora");
+  const Tarjeta=m=>{
+    const est=ESTADO_MAQ[m.estado]||ESTADO_MAQ.libre;
+    return(<div key={m.id} style={{...S.vcard,borderLeft:`4px solid ${est.color}`}}>
+      {editId===m.id?(
+        <div>
+          <div style={{display:"grid",gap:8,marginBottom:8}}>
+            <div><label style={S.lbl}>Nombre</label><input style={S.inp} value={ed.nombre||""} onChange={ev=>setEd({...ed,nombre:ev.target.value})}/></div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              <div><label style={S.lbl}>Tipo</label>
+                <select style={S.inp} value={ed.tipo} onChange={ev=>setEd({...ed,tipo:ev.target.value})}>
+                  <option value="lavadora">Lavadora</option>
+                  <option value="secadora">Secadora</option>
+                </select>
+              </div>
+              <div><label style={S.lbl}>Capacidad (Kg, opcional)</label><input type="number" style={S.inp} placeholder="ej. 15" value={ed.capacidadKg||""} onChange={ev=>setEd({...ed,capacidadKg:ev.target.value})}/></div>
+            </div>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button style={{...S.btnS,flex:1,background:"#e8f5e9",color:"#2e7d32"}} onClick={guardarEdicion}>✓ Guardar</button>
+            <button style={{...S.btnS,flex:1}} onClick={()=>setEditId(null)}>Cancelar</button>
+          </div>
+        </div>
+      ):(
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div>
+            <div style={{fontWeight:700,fontSize:15}}>{m.tipo==="lavadora"?"🧺":"🔥"} {m.nombre}</div>
+            <div style={{fontSize:12,color:est.color,fontWeight:700}}>{est.icon} {est.label}{m.capacidadKg?` · ${m.capacidadKg} Kg`:""}</div>
+          </div>
+          <div style={{display:"flex",gap:6}}>
+            <button style={S.btnS} onClick={()=>toggleMantenimiento(m)} title={m.estado==="mantenimiento"?"Marcar como libre":"Poner en mantenimiento"}>{m.estado==="mantenimiento"?"✅":"🛠️"}</button>
+            <button style={S.btnS} onClick={()=>{setEditId(m.id);setEd({nombre:m.nombre,tipo:m.tipo,capacidadKg:m.capacidadKg||""});}}>✏️</button>
+            <button style={S.btnR} onClick={()=>eliminar(m.id)}>✕</button>
+          </div>
+        </div>
+      )}
+    </div>);
+  };
+  return(<div style={S.panel}>
+    <h2 style={S.ptitle}>🏭 Máquinas</h2>
+    <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ Esta es la Fase 1 del módulo de Producción: catálogo de máquinas. El estado "Ocupada" con cuenta regresiva se activará en la fase del tablero de producción — por ahora solo puedes marcar "Libre" o "Mantenimiento" manualmente.</div>
+    <Card title="🧺 Lavadoras">
+      {lavadoras.map(Tarjeta)}
+    </Card>
+    <Card title="🔥 Secadoras">
+      {secadoras.map(Tarjeta)}
+    </Card>
+    {showAdd?(
+      <Card title="➕ Nueva máquina">
+        <div style={{display:"grid",gap:8}}>
+          <div><label style={S.lbl}>Nombre</label><input style={S.inp} placeholder="ej. Lavadora 4" value={nv.nombre} onChange={e=>setNv({...nv,nombre:e.target.value})}/></div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            <div><label style={S.lbl}>Tipo</label>
+              <select style={S.inp} value={nv.tipo} onChange={e=>setNv({...nv,tipo:e.target.value})}>
+                <option value="lavadora">Lavadora</option>
+                <option value="secadora">Secadora</option>
+              </select>
+            </div>
+            <div><label style={S.lbl}>Capacidad (Kg, opcional)</label><input type="number" style={S.inp} placeholder="ej. 15" value={nv.capacidadKg} onChange={e=>setNv({...nv,capacidadKg:e.target.value})}/></div>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:8,marginTop:10}}>
+          <button style={{...S.btnP,flex:1}} onClick={agregar}>Agregar máquina</button>
+          <button style={{...S.btnS,flex:1}} onClick={()=>setShowAdd(false)}>Cancelar</button>
+        </div>
+      </Card>
+    ):(
+      <button style={{...S.btnP,marginTop:4}} onClick={()=>setShowAdd(true)}>➕ Agregar máquina</button>
+    )}
   </div>);
 }
 
@@ -3085,6 +3449,11 @@ const { data: cupones, setData: setCupones, upsert: upsertCupon } = useCollectio
 const { data: promos, setData: setPromos, upsert: upsertPromo } = useCollection("promos", "ll_promos", []);
 const { data: incentivosArr, setData: setIncentivosArr, upsert: upsertIncentivo } = useCollection("configIncentivos", "ll_config_incentivos", INCENTIVOS_DEFAULT);
 const cfgInc = incentivosArr[0] || INCENTIVOS_DEFAULT[0];
+// 🏭 PRODUCCIÓN — Fase 1: colección de máquinas
+const { data: maquinas, setData: setMaquinas, upsert: upsertMaquina } = useCollection("maquinas", "ll_maquinas", MAQUINAS_DEFAULT);
+// 🏭 PRODUCCIÓN — Fase 2 y 3: PINs por empleada + registro de eventos (lavado/doblado)
+const { data: pins, setData: setPins, upsert: upsertPin } = useCollection("pins", "ll_pins", []);
+const { data: eventosProduccion, setData: setEventosProduccion, upsert: upsertEvento } = useCollection("eventosProduccion", "ll_eventos_produccion", []);
 const [showSalida,setShowSalida]=useState(false);
   const [ticketV,setTicketV]=useState(null);
   const [cuponSug,setCuponSug]=useState(null); // 🎟️ cupón sugerido tras imprimir la venta
@@ -3098,7 +3467,7 @@ const [showSalida,setShowSalida]=useState(false);
     setCajaOk(false);
     setEsperandoApertura(true);
   };
-  const exportarDatos=()=>{const d={ventas,clientes,empleadas,inventario,servicios,gastos,depositos,salidasCaja,cajas,cupones,promos};const blob=new Blob([JSON.stringify(d,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="respaldo-"+hoy+".json";a.click();};
+  const exportarDatos=()=>{const d={ventas,clientes,empleadas,inventario,servicios,gastos,depositos,salidasCaja,cajas,cupones,promos,maquinas};const blob=new Blob([JSON.stringify(d,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="respaldo-"+hoy+".json";a.click();};
   // Importa un respaldo .json Y lo sube a Firestore (antes solo quedaba en este dispositivo)
   const importarDatos=e=>{
     const f=e.target.files[0];if(!f)return;
@@ -3118,6 +3487,7 @@ const [showSalida,setShowSalida]=useState(false);
           [d.cajas,null,upsertCaja],
           [d.cupones,setCupones,upsertCupon],
           [d.promos,setPromos,upsertPromo],
+          [d.maquinas,setMaquinas,upsertMaquina],
         ];
         let tot=0;
         cols.forEach(([arr,setter,upsertFn])=>{
@@ -3144,7 +3514,7 @@ const [showSalida,setShowSalida]=useState(false);
     empleadas={empleadas}
     upsertCaja={upsertCaja}
   />;
-  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={serviciosActivos} sesion={sesion} addAbono={addAbono} onLogout={onLogout} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} upsertVenta={upsertVenta} upsertSalida={upsertSalida} upsertCliente={upsertCliente} upsertCaja={upsertCaja} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos} cfgInc={cfgInc}/>;
+  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={serviciosActivos} sesion={sesion} addAbono={addAbono} onLogout={onLogout} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} upsertVenta={upsertVenta} upsertSalida={upsertSalida} upsertCliente={upsertCliente} upsertCaja={upsertCaja} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos} cfgInc={cfgInc} maquinas={maquinas} pins={pins} eventosProduccion={eventosProduccion} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento}/>;
   const tabs=[
     {id:"ventas",icon:"🧾",l:"Venta"},{id:"historial",icon:"📋",l:"Historial"},
     {id:"pendientes",icon:"⏳",l:"Pendientes",b:pCount},{id:"bi",icon:"🚀",l:"Dashboard"},
@@ -3152,7 +3522,7 @@ const [showSalida,setShowSalida]=useState(false);
     {id:"reportes",icon:"📊",l:"Reportes"},{id:"depositos",icon:"🏦",l:"Depósitos"},
     {id:"conciliacion",icon:"🏛️",l:"Conciliación"},
     {id:"gastos",icon:"🛒",l:"Gastos"},{id:"inventario",icon:"📦",l:"Inventario"},
-    {id:"equipo",icon:"👩",l:"Equipo"},{id:"incentivosAdmin",icon:"🎯",l:"Incentivos"},{id:"caja",icon:"💰",l:"Caja"},
+    {id:"equipo",icon:"👩",l:"Equipo"},{id:"incentivosAdmin",icon:"🎯",l:"Incentivos"},{id:"maquinasAdmin",icon:"🏭",l:"Máquinas"},{id:"pinsAdmin",icon:"🔒",l:"PINs"},{id:"caja",icon:"💰",l:"Caja"},
     {id:"config",icon:"⚙️",l:"Config"},{id:"usuarios",icon:"🔑",l:"Usuarios"},
   ];
   return(<div style={S.app}>
@@ -3187,6 +3557,8 @@ const [showSalida,setShowSalida]=useState(false);
       {tab==="inventario"&&<Inventario inventario={inventario} setInventario={setInventario} upsertInventario={upsertInventario}/>}
       {tab==="equipo"&&<Equipo empleadas={empleadas} setEmpleadas={setEmpleadas} ventas={ventas} esAdmin={esAdmin} upsertEmpleada={upsertEmpleada}/>}
       {tab==="incentivosAdmin"&&<IncentivosAdmin cfgInc={cfgInc} setIncentivosArr={setIncentivosArr} upsertIncentivo={upsertIncentivo} ventas={ventas} empleadas={empleadas}/>}
+      {tab==="maquinasAdmin"&&<MaquinasAdmin maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina}/>}
+      {tab==="pinsAdmin"&&<PinsAdmin empleadas={empleadas} pins={pins} setPins={setPins} upsertPin={upsertPin}/>}
       {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={handleCierreListo} onResetCierre={()=>setCierreOk(false)} sesion={sesion} salidasCaja={salidasCaja} setVentas={setVentas} upsertVenta={upsertVenta} upsertCaja={upsertCaja}/>}
       {tab==="config"&&<Configuracion servicios={servicios} setServicios={setServicios} exportarDatos={exportarDatos} importarDatos={importarDatos} upsertVenta={upsertVenta} upsertServicio={upsertServicio}/>}
       {tab==="usuarios"&&<GestionUsuarios/>}
