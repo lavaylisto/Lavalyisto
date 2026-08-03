@@ -47,8 +47,8 @@ const MAQUINAS_DEFAULT = [
   {id:"S2",nombre:"Secadora 2",tipo:"secadora",categoria:"general",zona:"Cuarto principal",capacidadKg:null,estado:"libre",cargaActualId:null,finProgramado:null},
   {id:"S3",nombre:"Secadora 3",tipo:"secadora",categoria:"general",zona:"Afuera",capacidadKg:null,estado:"libre",cargaActualId:null,finProgramado:null},
   {id:"S4",nombre:"Secadora 4",tipo:"secadora",categoria:"general",zona:"Afuera",capacidadKg:null,estado:"libre",cargaActualId:null,finProgramado:null},
-  {id:"1LZ",nombre:"Lavadora Zapatos",tipo:"lavadora",categoria:"zapatos",zona:"Cuarto principal",capacidadKg:null,estado:"libre",cargaActualId:null,finProgramado:null},
-  {id:"1SZ",nombre:"Secadora Zapatos",tipo:"secadora",categoria:"zapatos",zona:"Cuarto principal",capacidadKg:null,estado:"libre",cargaActualId:null,finProgramado:null},
+  {id:"1LZ",nombre:"Lavadora Zapatos",tipo:"lavadora",categoria:"zapatos",zona:"Afuera",capacidadKg:null,estado:"libre",cargaActualId:null,finProgramado:null},
+  {id:"1SZ",nombre:"Secadora Zapatos",tipo:"secadora",categoria:"zapatos",zona:"Afuera",capacidadKg:null,estado:"libre",cargaActualId:null,finProgramado:null},
 ];
 // 🎯 INCENTIVOS: comisión por impulsación de promo + bonos por meta grupal (editable desde el panel admin)
 const INCENTIVOS_DEFAULT = [{id:"config",comisionImpulso:0.40,bonoMetaPct:1,bonoExcedentePct:10}];
@@ -702,7 +702,9 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
   const eventosDe=folio=>eventosProduccion.filter(ev=>ev.ventaFolio===folio);
   const buscarEvento=(folio,etapa)=>eventosDe(folio).filter(ev=>ev.etapa===etapa).sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp))[0];
   const nombreDe=id=>empleadas.find(e=>String(e.id)===String(id))?.nombre||"—";
-  const cargaDe=(folio,tipo,grupo)=>cargas.filter(c=>(c.ventaFolio===folio||(c.ventaFolios||[]).includes(folio))&&c.tipo===tipo&&(c.grupo||null)===(grupo||null)).sort((a,b)=>new Date(b.inicio)-new Date(a.inicio))[0];
+  // 🔧 "zapatos" y "sin grupo" cuentan como la misma orden — evita cargas huérfanas si una orden de puros zapatos empezó antes de dividirse en grupos
+  const gruposEquivalentes=g=>g==="zapatos"?[null,"zapatos"]:[g||null];
+  const cargaDe=(folio,tipo,grupo)=>cargas.filter(c=>(c.ventaFolio===folio||(c.ventaFolios||[]).includes(folio))&&c.tipo===tipo&&gruposEquivalentes(grupo).includes(c.grupo||null)).sort((a,b)=>new Date(b.inicio)-new Date(a.inicio))[0];
   const esZapatoLbl=lbl=>/ZAPATO|PARES?\b/i.test(lbl||"");
   // 👟 Flujos de zapatos entre las órdenes activas: el grupo "zapatos" de una orden dividida, o la orden completa si es solo zapatos
   const flujosZapatos=[];
@@ -929,7 +931,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
     {activos.length===0&&<div style={{textAlign:"center",padding:"40px 20px",color:"#aaa"}}><div style={{fontSize:48,marginBottom:8}}>🏭</div><div>No hay órdenes en producción ahora mismo</div></div>}
     {activos.map(v=>{
       const maquinaDe=id=>maquinas.find(m=>m.id===id);
-      const buscarEventoG=(folio,etapa,grupo)=>eventosDe(folio).filter(ev=>ev.etapa===etapa&&(ev.grupo||null)===(grupo||null)).sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp))[0];
+      const buscarEventoG=(folio,etapa,grupo)=>eventosDe(folio).filter(ev=>ev.etapa===etapa&&gruposEquivalentes(grupo).includes(ev.grupo||null)).sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp))[0];
       const esZapato=lbl=>/ZAPATO|PARES?\b/i.test(lbl||"");
       const tieneZapato=(v.items||[]).some(it=>esZapato(it.label));
       const tieneOtro=(v.items||[]).some(it=>!esZapato(it.label));
@@ -940,9 +942,9 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
       // 🔁 Un "flujo" completo (lavado→centrifugado→secado→doblado) para un grupo (o null si la orden no está dividida)
       const perteneceCarga=c=>c.ventaFolio===v.folio||(c.ventaFolios||[]).includes(v.folio);
       const renderFlujo=(grupo,etiqueta)=>{
-        const cLav=cargas.filter(c=>perteneceCarga(c)&&c.tipo==="lavado"&&(c.grupo||null)===(grupo||null)).sort((a,b)=>new Date(b.inicio)-new Date(a.inicio))[0];
-        const cCen=cargas.filter(c=>perteneceCarga(c)&&c.tipo==="centrifugado"&&(c.grupo||null)===(grupo||null)&&(!cLav||new Date(c.inicio)>=new Date(cLav.inicio))).sort((a,b)=>new Date(b.inicio)-new Date(a.inicio))[0];
-        const cSec=cargas.filter(c=>perteneceCarga(c)&&c.tipo==="secado"&&(c.grupo||null)===(grupo||null)&&(!cLav||new Date(c.inicio)>=new Date(cLav.inicio))).sort((a,b)=>new Date(b.inicio)-new Date(a.inicio))[0];
+        const cLav=cargas.filter(c=>perteneceCarga(c)&&c.tipo==="lavado"&&gruposEquivalentes(grupo).includes(c.grupo||null)).sort((a,b)=>new Date(b.inicio)-new Date(a.inicio))[0];
+        const cCen=cargas.filter(c=>perteneceCarga(c)&&c.tipo==="centrifugado"&&gruposEquivalentes(grupo).includes(c.grupo||null)&&(!cLav||new Date(c.inicio)>=new Date(cLav.inicio))).sort((a,b)=>new Date(b.inicio)-new Date(a.inicio))[0];
+        const cSec=cargas.filter(c=>perteneceCarga(c)&&c.tipo==="secado"&&gruposEquivalentes(grupo).includes(c.grupo||null)&&(!cLav||new Date(c.inicio)>=new Date(cLav.inicio))).sort((a,b)=>new Date(b.inicio)-new Date(a.inicio))[0];
         const evDobInicio=buscarEventoG(v.folio,"doblado_inicio",grupo);
         const evDobFin=buscarEventoG(v.folio,"doblado_fin",grupo);
         let etapaG="Recibido",colorG="#f59e0b";
@@ -2366,7 +2368,7 @@ const ESTADO_MAQ = {
   ocupada:{label:"Ocupada",color:"#1565c0",bg:"#e3f2fd",icon:"🔵"},
   mantenimiento:{label:"Mantenimiento",color:"#e65100",bg:"#fff3e0",icon:"🛠️"},
 };
-function MaquinasAdmin({maquinas,setMaquinas,upsertMaquina}){
+function MaquinasAdmin({maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga}){
   const [editId,setEditId]=useState(null);const [ed,setEd]=useState({});
   const [nv,setNv]=useState({nombre:"",tipo:"lavadora",categoria:"general",zona:"Cuarto principal",capacidadKg:""});
   const [showAdd,setShowAdd]=useState(false);
@@ -2390,6 +2392,22 @@ function MaquinasAdmin({maquinas,setMaquinas,upsertMaquina}){
   };
   const toggleMantenimiento=m=>{
     guardarCambio(m.id,{estado:m.estado==="mantenimiento"?"libre":"mantenimiento"});
+  };
+  // 🔓 Botón de emergencia: libera una máquina trabada (ej. carga huérfana) y cierra su carga asociada si seguía abierta
+  const liberarMaquina=m=>{
+    if(!confirm(`¿Liberar "${m.nombre}" a la fuerza? Úsalo solo si quedó trabada por un error — esto la marca libre y cierra cualquier carga abierta que tuviera.`))return;
+    if(m.cargaActualId&&cargas){
+      const c=cargas.find(x=>x.id===m.cargaActualId);
+      if(c&&!c.finReal&&setCargas){
+        setCargas(prev=>{
+          const next=prev.map(x=>x.id===c.id?{...x,finReal:new Date().toISOString(),empleadaRetiroId:null}:x);
+          const updated=next.find(x=>x.id===c.id);
+          if(updated&&upsertCarga)upsertCarga({...updated,_updatedAt:new Date().toISOString()});
+          return next;
+        });
+      }
+    }
+    guardarCambio(m.id,{estado:"libre",cargaActualId:null,finProgramado:null});
   };
   const agregar=()=>{
     if(!nv.nombre.trim())return;
@@ -2445,6 +2463,7 @@ function MaquinasAdmin({maquinas,setMaquinas,upsertMaquina}){
           </div>
           <div style={{display:"flex",gap:6}}>
             <button style={S.btnS} onClick={()=>toggleMantenimiento(m)} title={m.estado==="mantenimiento"?"Marcar como libre":"Poner en mantenimiento"}>{m.estado==="mantenimiento"?"✅":"🛠️"}</button>
+            {m.estado==="ocupada"&&<button style={{...S.btnS,background:"#ffebee",color:"#c62828"}} onClick={()=>liberarMaquina(m)} title="Liberar a la fuerza (si quedó trabada)">🔓</button>}
             <button style={S.btnS} onClick={()=>{setEditId(m.id);setEd({nombre:m.nombre,tipo:m.tipo,categoria:m.categoria||"general",zona:m.zona||"Sin asignar",capacidadKg:m.capacidadKg||""});}}>✏️</button>
             <button style={S.btnR} onClick={()=>eliminar(m.id)}>✕</button>
           </div>
@@ -4086,7 +4105,7 @@ const [showSalida,setShowSalida]=useState(false);
       {tab==="inventario"&&<Inventario inventario={inventario} setInventario={setInventario} upsertInventario={upsertInventario}/>}
       {tab==="equipo"&&<Equipo empleadas={empleadas} setEmpleadas={setEmpleadas} ventas={ventas} esAdmin={esAdmin} upsertEmpleada={upsertEmpleada}/>}
       {tab==="incentivosAdmin"&&<IncentivosAdmin cfgInc={cfgInc} setIncentivosArr={setIncentivosArr} upsertIncentivo={upsertIncentivo} ventas={ventas} empleadas={empleadas}/>}
-      {tab==="maquinasAdmin"&&<MaquinasAdmin maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina}/>}
+      {tab==="maquinasAdmin"&&<MaquinasAdmin maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga}/>}
       {tab==="pinsAdmin"&&<PinsAdmin empleadas={empleadas} pins={pins} setPins={setPins} upsertPin={upsertPin}/>}
       {tab==="produccionAdmin"&&(<div style={S.panel}><h2 style={S.ptitle}>🧺 Producción</h2><Produccion ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} empleadas={empleadas} pins={pins||[]} eventosProduccion={eventosProduccion||[]} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} maquinas={maquinas||[]} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas||[]} setCargas={setCargas} upsertCarga={upsertCarga}/></div>)}
       {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={handleCierreListo} onResetCierre={()=>setCierreOk(false)} sesion={sesion} salidasCaja={salidasCaja} setVentas={setVentas} upsertVenta={upsertVenta} upsertCaja={upsertCaja}/>}
