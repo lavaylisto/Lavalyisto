@@ -245,6 +245,42 @@ const expCSV=(ventas,titulo,empleadas)=>{
   const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
   const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=titulo+"-"+fechaHoyLocal()+".csv";a.click();
 };
+// 🏭 PRODUCCIÓN — reporte descargable: revisión, lavado, centrifugado, secado y doblado, con empleada/tiempos/observaciones, filtrado por rango de fechas
+const expCSVProduccion=(desde,hasta,{cargas,eventosProduccion,ventas,empleadas},titulo)=>{
+  const nombreDe=id=>empleadas.find(e=>String(e.id)===String(id))?.nombre||"";
+  const clienteDe=folio=>ventas.find(v=>v.folio===folio)?.clienteNombre||"";
+  const enRango=iso=>{if(!iso)return false;const d=fechaLocal(iso);return d>=desde&&d<=hasta;};
+  const filasRaw=[]; // [tsISO, folio(s), cliente(s), tipo, maquina, minProgramados, duracionMin, empIni, empFin, obs]
+
+  ventas.filter(v=>v.clasificacion&&enRango(v.clasificacion.timestamp)).forEach(v=>{
+    const c=v.clasificacion;
+    const obs=[c.objetosEncontrados?`Objetos: ${c.objetosEncontrados}`:"",c.manchasDetectadas?"Manchas":"",c.requiereRestregado?`Restregado extra $${(c.restregadoCosto||0).toFixed(2)}`:""].filter(Boolean).join(" · ");
+    filasRaw.push([c.timestamp,v.folio,v.clienteNombre||"","Revisión","-","-","-",nombreDe(c.empleadaId),"-",obs]);
+  });
+
+  cargas.filter(c=>enRango(c.inicio)).forEach(c=>{
+    const folios=c.ventaFolios&&c.ventaFolios.length?c.ventaFolios:[c.ventaFolio];
+    const clientes=[...new Set(folios.map(clienteDe))].join(" | ");
+    const dur=c.finReal?Math.round((new Date(c.finReal)-new Date(c.inicio))/60000):"";
+    const tipoLabel=c.tipo==="lavado"?"Lavado":c.tipo==="secado"?"Secado":"Centrifugado";
+    const obs=[c.esRepeticion?"🔁 Repetición":"",c.comentario||"",c.pares?`${c.pares} pares (lote)`:"",folios.length>1?`Lote de ${folios.length} órdenes`:""].filter(Boolean).join(" · ");
+    filasRaw.push([c.inicio,folios.join(" | "),clientes,tipoLabel,c.maquinaId||"",c.minutosProgramados||"",dur,nombreDe(c.empleadaId),nombreDe(c.empleadaRetiroId),obs]);
+  });
+
+  eventosProduccion.filter(ev=>ev.etapa==="doblado_inicio"&&enRango(ev.timestamp)).forEach(ini=>{
+    const fin=eventosProduccion.find(ev=>ev.etapa==="doblado_fin"&&ev.ventaFolio===ini.ventaFolio&&(ev.grupo||null)===(ini.grupo||null)&&new Date(ev.timestamp)>=new Date(ini.timestamp));
+    const dur=fin?Math.round((new Date(fin.timestamp)-new Date(ini.timestamp))/60000):"";
+    filasRaw.push([ini.timestamp,ini.ventaFolio,clienteDe(ini.ventaFolio),"Doblado","-","-",dur,nombreDe(ini.empleadaId),fin?nombreDe(fin.empleadaId):"",ini.grupo?`Grupo: ${ini.grupo}`:""]);
+  });
+
+  filasRaw.sort((a,b)=>new Date(a[0])-new Date(b[0]));
+  const enc=["Fecha","Folio(s)","Cliente(s)","Etapa","Máquina","Min. programados","Duración real (min)","Empleada inicio","Empleada fin/retiro","Observaciones"];
+  const filas=filasRaw.map(f=>[fmt(f[0]),f[1],f[2],f[3],f[4],f[5],f[6],f[7],f[8],f[9]]);
+  const csv=[enc,...filas].map(f=>f.map(c=>'"'+String(c).replace(/"/g,'\\"')+'"').join(",")).join("\n");
+  const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
+  const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=(titulo||"produccion")+"-"+desde+"_a_"+hasta+".csv";a.click();
+  return filasRaw.length;
+};
 
 const S={
   app:{fontFamily:"'DM Sans',sans-serif",minHeight:"100vh",background:"#f0f4f8",paddingBottom:40},
@@ -1175,6 +1211,35 @@ function IncentivosAdmin({cfgInc,setIncentivosArr,upsertIncentivo,ventas,emplead
 }
 
 // 🏭 PRODUCCIÓN — Fase 2: administración de PINs por empleada (solo admin)
+// 🏭 PRODUCCIÓN — panel de descarga de reportes (día/semana/mes/rango personalizado)
+function ReportesProduccionPanel({cargas,eventosProduccion,ventas,empleadas}){
+  const [desde,setDesde]=useState(fechaHoyLocal());
+  const [hasta,setHasta]=useState(fechaHoyLocal());
+  const descargar=(d,h,etiqueta)=>{
+    const n=expCSVProduccion(d,h,{cargas,eventosProduccion,ventas,empleadas},"produccion_"+etiqueta);
+    if(n===0)alert("No hay movimientos de producción en ese rango de fechas.");
+  };
+  const hoy=fechaHoyLocal();
+  const hace7=(()=>{const d=new Date();d.setDate(d.getDate()-7);return fechaLocal(d.toISOString());})();
+  const hace30=(()=>{const d=new Date();d.setDate(d.getDate()-30);return fechaLocal(d.toISOString());})();
+  return(
+    <Card title="📊 Descargar reporte de producción">
+      <div style={{fontSize:12,color:"#888",marginBottom:10}}>Incluye revisión de prendas, lavado, centrifugado, secado y doblado — con máquina, tiempos, quién hizo cada cosa, y observaciones.</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:12}}>
+        <button style={S.btnS} onClick={()=>descargar(hoy,hoy,"hoy")}>📅 Hoy</button>
+        <button style={S.btnS} onClick={()=>descargar(hace7,hoy,"semana")}>🗓️ Esta semana</button>
+        <button style={S.btnS} onClick={()=>descargar(hace30,hoy,"mes")}>📆 Este mes</button>
+      </div>
+      <div style={{fontSize:12,fontWeight:700,color:"#888",marginBottom:6}}>Rango personalizado</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+        <div><label style={S.lbl}>Desde</label><input type="date" style={S.inp} value={desde} onChange={e=>setDesde(e.target.value)}/></div>
+        <div><label style={S.lbl}>Hasta</label><input type="date" style={S.inp} value={hasta} onChange={e=>setHasta(e.target.value)}/></div>
+      </div>
+      <button style={{...S.btnP,width:"100%"}} onClick={()=>descargar(desde,hasta,"rango")}>⬇️ Descargar CSV</button>
+    </Card>
+  );
+}
+
 function PinsAdmin({empleadas,pins,setPins,upsertPin}){
   const [editId,setEditId]=useState(null);
   const [p1,setP1]=useState("");
@@ -4107,7 +4172,9 @@ const [showSalida,setShowSalida]=useState(false);
       {tab==="incentivosAdmin"&&<IncentivosAdmin cfgInc={cfgInc} setIncentivosArr={setIncentivosArr} upsertIncentivo={upsertIncentivo} ventas={ventas} empleadas={empleadas}/>}
       {tab==="maquinasAdmin"&&<MaquinasAdmin maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga}/>}
       {tab==="pinsAdmin"&&<PinsAdmin empleadas={empleadas} pins={pins} setPins={setPins} upsertPin={upsertPin}/>}
-      {tab==="produccionAdmin"&&(<div style={S.panel}><h2 style={S.ptitle}>🧺 Producción</h2><Produccion ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} empleadas={empleadas} pins={pins||[]} eventosProduccion={eventosProduccion||[]} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} maquinas={maquinas||[]} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas||[]} setCargas={setCargas} upsertCarga={upsertCarga}/></div>)}
+      {tab==="produccionAdmin"&&(<div style={S.panel}><h2 style={S.ptitle}>🧺 Producción</h2>
+        <ReportesProduccionPanel cargas={cargas||[]} eventosProduccion={eventosProduccion||[]} ventas={ventas} empleadas={empleadas}/>
+        <Produccion ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} empleadas={empleadas} pins={pins||[]} eventosProduccion={eventosProduccion||[]} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} maquinas={maquinas||[]} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas||[]} setCargas={setCargas} upsertCarga={upsertCarga}/></div>)}
       {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={handleCierreListo} onResetCierre={()=>setCierreOk(false)} sesion={sesion} salidasCaja={salidasCaja} setVentas={setVentas} upsertVenta={upsertVenta} upsertCaja={upsertCaja}/>}
       {tab==="config"&&<Configuracion servicios={servicios} setServicios={setServicios} exportarDatos={exportarDatos} importarDatos={importarDatos} upsertVenta={upsertVenta} upsertServicio={upsertServicio}/>}
       {tab==="usuarios"&&<GestionUsuarios/>}
