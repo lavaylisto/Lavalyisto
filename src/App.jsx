@@ -442,6 +442,53 @@ function AperturaObligatoria({sesion,onLogout,onAbierta,empleadas,upsertCaja}){
   );
 }
 
+// 🏭 PRODUCCIÓN — pantalla de selección al iniciar sesión: Facturación o Producción (áreas separadas)
+function SelectorVista({sesion,onElegir,onLogout}){
+  return(
+    <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#1a3c5e,#2563a8)",display:"flex",alignItems:"center",justifyContent:"center",padding:16,fontFamily:"'DM Sans',sans-serif"}}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=DM+Sans:wght@400;500;600;700&display=swap');*{box-sizing:border-box;margin:0;padding:0}`}</style>
+      <div style={{background:"#fff",borderRadius:20,padding:"36px 28px",width:"100%",maxWidth:380,boxShadow:"0 20px 60px rgba(0,0,0,.3)"}}>
+        <div style={{textAlign:"center",marginBottom:26}}>
+          <div style={{fontSize:40}}>🫧</div>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,color:"#1a3c5e",marginTop:6}}>Lava&Listo</div>
+          <div style={{fontSize:13,color:"#888",marginTop:6}}>Hola <strong>{sesion.nombre}</strong>, ¿a dónde quieres entrar?</div>
+        </div>
+        <button onClick={()=>onElegir("facturacion")} style={{width:"100%",padding:"20px",background:"linear-gradient(135deg,#1a3c5e,#2563a8)",color:"#fff",border:"none",borderRadius:14,marginBottom:12,cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:14}}>
+          <div style={{fontSize:32}}>🧾</div>
+          <div><div style={{fontWeight:800,fontSize:16}}>Facturación</div><div style={{fontSize:12,opacity:.85}}>Órdenes, cobros, ventas nuevas</div></div>
+        </button>
+        <button onClick={()=>onElegir("produccion")} style={{width:"100%",padding:"20px",background:"linear-gradient(135deg,#7b1fa2,#9c27b0)",color:"#fff",border:"none",borderRadius:14,marginBottom:16,cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:14}}>
+          <div style={{fontSize:32}}>🏭</div>
+          <div><div style={{fontWeight:800,fontSize:16}}>Producción</div><div style={{fontSize:12,opacity:.85}}>Lavado y doblado — se identifica con PIN</div></div>
+        </button>
+        <button style={{width:"100%",padding:"10px",background:"transparent",color:"#888",border:"1px solid #d0dce8",borderRadius:10,fontSize:13,cursor:"pointer"}} onClick={onLogout}>Cerrar sesión</button>
+      </div>
+    </div>
+  );
+}
+
+// 🏭 PRODUCCIÓN — pantalla completa, independiente de Facturación. Sin tabs de caja/ventas; todo aquí se identifica por PIN.
+function ProduccionScreen({sesion,onVolver,onLogout,ventas,setVentas,upsertVenta,empleadas,pins,eventosProduccion,setEventosProduccion,upsertEvento,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga}){
+  return(
+    <div style={{minHeight:"100vh",background:"#f0f4f8",fontFamily:"'DM Sans',sans-serif"}}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=DM+Sans:wght@400;500;600;700&display=swap');`}</style>
+      <div style={{background:"linear-gradient(135deg,#7b1fa2,#9c27b0)",padding:"14px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,color:"#fff",fontWeight:700}}>🏭 Producción</div>
+          <div style={{fontSize:11,color:"#e8d5f0"}}>Dispositivo del taller · cada acción se identifica con PIN</div>
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={onVolver} style={{background:"rgba(255,255,255,.2)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 12px",fontWeight:600,cursor:"pointer"}}>🧾 Ir a Facturación</button>
+          <button onClick={onLogout} style={{background:"rgba(255,255,255,.2)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 12px",fontWeight:600,cursor:"pointer"}}>Salir</button>
+        </div>
+      </div>
+      <div style={{padding:12,maxWidth:900,margin:"0 auto"}}>
+        <Produccion ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} empleadas={empleadas} pins={pins||[]} eventosProduccion={eventosProduccion||[]} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} maquinas={maquinas||[]} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas||[]} setCargas={setCargas} upsertCarga={upsertCarga}/>
+      </div>
+    </div>
+  );
+}
+
 // OrdenCard es componente SEPARADO (no dentro de map ni de PantallaEmpleada)
 function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta}){
   const [showAb,setShowAb]=useState(false);
@@ -498,14 +545,74 @@ function Cronometro({desde}){
   const ss=String(segs%60).padStart(2,"0");
   return <span>{mm}:{ss}</span>;
 }
+// 🏭 PRODUCCIÓN — cuenta regresiva hacia un finProgramado; si ya se pasó, cuenta hacia arriba en rojo
+function CuentaRegresiva({finProgramado}){
+  const [, setTick]=useState(0);
+  useEffect(()=>{const id=setInterval(()=>setTick(t=>t+1),1000);return()=>clearInterval(id);},[]);
+  const diffMs=new Date(finProgramado).getTime()-Date.now();
+  const vencido=diffMs<=0;
+  const segs=Math.floor(Math.abs(diffMs)/1000);
+  const mm=String(Math.floor(segs/60)).padStart(2,"0");
+  const ss=String(segs%60).padStart(2,"0");
+  return <span style={{color:vencido?"#c62828":"#1a3c5e",fontWeight:800}}>{vencido?"⏰ +":""}{mm}:{ss}</span>;
+}
+// 🏭 PRODUCCIÓN — tarjeta visual de una máquina para el tablero (libre/ocupada/mantenimiento + cuenta regresiva)
+function TarjetaMaquina({m,cargas,ventas}){
+  const est=ESTADO_MAQ[m.estado]||ESTADO_MAQ.libre;
+  const carga=m.cargaActualId?cargas.find(c=>c.id===m.cargaActualId):null;
+  const venta=carga?ventas.find(v=>v.folio===carga.ventaFolio):null;
+  return(
+    <div style={{background:est.bg,border:`2px solid ${est.color}`,borderRadius:10,padding:"8px 6px",textAlign:"center"}}>
+      <div style={{fontSize:18}}>{m.tipo==="lavadora"?"🧺":"🔥"}</div>
+      <div style={{fontSize:11,fontWeight:700,color:"#1a3c5e",lineHeight:1.1}}>{m.nombre}</div>
+      <div style={{fontSize:9,color:est.color,fontWeight:700}}>{est.label}</div>
+      {m.estado==="ocupada"&&m.finProgramado&&<div style={{fontSize:11,marginTop:2,fontFamily:"monospace"}}><CuentaRegresiva finProgramado={m.finProgramado}/></div>}
+      {m.estado==="ocupada"&&venta&&<div style={{fontSize:8,color:"#666",marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{venta.clienteNombre}</div>}
+    </div>
+  );
+}
+// 🏭 PRODUCCIÓN — selector de máquina libre + minutos programados, antes de pedir el PIN
+function MachinePicker({maquinas,tipoMaquina,tiempoSugerido,onConfirmar,onCancelar}){
+  const [maquinaId,setMaquinaId]=useState(null);
+  const [minutos,setMinutos]=useState(String(tiempoSugerido||45));
+  const libres=maquinas.filter(m=>m.tipo===tipoMaquina&&m.estado==="libre");
+  return(
+    <div style={S.ov}>
+      <div style={{background:"#fff",borderRadius:18,width:"100%",maxWidth:380,maxHeight:"85vh",overflowY:"auto",padding:20}}>
+        <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e",marginBottom:10,textAlign:"center"}}>{tipoMaquina==="lavadora"?"🧺 Elige la lavadora":"🔥 Elige la secadora"}</div>
+        {libres.length===0&&<div style={{textAlign:"center",color:"#c62828",fontWeight:600,fontSize:13,padding:"14px 0"}}>No hay {tipoMaquina==="lavadora"?"lavadoras":"secadoras"} libres ahora mismo.</div>}
+        {libres.map(m=>(
+          <button key={m.id} onClick={()=>setMaquinaId(m.id)} style={{display:"block",width:"100%",textAlign:"left",padding:"12px 14px",borderRadius:10,marginBottom:8,border:maquinaId===m.id?"2px solid #1a3c5e":"1.5px solid #e8f0f7",background:maquinaId===m.id?"#eaf3fb":"#f8fbfd",fontWeight:700,color:"#1a3c5e",cursor:"pointer"}}>
+            {m.tipo==="lavadora"?"🧺":"🔥"} {m.nombre}{m.capacidadKg?` · ${m.capacidadKg} Kg`:""}
+          </button>
+        ))}
+        {maquinaId&&(
+          <div style={{marginTop:12}}>
+            <label style={S.lbl}>Minutos programados</label>
+            <input type="number" style={S.inp} value={minutos} onChange={e=>setMinutos(e.target.value)}/>
+          </div>
+        )}
+        <div style={{display:"flex",gap:8,marginTop:16}}>
+          <button style={{...S.btnP,flex:1,opacity:maquinaId?1:0.5}} disabled={!maquinaId} onClick={()=>maquinaId&&onConfirmar(maquinaId,parseInt(minutos)||45)}>Continuar</button>
+          <button style={{...S.btnS,flex:1}} onClick={onCancelar}>Cancelar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
-// 🏭 PRODUCCIÓN — Fase 3 (parcial): lavado y doblado con PIN, ligado al estado real de la orden
-function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProduccion,setEventosProduccion,upsertEvento}){
-  const [pinFor,setPinFor]=useState(null); // {folio, accion, label}
+// 🏭 PRODUCCIÓN — Fase 5: tablero completo — máquina + tiempo por etapa, notificaciones, y confirmación final de Listo
+function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProduccion,setEventosProduccion,upsertEvento,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga}){
+  const [pickerFor,setPickerFor]=useState(null); // {folio, tipoMaquina}
+  const [pinFor,setPinFor]=useState(null); // {folio, accion, label, extra}
+  const [notifOn,setNotifOn]=useState(typeof Notification!=="undefined"&&Notification.permission==="granted");
+
   const activos=ventas.filter(v=>!v.anulada&&["recibido","proceso"].includes(v.estado||"recibido")).sort((a,b)=>new Date(a.fecha)-new Date(b.fecha));
   const eventosDe=folio=>eventosProduccion.filter(ev=>ev.ventaFolio===folio);
   const buscarEvento=(folio,etapa)=>eventosDe(folio).filter(ev=>ev.etapa===etapa).sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp))[0];
   const nombreDe=id=>empleadas.find(e=>String(e.id)===String(id))?.nombre||"—";
+
+  const notificar=(titulo,cuerpo)=>{try{if(typeof Notification!=="undefined"&&Notification.permission==="granted")new Notification(titulo,{body:cuerpo});}catch{}};
 
   const registrar=(folio,etapa,empleadaId)=>{
     const ev={id:folio+"_"+etapa+"_"+Date.now(),ventaFolio:folio,etapa,empleadaId:empleadaId||null,timestamp:new Date().toISOString()};
@@ -520,48 +627,144 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
       return next;
     });
   };
+  const setMaquinaEstado=(maquinaId,cambios)=>{
+    setMaquinas(prev=>{
+      const next=prev.map(m=>m.id===maquinaId?{...m,...cambios}:m);
+      const updated=next.find(m=>m.id===maquinaId);
+      if(updated&&upsertMaquina)upsertMaquina({...updated,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+  };
+  const iniciarCarga=(folio,tipo,maquinaId,minutos,empleadaId)=>{
+    const inicio=new Date();
+    const finProgramado=new Date(inicio.getTime()+minutos*60000);
+    const carga={id:folio+"_"+tipo+"_"+Date.now(),ventaFolio:folio,tipo,maquinaId,minutosProgramados:minutos,inicio:inicio.toISOString(),finProgramado:finProgramado.toISOString(),finReal:null,empleadaId:empleadaId||null,empleadaRetiroId:null,notificado:false};
+    setCargas(prev=>[...prev,carga]);
+    if(upsertCarga)upsertCarga(carga);
+    setMaquinaEstado(maquinaId,{estado:"ocupada",cargaActualId:carga.id,finProgramado:carga.finProgramado});
+    registrar(folio,tipo==="lavado"?"lavado_inicio":"secado_inicio",empleadaId);
+    if(tipo==="lavado")cambiarEstadoVenta(folio,"proceso");
+  };
+  const retirarCarga=(carga,empleadaId)=>{
+    const finReal=new Date().toISOString();
+    setCargas(prev=>{
+      const next=prev.map(c=>c.id===carga.id?{...c,finReal,empleadaRetiroId:empleadaId||null}:c);
+      const updated=next.find(c=>c.id===carga.id);
+      if(updated&&upsertCarga)upsertCarga({...updated,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+    setMaquinaEstado(carga.maquinaId,{estado:"libre",cargaActualId:null,finProgramado:null});
+    registrar(carga.ventaFolio,carga.tipo==="lavado"?"lavado_fin":"secado_fin",empleadaId);
+  };
+
+  // ⏰ Revisa cada 15s si alguna carga cumplió su tiempo, para notificar una sola vez (requiere esta pantalla abierta)
+  useEffect(()=>{
+    const id=setInterval(()=>{
+      const ahora=Date.now();
+      cargas.forEach(c=>{
+        if(c.finReal||c.notificado)return;
+        if(new Date(c.finProgramado).getTime()<=ahora){
+          const v=ventas.find(vv=>vv.folio===c.ventaFolio);
+          notificar(c.tipo==="lavado"?"🧺 Lavado terminado":"🔥 Secado terminado",`${v?.clienteNombre||c.ventaFolio} — pasa a ${c.tipo==="lavado"?"secadora":"doblado"}`);
+          setCargas(prev=>{
+            const next=prev.map(cc=>cc.id===c.id?{...cc,notificado:true}:cc);
+            const updated=next.find(cc=>cc.id===c.id);
+            if(updated&&upsertCarga)upsertCarga({...updated,_updatedAt:new Date().toISOString()});
+            return next;
+          });
+        }
+      });
+    },15000);
+    return()=>clearInterval(id);
+    // eslint-disable-next-line
+  },[cargas]);
+
+  const onPickerConfirm=(maquinaId,minutos)=>{
+    const{folio,tipoMaquina}=pickerFor;
+    setPickerFor(null);
+    setPinFor({folio,accion:tipoMaquina==="lavadora"?"iniciar_lavado":"iniciar_secado",label:tipoMaquina==="lavadora"?"¿Quién pone la carga a lavar?":"¿Quién pone la carga a secar?",extra:{maquinaId,minutos}});
+  };
   const onPinOk=emp=>{
     if(!pinFor)return;
-    const{folio,accion}=pinFor;
-    if(accion==="lavado"){registrar(folio,"lavado_inicio",emp?.id);cambiarEstadoVenta(folio,"proceso");}
-    else if(accion==="doblado_inicio"){registrar(folio,"doblado_inicio",emp?.id);}
-    else if(accion==="doblado_fin"){registrar(folio,"doblado_fin",emp?.id);cambiarEstadoVenta(folio,"listo");}
+    const{folio,accion,extra}=pinFor;
+    if(accion==="iniciar_lavado")iniciarCarga(folio,"lavado",extra.maquinaId,extra.minutos,emp?.id);
+    else if(accion==="retirar_lavado")retirarCarga(extra.carga,emp?.id);
+    else if(accion==="iniciar_secado")iniciarCarga(folio,"secado",extra.maquinaId,extra.minutos,emp?.id);
+    else if(accion==="retirar_secado")retirarCarga(extra.carga,emp?.id);
+    else if(accion==="doblado_inicio")registrar(folio,"doblado_inicio",emp?.id);
+    else if(accion==="doblado_fin"){registrar(folio,"doblado_fin",emp?.id);const v=ventas.find(vv=>vv.folio===folio);notificar("🪄 Doblado terminado",`${v?.clienteNombre||folio} — falta cambiar a Listo para retirar`);}
+    else if(accion==="confirmar_listo")cambiarEstadoVenta(folio,"listo");
     setPinFor(null);
+  };
+  const activarNotificaciones=async()=>{
+    try{const p=await Notification.requestPermission();setNotifOn(p==="granted");}catch{}
   };
 
   const sinPins=pins.filter(p=>p.activo).length===0;
 
   return(<div style={{padding:"4px 4px 20px"}}>
-    {sinPins&&<div style={{...S.alrt,background:"#fff3e0",color:"#e65100"}}>⚠️ Todavía no hay PINs asignados. Pídele al admin que configure los PINs en el panel de administración → 🔒 PINs.</div>}
+    {sinPins&&<div style={{...S.alrt,background:"#fff3e0",color:"#e65100"}}>⚠️ Todavía no hay PINs asignados. Pídele al admin que los configure en 🔒 PINs.</div>}
+    {!notifOn&&<button onClick={activarNotificaciones} style={{...S.btnS,width:"100%",marginBottom:12,background:"#fff3e0",color:"#e65100"}}>🔔 Activar notificaciones en esta pantalla</button>}
+
+    <div style={{fontSize:12,fontWeight:700,color:"#888",marginBottom:6}}>🧺 LAVADORAS</div>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(90px,1fr))",gap:8,marginBottom:14}}>
+      {maquinas.filter(m=>m.tipo==="lavadora").map(m=><TarjetaMaquina key={m.id} m={m} cargas={cargas} ventas={ventas}/>)}
+    </div>
+    <div style={{fontSize:12,fontWeight:700,color:"#888",marginBottom:6}}>🔥 SECADORAS</div>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(90px,1fr))",gap:8,marginBottom:18}}>
+      {maquinas.filter(m=>m.tipo==="secadora").map(m=><TarjetaMaquina key={m.id} m={m} cargas={cargas} ventas={ventas}/>)}
+    </div>
+
+    <div style={{fontSize:12,fontWeight:700,color:"#888",marginBottom:6}}>📋 ÓRDENES EN PRODUCCIÓN</div>
     {activos.length===0&&<div style={{textAlign:"center",padding:"40px 20px",color:"#aaa"}}><div style={{fontSize:48,marginBottom:8}}>🏭</div><div>No hay órdenes en producción ahora mismo</div></div>}
     {activos.map(v=>{
-      const evLavInicio=buscarEvento(v.folio,"lavado_inicio");
+      const cLav=cargas.filter(c=>c.ventaFolio===v.folio&&c.tipo==="lavado").sort((a,b)=>new Date(b.inicio)-new Date(a.inicio))[0];
+      const cSec=cargas.filter(c=>c.ventaFolio===v.folio&&c.tipo==="secado").sort((a,b)=>new Date(b.inicio)-new Date(a.inicio))[0];
       const evDobInicio=buscarEvento(v.folio,"doblado_inicio");
       const evDobFin=buscarEvento(v.folio,"doblado_fin");
-      let etapaActual="recibido",colorEt="#f59e0b",bgEt="#fff8e1";
-      if(evLavInicio&&!evDobInicio){etapaActual="Lavando / en proceso";colorEt="#1565c0";bgEt="#e3f2fd";}
-      if(evDobInicio&&!evDobFin){etapaActual="Doblando";colorEt="#7b1fa2";bgEt="#f3e5f5";}
-      if(evDobFin){etapaActual="Doblado, pasa a Listo";colorEt="#2e7d32";bgEt="#e8f5e9";}
+      const maquinaDe=id=>maquinas.find(m=>m.id===id);
+
+      let etapaActual="Recibido",colorEt="#f59e0b";
+      if(cLav&&!cLav.finReal){etapaActual="Lavando";colorEt="#1565c0";}
+      else if(cLav?.finReal&&!cSec){etapaActual="Esperando secadora";colorEt="#f59e0b";}
+      else if(cSec&&!cSec.finReal){etapaActual="Secando";colorEt="#00838f";}
+      else if(cSec?.finReal&&!evDobInicio){etapaActual="Esperando doblado";colorEt="#f59e0b";}
+      else if(evDobInicio&&!evDobFin){etapaActual="Doblando";colorEt="#7b1fa2";}
+      else if(evDobFin){etapaActual="🔔 Falta marcar Listo";colorEt="#2e7d32";}
+
       return(
         <div key={v.folio} style={{...S.vcard,borderLeft:`4px solid ${colorEt}`}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-            <div>
-              <div style={{fontWeight:700,fontSize:15}}>{v.clienteNombre}</div>
-              <div style={{fontSize:11,color:"#888"}}>{v.folio}</div>
-              <div style={{fontSize:12,color:colorEt,fontWeight:700,marginTop:2}}>{etapaActual}</div>
-            </div>
-          </div>
+          <div style={{fontWeight:700,fontSize:15}}>{v.clienteNombre}</div>
+          <div style={{fontSize:11,color:"#888"}}>{v.folio}</div>
+          <div style={{fontSize:12,color:colorEt,fontWeight:700,marginTop:2}}>{etapaActual}</div>
           <div style={{fontSize:12,color:"#666",marginTop:6}}>{(v.items||[]).map(it=>it.label).join(" · ")}</div>
 
-          {!evLavInicio&&(
-            <button style={{...S.btnP,marginTop:10}} onClick={()=>setPinFor({folio:v.folio,accion:"lavado",label:"¿Quién inicia el lavado?"})}>🧺 Iniciar lavado</button>
+          {!cLav&&(
+            <button style={{...S.btnP,marginTop:10}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"lavadora"})}>🧺 Iniciar lavado</button>
           )}
 
-          {evLavInicio&&!evDobInicio&&(
+          {cLav&&!cLav.finReal&&(
             <>
-              <div style={{fontSize:11,color:"#888",marginTop:8}}>🧺 Lavado iniciado por {nombreDe(evLavInicio.empleadaId)} a las {new Date(evLavInicio.timestamp).toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"})}</div>
-              <button style={{...S.btnP,marginTop:10,background:"linear-gradient(135deg,#7b1fa2,#9c27b0)"}} onClick={()=>setPinFor({folio:v.folio,accion:"doblado_inicio",label:"¿Quién inicia el doblado?"})}>🪄 Iniciar doblado</button>
+              <div style={{fontSize:11,color:"#888",marginTop:8}}>🧺 {maquinaDe(cLav.maquinaId)?.nombre||cLav.maquinaId} · {cLav.minutosProgramados} min · inició {nombreDe(cLav.empleadaId)}</div>
+              <div style={{fontSize:20,textAlign:"center",margin:"6px 0",fontFamily:"monospace"}}><CuentaRegresiva finProgramado={cLav.finProgramado}/></div>
+              <button style={{...S.btnP,background:"linear-gradient(135deg,#1565c0,#42a5f5)"}} onClick={()=>setPinFor({folio:v.folio,accion:"retirar_lavado",label:"¿Quién retira de la lavadora?",extra:{carga:cLav}})}>📤 Retirar de lavadora</button>
             </>
+          )}
+
+          {cLav?.finReal&&!cSec&&(
+            <button style={{...S.btnP,marginTop:10,background:"linear-gradient(135deg,#00838f,#26c6da)"}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"secadora"})}>🔥 Iniciar secado</button>
+          )}
+
+          {cSec&&!cSec.finReal&&(
+            <>
+              <div style={{fontSize:11,color:"#888",marginTop:8}}>🔥 {maquinaDe(cSec.maquinaId)?.nombre||cSec.maquinaId} · {cSec.minutosProgramados} min · inició {nombreDe(cSec.empleadaId)}</div>
+              <div style={{fontSize:20,textAlign:"center",margin:"6px 0",fontFamily:"monospace"}}><CuentaRegresiva finProgramado={cSec.finProgramado}/></div>
+              <button style={{...S.btnP,background:"linear-gradient(135deg,#00838f,#26c6da)"}} onClick={()=>setPinFor({folio:v.folio,accion:"retirar_secado",label:"¿Quién retira de la secadora?",extra:{carga:cSec}})}>📤 Retirar de secadora</button>
+            </>
+          )}
+
+          {cSec?.finReal&&!evDobInicio&&(
+            <button style={{...S.btnP,marginTop:10,background:"linear-gradient(135deg,#7b1fa2,#9c27b0)"}} onClick={()=>setPinFor({folio:v.folio,accion:"doblado_inicio",label:"¿Quién inicia el doblado?"})}>🪄 Iniciar doblado</button>
           )}
 
           {evDobInicio&&!evDobFin&&(
@@ -573,11 +776,16 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
           )}
 
           {evDobFin&&(
-            <div style={{fontSize:12,color:"#2e7d32",fontWeight:700,marginTop:8}}>✅ Doblado por {nombreDe(evDobFin.empleadaId)} en {Math.round((new Date(evDobFin.timestamp)-new Date(evDobInicio.timestamp))/60000)} min — pasando a Listo...</div>
+            <>
+              <div style={{fontSize:12,color:"#2e7d32",fontWeight:700,marginTop:8}}>✅ Doblado por {nombreDe(evDobFin.empleadaId)} en {Math.round((new Date(evDobFin.timestamp)-new Date(evDobInicio.timestamp))/60000)} min</div>
+              <button style={{...S.btnP,marginTop:8,background:"linear-gradient(135deg,#2e7d32,#66bb6a)"}} onClick={()=>setPinFor({folio:v.folio,accion:"confirmar_listo",label:"¿Quién confirma que ya está Listo para retirar?"})}>🔔 Confirmar Listo para retirar</button>
+            </>
           )}
         </div>
       );
     })}
+
+    {pickerFor&&<MachinePicker maquinas={maquinas} tipoMaquina={pickerFor.tipoMaquina} tiempoSugerido={45} onConfirmar={onPickerConfirm} onCancelar={()=>setPickerFor(null)}/>}
     {pinFor&&<PinModal pins={pins} empleadas={empleadas} titulo={pinFor.label} onConfirm={onPinOk} onCancelar={()=>setPinFor(null)}/>}
   </div>);
 }
@@ -795,7 +1003,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         </div>
       </div>
       <div style={{background:"#fff",display:"flex",borderBottom:"2px solid #e8f0f7",position:"sticky",top:0,zIndex:10}}>
-        {[{id:"hoy",l:"📋 Ordenes",c:pendientesRaw.length},{id:"cobrar",l:"💸 Recibido",c:porCob.length},{id:"proceso",l:"🔄 En proceso",c:porProc.length},{id:"entregar",l:"📦 Listo para retirar",c:porEnt.length},{id:"produccion",l:"🏭 Producción"},{id:"bonos",l:"📈 Bonos"},{id:"nueva",l:"➕ Nuevo"}].map(t=>(
+        {[{id:"hoy",l:"📋 Ordenes",c:pendientesRaw.length},{id:"cobrar",l:"💸 Recibido",c:porCob.length},{id:"proceso",l:"🔄 En proceso",c:porProc.length},{id:"entregar",l:"📦 Listo para retirar",c:porEnt.length},{id:"bonos",l:"📈 Bonos"},{id:"nueva",l:"➕ Nuevo"}].map(t=>(
           <button key={t.id} style={{flex:1,padding:"12px 4px",border:"none",background:"transparent",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:tab===t.id?700:500,color:tab===t.id?"#1a3c5e":"#888",borderBottom:tab===t.id?"2px solid #4db6e4":"none",marginBottom:-2,fontSize:11,position:"relative"}}
             onClick={()=>t.id==="nueva"?setShowNueva(true):setTab(t.id)}>
             {t.l}{t.c>0&&<span style={{position:"absolute",top:5,right:3,background:"#e53935",color:"#fff",borderRadius:10,fontSize:9,fontWeight:800,padding:"1px 4px"}}>{t.c}</span>}
@@ -803,7 +1011,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         ))}
       </div>
       <div style={{padding:12}}>
-        {tab!=="bonos"&&tab!=="produccion"&&(<div style={{display:"flex",gap:8,marginBottom:12}}>
+        {tab!=="bonos"&&(<div style={{display:"flex",gap:8,marginBottom:12}}>
           <input style={{...S.inp,flex:1}} placeholder="🔍 Buscar cliente o folio..." value={busq} onChange={e=>setBusq(e.target.value)}/>
         </div>)}
         {tab==="hoy"&&(<>
@@ -829,8 +1037,6 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         </>)}
         {tab==="bonos"
           ?<MisIncentivos ventas={ventas} empleadas={empleadas} sesion={sesion} cfgInc={cfgInc||INCENTIVOS_DEFAULT[0]}/>
-          :tab==="produccion"
-            ?<Produccion ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} empleadas={empleadas} pins={pins||[]} eventosProduccion={eventosProduccion||[]} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento}/>
           :filtrados.length===0
             ?<div style={{textAlign:"center",padding:"40px 20px",color:"#aaa"}}><div style={{fontSize:48,marginBottom:8}}>{tab==="entregar"?"🎉":"📋"}</div><div>{tab==="cobrar"?"Sin órdenes en Recibido":tab==="proceso"?"Nada en proceso":tab==="entregar"?"Nada listo para retirar":"Sin ordenes"}</div></div>
             :filtrados.map(v=><OrdenCard key={v.folio} v={v} setVentas={setVentas} addAbono={addAbono} setTicket={setTicket} upsertVenta={upsertVenta}/>)
@@ -3435,6 +3641,7 @@ function AppContent({sesion,onLogout}){
   const [cajaOk,setCajaOk]=useState(false);
   const [cierreOk,setCierreOk]=useState(false);
   const [esperandoApertura,setEsperandoApertura]=useState(false);
+  const [vista,setVista]=useState(null); // 🏭 null | "facturacion" | "produccion" — elegido en SelectorVista
   const [tab,setTab]=useState("ventas");
   const { data: ventas, setData: setVentas, upsert: upsertVenta } = useCollection("ventas", KEYS.ventas, []);
 const { data: clientes, setData: setClientes, upsert: upsertCliente } = useCollection("clientes", KEYS.clientes, []);
@@ -3454,6 +3661,8 @@ const { data: maquinas, setData: setMaquinas, upsert: upsertMaquina } = useColle
 // 🏭 PRODUCCIÓN — Fase 2 y 3: PINs por empleada + registro de eventos (lavado/doblado)
 const { data: pins, setData: setPins, upsert: upsertPin } = useCollection("pins", "ll_pins", []);
 const { data: eventosProduccion, setData: setEventosProduccion, upsert: upsertEvento } = useCollection("eventosProduccion", "ll_eventos_produccion", []);
+// 🏭 PRODUCCIÓN — Fase 5: cargas de lavado/secado (máquina + tiempo programado)
+const { data: cargas, setData: setCargas, upsert: upsertCarga } = useCollection("cargas", "ll_cargas", []);
 const [showSalida,setShowSalida]=useState(false);
   const [ticketV,setTicketV]=useState(null);
   const [cuponSug,setCuponSug]=useState(null); // 🎟️ cupón sugerido tras imprimir la venta
@@ -3467,7 +3676,7 @@ const [showSalida,setShowSalida]=useState(false);
     setCajaOk(false);
     setEsperandoApertura(true);
   };
-  const exportarDatos=()=>{const d={ventas,clientes,empleadas,inventario,servicios,gastos,depositos,salidasCaja,cajas,cupones,promos,maquinas};const blob=new Blob([JSON.stringify(d,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="respaldo-"+hoy+".json";a.click();};
+  const exportarDatos=()=>{const d={ventas,clientes,empleadas,inventario,servicios,gastos,depositos,salidasCaja,cajas,cupones,promos,maquinas,cargas};const blob=new Blob([JSON.stringify(d,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="respaldo-"+hoy+".json";a.click();};
   // Importa un respaldo .json Y lo sube a Firestore (antes solo quedaba en este dispositivo)
   const importarDatos=e=>{
     const f=e.target.files[0];if(!f)return;
@@ -3488,6 +3697,7 @@ const [showSalida,setShowSalida]=useState(false);
           [d.cupones,setCupones,upsertCupon],
           [d.promos,setPromos,upsertPromo],
           [d.maquinas,setMaquinas,upsertMaquina],
+          [d.cargas,setCargas,upsertCarga],
         ];
         let tot=0;
         cols.forEach(([arr,setter,upsertFn])=>{
@@ -3501,6 +3711,11 @@ const [showSalida,setShowSalida]=useState(false);
     r.readAsText(f);
   };
   const pCount=ventas.filter(v=>(!pagada(v)&&!v.anulada)||(pagada(v)&&!v.anulada&&(v.estado||"recibido")!=="entregado")).length;
+
+  // 🏭 PRODUCCIÓN: para quienes no son admin, primero eligen si entran a Facturación o a Producción.
+  // Producción NO requiere caja abierta (es un área/dispositivo aparte del taller).
+  if(!esAdmin&&!vista)return <SelectorVista sesion={sesion} onElegir={setVista} onLogout={onLogout}/>;
+  if(!esAdmin&&vista==="produccion")return <ProduccionScreen sesion={sesion} onVolver={()=>setVista(null)} onLogout={onLogout} ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} empleadas={empleadas} pins={pins} eventosProduccion={eventosProduccion} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga}/>;
 
   // Si cerró caja y quiere seguir trabajando, DEBE abrir caja nuevamente
   if(!cajaOk||esperandoApertura)return <AperturaObligatoria
@@ -3522,7 +3737,7 @@ const [showSalida,setShowSalida]=useState(false);
     {id:"reportes",icon:"📊",l:"Reportes"},{id:"depositos",icon:"🏦",l:"Depósitos"},
     {id:"conciliacion",icon:"🏛️",l:"Conciliación"},
     {id:"gastos",icon:"🛒",l:"Gastos"},{id:"inventario",icon:"📦",l:"Inventario"},
-    {id:"equipo",icon:"👩",l:"Equipo"},{id:"incentivosAdmin",icon:"🎯",l:"Incentivos"},{id:"maquinasAdmin",icon:"🏭",l:"Máquinas"},{id:"pinsAdmin",icon:"🔒",l:"PINs"},{id:"caja",icon:"💰",l:"Caja"},
+    {id:"equipo",icon:"👩",l:"Equipo"},{id:"incentivosAdmin",icon:"🎯",l:"Incentivos"},{id:"maquinasAdmin",icon:"🏭",l:"Máquinas"},{id:"pinsAdmin",icon:"🔒",l:"PINs"},{id:"produccionAdmin",icon:"🧺",l:"Producción"},{id:"caja",icon:"💰",l:"Caja"},
     {id:"config",icon:"⚙️",l:"Config"},{id:"usuarios",icon:"🔑",l:"Usuarios"},
   ];
   return(<div style={S.app}>
@@ -3559,6 +3774,7 @@ const [showSalida,setShowSalida]=useState(false);
       {tab==="incentivosAdmin"&&<IncentivosAdmin cfgInc={cfgInc} setIncentivosArr={setIncentivosArr} upsertIncentivo={upsertIncentivo} ventas={ventas} empleadas={empleadas}/>}
       {tab==="maquinasAdmin"&&<MaquinasAdmin maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina}/>}
       {tab==="pinsAdmin"&&<PinsAdmin empleadas={empleadas} pins={pins} setPins={setPins} upsertPin={upsertPin}/>}
+      {tab==="produccionAdmin"&&(<div style={S.panel}><h2 style={S.ptitle}>🧺 Producción</h2><Produccion ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} empleadas={empleadas} pins={pins||[]} eventosProduccion={eventosProduccion||[]} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} maquinas={maquinas||[]} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas||[]} setCargas={setCargas} upsertCarga={upsertCarga}/></div>)}
       {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={handleCierreListo} onResetCierre={()=>setCierreOk(false)} sesion={sesion} salidasCaja={salidasCaja} setVentas={setVentas} upsertVenta={upsertVenta} upsertCaja={upsertCaja}/>}
       {tab==="config"&&<Configuracion servicios={servicios} setServicios={setServicios} exportarDatos={exportarDatos} importarDatos={importarDatos} upsertVenta={upsertVenta} upsertServicio={upsertServicio}/>}
       {tab==="usuarios"&&<GestionUsuarios/>}
