@@ -575,12 +575,80 @@ function TarjetaMaquina({m,cargas,ventas}){
   );
 }
 // 🏭 PRODUCCIÓN — selector de máquina libre + minutos programados, antes de pedir el PIN
-function MachinePicker({maquinas,tipoMaquina,tiempoSugerido,repetir,onConfirmar,onCancelar}){
+// 🏭 PRODUCCIÓN — Fase 4: revisión/clasificación de prendas, obligatoria antes de iniciar el lavado
+function ClasificacionModal({onConfirmar,onCancelar}){
+  const [bolsillosRevisados,setBolsillosRevisados]=useState(false);
+  const [objetosEncontrados,setObjetosEncontrados]=useState("");
+  const [manchasDetectadas,setManchasDetectadas]=useState(false);
+  const [requiereRestregado,setRequiereRestregado]=useState(false);
+  const [restregadoCosto,setRestregadoCosto]=useState("");
+  const [err,setErr]=useState("");
+  const confirmar=()=>{
+    if(!bolsillosRevisados){setErr("Confirma que ya revisaste los bolsillos");return;}
+    if(requiereRestregado&&!restregadoCosto){setErr("Escribe el costo del restregado extra");return;}
+    onConfirmar({
+      bolsillosRevisados,
+      objetosEncontrados:objetosEncontrados.trim()||null,
+      manchasDetectadas,
+      requiereRestregado,
+      restregadoCosto:requiereRestregado?parseFloat(restregadoCosto)||0:null,
+    });
+  };
+  return(
+    <div style={S.ov}>
+      <div style={{background:"#fff",borderRadius:18,width:"100%",maxWidth:400,maxHeight:"88vh",overflowY:"auto",padding:20}}>
+        <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e",marginBottom:4,textAlign:"center"}}>🔍 Revisión de prendas</div>
+        <div style={{fontSize:12,color:"#888",textAlign:"center",marginBottom:16}}>Antes de empezar a lavar</div>
+
+        <label style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:bolsillosRevisados?"#e8f5e9":"#f8fbfd",borderRadius:10,marginBottom:10,cursor:"pointer",border:"1.5px solid "+(bolsillosRevisados?"#2e7d32":"#e8f0f7")}}>
+          <input type="checkbox" checked={bolsillosRevisados} onChange={e=>{setBolsillosRevisados(e.target.checked);setErr("");}} style={{width:18,height:18}}/>
+          <span style={{fontWeight:600,fontSize:13,color:"#1a3c5e"}}>👖 Revisé los bolsillos</span>
+        </label>
+
+        <div style={{marginBottom:10}}>
+          <label style={S.lbl}>Objetos encontrados (opcional)</label>
+          <input style={S.inp} placeholder="ej. billete, llaves, lápiz..." value={objetosEncontrados} onChange={e=>setObjetosEncontrados(e.target.value)}/>
+        </div>
+
+        <label style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:manchasDetectadas?"#fff3e0":"#f8fbfd",borderRadius:10,marginBottom:10,cursor:"pointer",border:"1.5px solid "+(manchasDetectadas?"#e65100":"#e8f0f7")}}>
+          <input type="checkbox" checked={manchasDetectadas} onChange={e=>setManchasDetectadas(e.target.checked)} style={{width:18,height:18}}/>
+          <span style={{fontWeight:600,fontSize:13,color:"#1a3c5e"}}>🟤 Tiene manchas visibles</span>
+        </label>
+
+        <label style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:requiereRestregado?"#fff3e0":"#f8fbfd",borderRadius:10,marginBottom:6,cursor:"pointer",border:"1.5px solid "+(requiereRestregado?"#e65100":"#e8f0f7")}}>
+          <input type="checkbox" checked={requiereRestregado} onChange={e=>{setRequiereRestregado(e.target.checked);setErr("");}} style={{width:18,height:18}}/>
+          <span style={{fontWeight:600,fontSize:13,color:"#1a3c5e"}}>🧽 Requiere restregado extra (costo adicional)</span>
+        </label>
+        {requiereRestregado&&(
+          <div style={{marginBottom:10}}>
+            <label style={S.lbl}>Costo del restregado extra</label>
+            <input type="number" style={S.inp} placeholder="ej. 2.00" value={restregadoCosto} onChange={e=>{setRestregadoCosto(e.target.value);setErr("");}}/>
+            <div style={{fontSize:11,color:"#888",marginTop:4}}>Después de confirmar, podrás avisarle al cliente por WhatsApp con este costo.</div>
+          </div>
+        )}
+
+        {err&&<div style={{color:"#c62828",fontSize:12,fontWeight:600,marginBottom:8}}>{err}</div>}
+
+        <div style={{display:"flex",gap:8,marginTop:10}}>
+          <button style={{...S.btnP,flex:1}} onClick={confirmar}>Continuar</button>
+          <button style={{...S.btnS,flex:1}} onClick={onCancelar}>Cancelar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MachinePicker({maquinas,tipoMaquina,tiempoSugerido,repetir,grupo,centrifugado,onConfirmar,onCancelar}){
   const [maquinaId,setMaquinaId]=useState(null);
   const [minutos,setMinutos]=useState(String(tiempoSugerido||45));
   const [comentario,setComentario]=useState("");
   const [errC,setErrC]=useState("");
-  const libres=maquinas.filter(m=>m.tipo===tipoMaquina&&m.estado==="libre");
+  // 👟 El centrifugado siempre usa lavadora normal (incluso para zapatos). Si el grupo es "zapatos" y no es centrifugado, prioriza 1LZ/1SZ.
+  const categoriaPreferida=(grupo==="zapatos"&&!centrifugado)?"zapatos":"general";
+  const todasDelTipo=maquinas.filter(m=>m.tipo===tipoMaquina&&m.estado==="libre");
+  const preferidas=todasDelTipo.filter(m=>(m.categoria||"general")===categoriaPreferida);
+  const usarPreferidas=preferidas.length>0;
+  const libres=usarPreferidas?preferidas:todasDelTipo.filter(m=>(m.categoria||"general")==="general");
   const confirmar=()=>{
     if(!maquinaId)return;
     if(repetir&&!comentario.trim()){setErrC("Escribe el motivo, es obligatorio para volver a lavar/secar");return;}
@@ -589,12 +657,14 @@ function MachinePicker({maquinas,tipoMaquina,tiempoSugerido,repetir,onConfirmar,
   return(
     <div style={S.ov}>
       <div style={{background:"#fff",borderRadius:18,width:"100%",maxWidth:380,maxHeight:"85vh",overflowY:"auto",padding:20}}>
-        <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e",marginBottom:4,textAlign:"center"}}>{repetir?"🔁 ":""}{tipoMaquina==="lavadora"?"🧺 Elige la lavadora":"🔥 Elige la secadora"}</div>
+        <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e",marginBottom:4,textAlign:"center"}}>{repetir?"🔁 ":""}{centrifugado?"🌀 Elige la lavadora (centrifugado)":tipoMaquina==="lavadora"?"🧺 Elige la lavadora":"🔥 Elige la secadora"}</div>
         {repetir&&<div style={{fontSize:12,color:"#e65100",fontWeight:600,textAlign:"center",marginBottom:10}}>Se va a repetir {tipoMaquina==="lavadora"?"el lavado":"el secado"}</div>}
+        {categoriaPreferida==="zapatos"&&usarPreferidas&&<div style={{fontSize:12,color:"#8d6e63",fontWeight:600,textAlign:"center",marginBottom:10}}>👟 Mostrando solo la máquina especial de zapatos</div>}
+        {categoriaPreferida==="zapatos"&&!usarPreferidas&&todasDelTipo.length>0&&<div style={{fontSize:12,color:"#e65100",fontWeight:600,textAlign:"center",marginBottom:10}}>⚠️ La máquina de zapatos está ocupada — mostrando lavadoras/secadoras normales</div>}
         {libres.length===0&&<div style={{textAlign:"center",color:"#c62828",fontWeight:600,fontSize:13,padding:"14px 0"}}>No hay {tipoMaquina==="lavadora"?"lavadoras":"secadoras"} libres ahora mismo.</div>}
         {libres.map(m=>(
           <button key={m.id} onClick={()=>setMaquinaId(m.id)} style={{display:"block",width:"100%",textAlign:"left",padding:"12px 14px",borderRadius:10,marginBottom:8,border:maquinaId===m.id?"2px solid #1a3c5e":"1.5px solid #e8f0f7",background:maquinaId===m.id?"#eaf3fb":"#f8fbfd",fontWeight:700,color:"#1a3c5e",cursor:"pointer"}}>
-            {m.tipo==="lavadora"?"🧺":"🔥"} {m.nombre}{m.capacidadKg?` · ${m.capacidadKg} Kg`:""}
+            {m.categoria==="zapatos"?"👟":m.tipo==="lavadora"?"🧺":"🔥"} {m.nombre}{m.capacidadKg?` · ${m.capacidadKg} Kg`:""}
           </button>
         ))}
         {maquinaId&&(
@@ -620,6 +690,11 @@ function MachinePicker({maquinas,tipoMaquina,tiempoSugerido,repetir,onConfirmar,
 // 🏭 PRODUCCIÓN — Fase 5: tablero completo — máquina + tiempo por etapa, notificaciones, y confirmación final de Listo
 function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProduccion,setEventosProduccion,upsertEvento,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga}){
   const [pickerFor,setPickerFor]=useState(null); // {folio, tipoMaquina}
+  const [clasifFor,setClasifFor]=useState(null); // {folio} — orden esperando revisión de prendas
+  const [selLavadoZap,setSelLavadoZap]=useState({}); // {folio:true} seleccionados para lote de lavado
+  const [selSecadoZap,setSelSecadoZap]=useState({}); // {folio:"pares"} seleccionados para lote de secado (máx 20 pares)
+  const [minLoteLav,setMinLoteLav]=useState("45");
+  const [minLoteSec,setMinLoteSec]=useState("45");
   const [pinFor,setPinFor]=useState(null); // {folio, accion, label, extra}
   const [notifOn,setNotifOn]=useState(typeof Notification!=="undefined"&&Notification.permission==="granted");
 
@@ -627,11 +702,24 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
   const eventosDe=folio=>eventosProduccion.filter(ev=>ev.ventaFolio===folio);
   const buscarEvento=(folio,etapa)=>eventosDe(folio).filter(ev=>ev.etapa===etapa).sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp))[0];
   const nombreDe=id=>empleadas.find(e=>String(e.id)===String(id))?.nombre||"—";
+  const cargaDe=(folio,tipo,grupo)=>cargas.filter(c=>(c.ventaFolio===folio||(c.ventaFolios||[]).includes(folio))&&c.tipo===tipo&&(c.grupo||null)===(grupo||null)).sort((a,b)=>new Date(b.inicio)-new Date(a.inicio))[0];
+  const esZapatoLbl=lbl=>/ZAPATO|PARES?\b/i.test(lbl||"");
+  // 👟 Flujos de zapatos entre las órdenes activas: el grupo "zapatos" de una orden dividida, o la orden completa si es solo zapatos
+  const flujosZapatos=[];
+  activos.forEach(v=>{
+    const tieneZap=(v.items||[]).some(it=>esZapatoLbl(it.label));
+    const tieneOtro=(v.items||[]).some(it=>!esZapatoLbl(it.label));
+    if(v.prodGrupos&&v.prodGrupos.includes("zapatos"))flujosZapatos.push({folio:v.folio,grupo:"zapatos",cliente:v.clienteNombre,v});
+    else if(!v.prodGrupos&&tieneZap&&!tieneOtro)flujosZapatos.push({folio:v.folio,grupo:null,cliente:v.clienteNombre,v});
+  });
+  const colaLavadoZap=flujosZapatos.filter(f=>f.v.clasificacion&&!cargaDe(f.folio,"lavado",f.grupo));
+  const colaSecadoZap=flujosZapatos.filter(f=>{const cl=cargaDe(f.folio,"lavado",f.grupo);return cl?.finReal&&!cargaDe(f.folio,"secado",f.grupo);});
+  const paresSeleccionados=Object.values(selSecadoZap).reduce((a,p)=>a+(parseInt(p)||0),0);
 
   const notificar=(titulo,cuerpo)=>{try{if(typeof Notification!=="undefined"&&Notification.permission==="granted")new Notification(titulo,{body:cuerpo});}catch{}};
 
-  const registrar=(folio,etapa,empleadaId,observaciones)=>{
-    const ev={id:folio+"_"+etapa+"_"+Date.now(),ventaFolio:folio,etapa,empleadaId:empleadaId||null,timestamp:new Date().toISOString(),observaciones:observaciones||null};
+  const registrar=(folio,etapa,empleadaId,observaciones,grupo)=>{
+    const ev={id:folio+"_"+etapa+"_"+(grupo||"x")+"_"+Date.now(),ventaFolio:folio,etapa,empleadaId:empleadaId||null,timestamp:new Date().toISOString(),observaciones:observaciones||null,grupo:grupo||null};
     setEventosProduccion(prev=>[...prev,ev]);
     if(upsertEvento)upsertEvento(ev);
   };
@@ -643,6 +731,26 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
       return next;
     });
   };
+  // ✂️ Divide una orden en 2 flujos de producción independientes (ej. Ropa y Zapatos) para que avancen a ritmos distintos
+  const dividirGrupos=(folio,grupos)=>{
+    setVentas(prev=>{
+      const next=prev.map(v=>v.folio===folio?{...v,prodGrupos:grupos}:v);
+      const updated=next.find(v=>v.folio===folio);
+      if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+  };
+  // 🔍 Guarda la revisión de prendas (checklist de bolsillos/manchas/restregado) antes de permitir lavar
+  const guardarClasificacion=(folio,datos,empleadaId)=>{
+    const clasificacion={...datos,empleadaId:empleadaId||null,timestamp:new Date().toISOString()};
+    setVentas(prev=>{
+      const next=prev.map(v=>v.folio===folio?{...v,clasificacion}:v);
+      const updated=next.find(v=>v.folio===folio);
+      if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+    registrar(folio,"clasificacion",empleadaId,datos.requiereRestregado?`Requiere restregado extra ($${datos.restregadoCosto?.toFixed(2)})`:datos.manchasDetectadas?"Tiene manchas":null);
+  };
   const setMaquinaEstado=(maquinaId,cambios)=>{
     setMaquinas(prev=>{
       const next=prev.map(m=>m.id===maquinaId?{...m,...cambios}:m);
@@ -651,15 +759,28 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
       return next;
     });
   };
-  const iniciarCarga=(folio,tipo,maquinaId,minutos,empleadaId,comentario,esRepeticion)=>{
+  const iniciarCarga=(folio,tipo,maquinaId,minutos,empleadaId,comentario,esRepeticion,grupo)=>{
     const inicio=new Date();
     const finProgramado=new Date(inicio.getTime()+minutos*60000);
-    const carga={id:folio+"_"+tipo+"_"+Date.now(),ventaFolio:folio,tipo,maquinaId,minutosProgramados:minutos,inicio:inicio.toISOString(),finProgramado:finProgramado.toISOString(),finReal:null,empleadaId:empleadaId||null,empleadaRetiroId:null,notificado:false,comentario:comentario||null,esRepeticion:!!esRepeticion};
+    const carga={id:folio+"_"+tipo+"_"+(grupo||"x")+"_"+Date.now(),ventaFolio:folio,ventaFolios:null,tipo,maquinaId,minutosProgramados:minutos,inicio:inicio.toISOString(),finProgramado:finProgramado.toISOString(),finReal:null,empleadaId:empleadaId||null,empleadaRetiroId:null,notificado:false,comentario:comentario||null,esRepeticion:!!esRepeticion,grupo:grupo||null,pares:null};
     setCargas(prev=>[...prev,carga]);
     if(upsertCarga)upsertCarga(carga);
     setMaquinaEstado(maquinaId,{estado:"ocupada",cargaActualId:carga.id,finProgramado:carga.finProgramado});
-    registrar(folio,tipo==="lavado"?"lavado_inicio":tipo==="secado"?"secado_inicio":"centrifugado_inicio",empleadaId,esRepeticion?`🔁 Repetición — ${comentario}`:comentario);
+    registrar(folio,tipo==="lavado"?"lavado_inicio":tipo==="secado"?"secado_inicio":"centrifugado_inicio",empleadaId,esRepeticion?`🔁 Repetición — ${comentario}`:comentario,grupo);
     if(tipo==="lavado")cambiarEstadoVenta(folio,"proceso");
+  };
+  // 👟 Carga en LOTE: varias órdenes de zapatos acumuladas se lavan/secan juntas en 1LZ/1SZ
+  const iniciarCargaLote=(folios,tipo,maquinaId,minutos,empleadaId,pares)=>{
+    const inicio=new Date();
+    const finProgramado=new Date(inicio.getTime()+minutos*60000);
+    const carga={id:"lote_"+tipo+"_"+Date.now(),ventaFolio:null,ventaFolios:folios,tipo,maquinaId,minutosProgramados:minutos,inicio:inicio.toISOString(),finProgramado:finProgramado.toISOString(),finReal:null,empleadaId:empleadaId||null,empleadaRetiroId:null,notificado:false,comentario:null,esRepeticion:false,grupo:"zapatos",pares:pares||null};
+    setCargas(prev=>[...prev,carga]);
+    if(upsertCarga)upsertCarga(carga);
+    setMaquinaEstado(maquinaId,{estado:"ocupada",cargaActualId:carga.id,finProgramado:carga.finProgramado});
+    folios.forEach(folio=>{
+      registrar(folio,tipo==="lavado"?"lavado_inicio":"secado_inicio",empleadaId,`👟 Lote de ${folios.length} orden(es)${pares?` · ${pares} pares`:""}`,"zapatos");
+      if(tipo==="lavado")cambiarEstadoVenta(folio,"proceso");
+    });
   };
   const retirarCarga=(carga,empleadaId)=>{
     const finReal=new Date().toISOString();
@@ -670,7 +791,10 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
       return next;
     });
     setMaquinaEstado(carga.maquinaId,{estado:"libre",cargaActualId:null,finProgramado:null});
-    registrar(carga.ventaFolio,carga.tipo==="lavado"?"lavado_fin":carga.tipo==="secado"?"secado_fin":"centrifugado_fin",empleadaId);
+    const folios=carga.ventaFolios&&carga.ventaFolios.length?carga.ventaFolios:[carga.ventaFolio];
+    folios.forEach(folio=>{
+      registrar(folio,carga.tipo==="lavado"?"lavado_fin":carga.tipo==="secado"?"secado_fin":"centrifugado_fin",empleadaId,null,carga.grupo);
+    });
   };
 
   // ⏰ Revisa cada 15s si alguna carga cumplió su tiempo, para notificar una sola vez (requiere esta pantalla abierta)
@@ -697,24 +821,48 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
     // eslint-disable-next-line
   },[cargas]);
 
+  const onClasifConfirm=datos=>{
+    const folio=clasifFor.folio;
+    setClasifFor(null);
+    setPinFor({folio,accion:"clasificacion",label:"¿Quién hizo la revisión?",extra:{datos}});
+  };
+  const iniciarLoteLavado=()=>{
+    const folios=Object.keys(selLavadoZap).filter(f=>selLavadoZap[f]);
+    if(folios.length===0)return;
+    setSelLavadoZap({});
+    setPickerFor({tipoMaquina:"lavadora",grupo:"zapatos",lote:{folios,tipo:"lavado"}});
+  };
+  const iniciarLoteSecado=()=>{
+    const folios=Object.keys(selSecadoZap).filter(f=>selSecadoZap[f]);
+    if(folios.length===0)return;
+    if(paresSeleccionados>20){alert("⚠️ No puedes pasar de 20 pares en la secadora. Quita algunos antes de continuar.");return;}
+    setSelSecadoZap({});
+    setPickerFor({tipoMaquina:"secadora",grupo:"zapatos",lote:{folios,tipo:"secado",pares:paresSeleccionados}});
+  };
   const onPickerConfirm=(maquinaId,minutos,comentario)=>{
-    const{folio,tipoMaquina,repetir,centrifugado}=pickerFor;
+    const{folio,tipoMaquina,repetir,centrifugado,grupo,lote}=pickerFor;
     setPickerFor(null);
+    if(lote){
+      setPinFor({folio:null,accion:"iniciar_lote",label:lote.tipo==="lavado"?"¿Quién pone el lote de zapatos a lavar?":"¿Quién pone el lote de zapatos a secar?",extra:{maquinaId,minutos,lote}});
+      return;
+    }
     const accion=centrifugado?"iniciar_centrifugado":tipoMaquina==="lavadora"?"iniciar_lavado":"iniciar_secado";
     const label=centrifugado?"¿Quién pone a centrifugar?":tipoMaquina==="lavadora"?(repetir?"¿Quién vuelve a lavar?":"¿Quién pone la carga a lavar?"):(repetir?"¿Quién vuelve a secar?":"¿Quién pone la carga a secar?");
-    setPinFor({folio,accion,label,extra:{maquinaId,minutos,comentario,repetir}});
+    setPinFor({folio,accion,label,extra:{maquinaId,minutos,comentario,repetir,grupo}});
   };
   const onPinOk=emp=>{
     if(!pinFor)return;
     const{folio,accion,extra}=pinFor;
-    if(accion==="iniciar_lavado")iniciarCarga(folio,"lavado",extra.maquinaId,extra.minutos,emp?.id,extra.comentario,extra.repetir);
+    if(accion==="clasificacion")guardarClasificacion(folio,extra.datos,emp?.id);
+    else if(accion==="iniciar_lote")iniciarCargaLote(extra.lote.folios,extra.lote.tipo,extra.maquinaId,extra.minutos,emp?.id,extra.lote.pares);
+    else if(accion==="iniciar_lavado")iniciarCarga(folio,"lavado",extra.maquinaId,extra.minutos,emp?.id,extra.comentario,extra.repetir,extra.grupo);
     else if(accion==="retirar_lavado")retirarCarga(extra.carga,emp?.id);
-    else if(accion==="iniciar_secado")iniciarCarga(folio,"secado",extra.maquinaId,extra.minutos,emp?.id,extra.comentario,extra.repetir);
+    else if(accion==="iniciar_secado")iniciarCarga(folio,"secado",extra.maquinaId,extra.minutos,emp?.id,extra.comentario,extra.repetir,extra.grupo);
     else if(accion==="retirar_secado")retirarCarga(extra.carga,emp?.id);
-    else if(accion==="iniciar_centrifugado")iniciarCarga(folio,"centrifugado",extra.maquinaId,extra.minutos,emp?.id,extra.comentario,false);
+    else if(accion==="iniciar_centrifugado")iniciarCarga(folio,"centrifugado",extra.maquinaId,extra.minutos,emp?.id,extra.comentario,false,extra.grupo);
     else if(accion==="retirar_centrifugado")retirarCarga(extra.carga,emp?.id);
-    else if(accion==="doblado_inicio")registrar(folio,"doblado_inicio",emp?.id);
-    else if(accion==="doblado_fin"){registrar(folio,"doblado_fin",emp?.id);const v=ventas.find(vv=>vv.folio===folio);notificar("🪄 Doblado terminado",`${v?.clienteNombre||folio} — falta cambiar a Listo para retirar`);}
+    else if(accion==="doblado_inicio")registrar(folio,"doblado_inicio",emp?.id,null,extra?.grupo);
+    else if(accion==="doblado_fin"){registrar(folio,"doblado_fin",emp?.id,null,extra?.grupo);const v=ventas.find(vv=>vv.folio===folio);notificar("🪄 Doblado terminado",`${v?.clienteNombre||folio} — falta cambiar a Listo para retirar`);}
     else if(accion==="confirmar_listo")cambiarEstadoVenta(folio,"listo");
     setPinFor(null);
   };
@@ -737,109 +885,182 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
       </div>
     ))}
 
+    {(colaLavadoZap.length>0||colaSecadoZap.length>0)&&(
+      <div style={{background:"#fdf6f0",border:"1.5px solid #8d6e63",borderRadius:12,padding:12,marginBottom:16}}>
+        <div style={{fontSize:13,fontWeight:800,color:"#5d4037",marginBottom:8}}>👟 Cola de zapatos acumulados</div>
+
+        {colaLavadoZap.length>0&&(
+          <div style={{marginBottom:colaSecadoZap.length>0?14:0}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#5d4037",marginBottom:4}}>Esperando lavar (1LZ)</div>
+            {colaLavadoZap.map(f=>(
+              <label key={f.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px",cursor:"pointer"}}>
+                <input type="checkbox" checked={!!selLavadoZap[f.folio]} onChange={e=>setSelLavadoZap({...selLavadoZap,[f.folio]:e.target.checked})}/>
+                <span style={{fontSize:13,color:"#3e2723"}}>{f.cliente} · {f.folio}</span>
+              </label>
+            ))}
+            <div style={{display:"flex",gap:8,alignItems:"center",marginTop:8}}>
+              <input type="number" style={{...S.inp,width:80}} value={minLoteLav} onChange={e=>setMinLoteLav(e.target.value)} placeholder="min"/>
+              <button style={{...S.btnP,flex:1,background:"linear-gradient(135deg,#5c6bc0,#7986cb)",opacity:Object.values(selLavadoZap).some(Boolean)?1:0.5}} disabled={!Object.values(selLavadoZap).some(Boolean)} onClick={iniciarLoteLavado}>🧺 Lavar seleccionados en lote</button>
+            </div>
+          </div>
+        )}
+
+        {colaSecadoZap.length>0&&(
+          <div>
+            <div style={{fontSize:12,fontWeight:700,color:"#5d4037",marginBottom:4}}>Esperando secar (1SZ · máx 20 pares)</div>
+            {colaSecadoZap.map(f=>(
+              <div key={f.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px"}}>
+                <input type="checkbox" checked={!!selSecadoZap[f.folio]} onChange={e=>{const c={...selSecadoZap};if(e.target.checked)c[f.folio]="2";else delete c[f.folio];setSelSecadoZap(c);}}/>
+                <span style={{fontSize:13,color:"#3e2723",flex:1}}>{f.cliente} · {f.folio}</span>
+                {selSecadoZap[f.folio]!==undefined&&<input type="number" min="1" style={{...S.inp,width:60,padding:"4px 8px"}} value={selSecadoZap[f.folio]} onChange={e=>setSelSecadoZap({...selSecadoZap,[f.folio]:e.target.value})}/>}
+              </div>
+            ))}
+            <div style={{fontSize:12,fontWeight:700,color:paresSeleccionados>20?"#c62828":"#5d4037",marginTop:4}}>Total: {paresSeleccionados} / 20 pares</div>
+            <div style={{display:"flex",gap:8,alignItems:"center",marginTop:8}}>
+              <input type="number" style={{...S.inp,width:80}} value={minLoteSec} onChange={e=>setMinLoteSec(e.target.value)} placeholder="min"/>
+              <button style={{...S.btnP,flex:1,background:"linear-gradient(135deg,#00838f,#26c6da)",opacity:(Object.keys(selSecadoZap).length>0&&paresSeleccionados<=20)?1:0.5}} disabled={Object.keys(selSecadoZap).length===0||paresSeleccionados>20} onClick={iniciarLoteSecado}>🔥 Secar seleccionados en lote</button>
+            </div>
+          </div>
+        )}
+      </div>
+    )}
+
     <div style={{fontSize:12,fontWeight:700,color:"#888",marginBottom:6}}>📋 ÓRDENES EN PRODUCCIÓN</div>
     {activos.length===0&&<div style={{textAlign:"center",padding:"40px 20px",color:"#aaa"}}><div style={{fontSize:48,marginBottom:8}}>🏭</div><div>No hay órdenes en producción ahora mismo</div></div>}
     {activos.map(v=>{
-      const cLav=cargas.filter(c=>c.ventaFolio===v.folio&&c.tipo==="lavado").sort((a,b)=>new Date(b.inicio)-new Date(a.inicio))[0];
-      const cCen=cargas.filter(c=>c.ventaFolio===v.folio&&c.tipo==="centrifugado"&&(!cLav||new Date(c.inicio)>=new Date(cLav.inicio))).sort((a,b)=>new Date(b.inicio)-new Date(a.inicio))[0];
-      const cSec=cargas.filter(c=>c.ventaFolio===v.folio&&c.tipo==="secado"&&(!cLav||new Date(c.inicio)>=new Date(cLav.inicio))).sort((a,b)=>new Date(b.inicio)-new Date(a.inicio))[0];
-      const evDobInicio=buscarEvento(v.folio,"doblado_inicio");
-      const evDobFin=buscarEvento(v.folio,"doblado_fin");
       const maquinaDe=id=>maquinas.find(m=>m.id===id);
+      const buscarEventoG=(folio,etapa,grupo)=>eventosDe(folio).filter(ev=>ev.etapa===etapa&&(ev.grupo||null)===(grupo||null)).sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp))[0];
+      const esZapato=lbl=>/ZAPATO|PARES?\b/i.test(lbl||"");
+      const tieneZapato=(v.items||[]).some(it=>esZapato(it.label));
+      const tieneOtro=(v.items||[]).some(it=>!esZapato(it.label));
+      const puedeDividir=!v.prodGrupos&&tieneZapato&&tieneOtro;
+      const soloZapatos=!v.prodGrupos&&tieneZapato&&!tieneOtro;
+      const grupos=v.prodGrupos&&v.prodGrupos.length?v.prodGrupos:[soloZapatos?"zapatos":null];
 
-      let etapaActual="Recibido",colorEt="#f59e0b";
-      if(cLav&&!cLav.finReal){etapaActual="Lavando";colorEt="#1565c0";}
-      else if(cCen&&!cCen.finReal){etapaActual="Centrifugando";colorEt="#5c6bc0";}
-      else if(cLav?.finReal&&!cCen&&!cSec){etapaActual="Esperando secadora";colorEt="#f59e0b";}
-      else if(cSec&&!cSec.finReal){etapaActual="Secando";colorEt="#00838f";}
-      else if(cSec?.finReal&&!evDobInicio){etapaActual="Esperando doblado";colorEt="#f59e0b";}
-      else if(evDobInicio&&!evDobFin){etapaActual="Doblando";colorEt="#7b1fa2";}
-      else if(evDobFin){etapaActual="🔔 Falta marcar Listo";colorEt="#2e7d32";}
+      // 🔁 Un "flujo" completo (lavado→centrifugado→secado→doblado) para un grupo (o null si la orden no está dividida)
+      const perteneceCarga=c=>c.ventaFolio===v.folio||(c.ventaFolios||[]).includes(v.folio);
+      const renderFlujo=(grupo,etiqueta)=>{
+        const cLav=cargas.filter(c=>perteneceCarga(c)&&c.tipo==="lavado"&&(c.grupo||null)===(grupo||null)).sort((a,b)=>new Date(b.inicio)-new Date(a.inicio))[0];
+        const cCen=cargas.filter(c=>perteneceCarga(c)&&c.tipo==="centrifugado"&&(c.grupo||null)===(grupo||null)&&(!cLav||new Date(c.inicio)>=new Date(cLav.inicio))).sort((a,b)=>new Date(b.inicio)-new Date(a.inicio))[0];
+        const cSec=cargas.filter(c=>perteneceCarga(c)&&c.tipo==="secado"&&(c.grupo||null)===(grupo||null)&&(!cLav||new Date(c.inicio)>=new Date(cLav.inicio))).sort((a,b)=>new Date(b.inicio)-new Date(a.inicio))[0];
+        const evDobInicio=buscarEventoG(v.folio,"doblado_inicio",grupo);
+        const evDobFin=buscarEventoG(v.folio,"doblado_fin",grupo);
+        let etapaG="Recibido",colorG="#f59e0b";
+        if(cLav&&!cLav.finReal){etapaG="Lavando";colorG="#1565c0";}
+        else if(cCen&&!cCen.finReal){etapaG="Centrifugando";colorG="#5c6bc0";}
+        else if(cLav?.finReal&&!cCen&&!cSec){etapaG="Esperando secadora";colorG="#f59e0b";}
+        else if(cSec&&!cSec.finReal){etapaG="Secando";colorG="#00838f";}
+        else if(cSec?.finReal&&!evDobInicio){etapaG="Esperando doblado";colorG="#f59e0b";}
+        else if(evDobInicio&&!evDobFin){etapaG="Doblando";colorG="#7b1fa2";}
+        else if(evDobFin){etapaG="✅ Doblado";colorG="#2e7d32";}
+        return(
+          <div key={grupo||"solo"} style={grupo?{background:"#f8fbfd",borderRadius:10,padding:10,marginTop:10,border:"1px solid #e8f0f7"}:null}>
+            {etiqueta&&<div style={{fontSize:12,fontWeight:800,color:"#1a3c5e",marginBottom:4}}>{etiqueta}</div>}
+            <div style={{fontSize:12,color:colorG,fontWeight:700}}>{etapaG}</div>
+
+            {!cLav&&(
+              <button style={{...S.btnP,marginTop:8}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"lavadora",grupo})}>🧺 Iniciar lavado</button>
+            )}
+            {cLav&&!cLav.finReal&&(
+              <>
+                <div style={{fontSize:11,color:"#888",marginTop:8}}>🧺 {maquinaDe(cLav.maquinaId)?.nombre||cLav.maquinaId} · {cLav.minutosProgramados} min · inició {nombreDe(cLav.empleadaId)}</div>
+                <div style={{fontSize:20,textAlign:"center",margin:"6px 0",fontFamily:"monospace"}}><CuentaRegresiva finProgramado={cLav.finProgramado}/></div>
+                <button style={{...S.btnP,background:"linear-gradient(135deg,#1565c0,#42a5f5)"}} onClick={()=>setPinFor({folio:v.folio,accion:"retirar_lavado",label:"¿Quién retira de la lavadora?",extra:{carga:cLav}})}>📤 Retirar de lavadora</button>
+              </>
+            )}
+            {cLav?.finReal&&!cCen&&!cSec&&(
+              <div style={{display:"flex",gap:8,marginTop:8}}>
+                <button style={{...S.btnP,flex:1,background:"linear-gradient(135deg,#00838f,#26c6da)"}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"secadora",grupo})}>🔥 Iniciar secado</button>
+                <button style={{...S.btnP,flex:1,background:"linear-gradient(135deg,#5c6bc0,#7986cb)"}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"lavadora",centrifugado:true,grupo})}>🌀 Centrifugar</button>
+              </div>
+            )}
+            {cCen&&!cCen.finReal&&(
+              <>
+                <div style={{fontSize:11,color:"#888",marginTop:8}}>🌀 {maquinaDe(cCen.maquinaId)?.nombre||cCen.maquinaId} · {cCen.minutosProgramados} min · inició {nombreDe(cCen.empleadaId)}</div>
+                <div style={{fontSize:20,textAlign:"center",margin:"6px 0",fontFamily:"monospace"}}><CuentaRegresiva finProgramado={cCen.finProgramado}/></div>
+                <button style={{...S.btnP,background:"linear-gradient(135deg,#5c6bc0,#7986cb)"}} onClick={()=>setPinFor({folio:v.folio,accion:"retirar_centrifugado",label:"¿Quién retira del centrifugado?",extra:{carga:cCen}})}>📤 Retirar de centrifugado</button>
+              </>
+            )}
+            {cCen?.finReal&&!cSec&&(
+              <button style={{...S.btnP,marginTop:8,background:"linear-gradient(135deg,#00838f,#26c6da)"}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"secadora",grupo})}>🔥 Iniciar secado</button>
+            )}
+            {cSec&&!cSec.finReal&&(
+              <>
+                <div style={{fontSize:11,color:"#888",marginTop:8}}>🔥 {maquinaDe(cSec.maquinaId)?.nombre||cSec.maquinaId} · {cSec.minutosProgramados} min · inició {nombreDe(cSec.empleadaId)}</div>
+                <div style={{fontSize:20,textAlign:"center",margin:"6px 0",fontFamily:"monospace"}}><CuentaRegresiva finProgramado={cSec.finProgramado}/></div>
+                <button style={{...S.btnP,background:"linear-gradient(135deg,#00838f,#26c6da)"}} onClick={()=>setPinFor({folio:v.folio,accion:"retirar_secado",label:"¿Quién retira de la secadora?",extra:{carga:cSec}})}>📤 Retirar de secadora</button>
+              </>
+            )}
+            {cSec?.finReal&&!evDobInicio&&(
+              <button style={{...S.btnP,marginTop:8,background:"linear-gradient(135deg,#7b1fa2,#9c27b0)"}} onClick={()=>setPinFor({folio:v.folio,accion:"doblado_inicio",label:"¿Quién inicia el doblado?",extra:{grupo}})}>🪄 Iniciar doblado</button>
+            )}
+            {evDobInicio&&!evDobFin&&(
+              <>
+                <div style={{fontSize:11,color:"#888",marginTop:8}}>🪄 Doblando desde las {new Date(evDobInicio.timestamp).toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"})} por {nombreDe(evDobInicio.empleadaId)}</div>
+                <div style={{fontSize:22,fontWeight:800,color:"#7b1fa2",textAlign:"center",margin:"8px 0",fontFamily:"monospace"}}><Cronometro desde={evDobInicio.timestamp}/></div>
+                <button style={{...S.btnP,background:"linear-gradient(135deg,#2e7d32,#4caf50)"}} onClick={()=>setPinFor({folio:v.folio,accion:"doblado_fin",label:"¿Quién termina el doblado?",extra:{grupo}})}>✅ Terminar doblado</button>
+              </>
+            )}
+            {evDobFin&&(
+              <div style={{fontSize:12,color:"#2e7d32",fontWeight:700,marginTop:8}}>✅ Doblado por {nombreDe(evDobFin.empleadaId)} en {Math.round((new Date(evDobFin.timestamp)-new Date(evDobInicio.timestamp))/60000)} min</div>
+            )}
+            {(cLav?.comentario||cSec?.comentario||cCen?.comentario)&&(
+              <div style={{fontSize:11,color:"#e65100",background:"#fff3e0",borderRadius:8,padding:"6px 8px",marginTop:8}}>
+                {cLav?.esRepeticion&&cLav?.comentario&&<div>🔁 Se repitió el lavado — {cLav.comentario}</div>}
+                {cSec?.esRepeticion&&cSec?.comentario&&<div>🔁 Se repitió el secado — {cSec.comentario}</div>}
+                {cCen?.comentario&&<div>🌀 Centrifugado — {cCen.comentario}</div>}
+              </div>
+            )}
+            {cLav?.finReal&&!(cSec&&!cSec.finReal)&&(
+              <button style={{...S.btnS,marginTop:8,width:"100%",background:"#fff3e0",color:"#e65100",fontSize:12}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"lavadora",repetir:true,grupo})}>🔁 Lavar de nuevo</button>
+            )}
+            {cSec?.finReal&&!(evDobInicio&&!evDobFin)&&(
+              <button style={{...S.btnS,marginTop:8,width:"100%",background:"#fff3e0",color:"#e65100",fontSize:12}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"secadora",repetir:true,grupo})}>🔁 Secar de nuevo</button>
+            )}
+          </div>
+        );
+      };
+
+      const todosListos=grupos.every(g=>buscarEventoG(v.folio,"doblado_fin",g));
+      const etapaResumen=todosListos?"🔔 Falta marcar Listo":v.prodGrupos?"Dividida en grupos":"En producción";
 
       return(
-        <div key={v.folio} style={{...S.vcard,borderLeft:`4px solid ${colorEt}`}}>
+        <div key={v.folio} style={{...S.vcard,borderLeft:`4px solid ${todosListos?"#2e7d32":"#4db6e4"}`}}>
           <div style={{fontWeight:700,fontSize:15}}>{v.clienteNombre}</div>
           <div style={{fontSize:11,color:"#888"}}>{v.folio}</div>
-          <div style={{fontSize:12,color:colorEt,fontWeight:700,marginTop:2}}>{etapaActual}</div>
+          <div style={{fontSize:12,color:todosListos?"#2e7d32":"#4db6e4",fontWeight:700,marginTop:2}}>{etapaResumen}</div>
           <div style={{fontSize:12,color:"#666",marginTop:6}}>{(v.items||[]).map(it=>it.label).join(" · ")}</div>
 
-          {!cLav&&(
-            <button style={{...S.btnP,marginTop:10}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"lavadora"})}>🧺 Iniciar lavado</button>
-          )}
-
-          {cLav&&!cLav.finReal&&(
+          {!v.clasificacion?(
+            <button style={{...S.btnP,marginTop:10,background:"linear-gradient(135deg,#e65100,#ff9800)"}} onClick={()=>setClasifFor({folio:v.folio})}>🔍 Revisar prendas antes de lavar</button>
+          ):(
             <>
-              <div style={{fontSize:11,color:"#888",marginTop:8}}>🧺 {maquinaDe(cLav.maquinaId)?.nombre||cLav.maquinaId} · {cLav.minutosProgramados} min · inició {nombreDe(cLav.empleadaId)}</div>
-              <div style={{fontSize:20,textAlign:"center",margin:"6px 0",fontFamily:"monospace"}}><CuentaRegresiva finProgramado={cLav.finProgramado}/></div>
-              <button style={{...S.btnP,background:"linear-gradient(135deg,#1565c0,#42a5f5)"}} onClick={()=>setPinFor({folio:v.folio,accion:"retirar_lavado",label:"¿Quién retira de la lavadora?",extra:{carga:cLav}})}>📤 Retirar de lavadora</button>
+              <div style={{fontSize:11,color:"#2e7d32",background:"#e8f5e9",borderRadius:8,padding:"6px 8px",marginTop:8,fontWeight:600}}>
+                ✅ Revisado por {nombreDe(v.clasificacion.empleadaId)}
+                {v.clasificacion.objetosEncontrados&&<div>🔑 Se encontró: {v.clasificacion.objetosEncontrados}</div>}
+                {v.clasificacion.manchasDetectadas&&<div>🟤 Tiene manchas</div>}
+                {v.clasificacion.requiereRestregado&&<div>🧽 Restregado extra: ${v.clasificacion.restregadoCosto?.toFixed(2)}{" "}
+                  <a href="#" onClick={e=>{e.preventDefault();const tel=telWa(v.clienteTel);if(!tel){alert("Este cliente no tiene teléfono registrado.");return;}const msg=`🫧 *LAVA & LISTO* 🫧\n\n¡Hola *${v.clienteNombre}*! 👋\nAl revisar tu orden *${v.folio}* encontramos que necesita un restregado extra por manchas difíciles.\n\n🧽 *Costo adicional:* $${v.clasificacion.restregadoCosto?.toFixed(2)}\n\n¿Nos autorizas a hacerlo? Contéstanos por este medio. ¡Gracias! 💙`;window.open(`https://api.whatsapp.com/send/?phone=${tel}&text=${encodeURIComponent(msg)}`,"_blank");}} style={{color:"#1565c0",fontWeight:700}}>💬 Avisar al cliente</a>
+                </div>}
+              </div>
+
+              {puedeDividir&&(
+                <button style={{...S.btnS,marginTop:8,width:"100%",background:"#e8f5fd",color:"#1565c0"}} onClick={()=>dividirGrupos(v.folio,["ropa","zapatos"])}>✂️ Dividir en Ropa y Zapatos</button>
+              )}
+
+              {grupos.map(g=>renderFlujo(g,v.prodGrupos?(g==="ropa"?"👕 ROPA":"👟 ZAPATOS"):null))}
+
+              {todosListos&&(
+                <button style={{...S.btnP,marginTop:10,background:"linear-gradient(135deg,#2e7d32,#66bb6a)"}} onClick={()=>setPinFor({folio:v.folio,accion:"confirmar_listo",label:"¿Quién confirma que ya está Listo para retirar?"})}>🔔 Confirmar Listo para retirar</button>
+              )}
             </>
-          )}
-
-          {cLav?.finReal&&!cCen&&!cSec&&(
-            <div style={{display:"flex",gap:8,marginTop:10}}>
-              <button style={{...S.btnP,flex:1,background:"linear-gradient(135deg,#00838f,#26c6da)"}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"secadora"})}>🔥 Iniciar secado</button>
-              <button style={{...S.btnP,flex:1,background:"linear-gradient(135deg,#5c6bc0,#7986cb)"}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"lavadora",centrifugado:true})}>🌀 Centrifugar</button>
-            </div>
-          )}
-
-          {cCen&&!cCen.finReal&&(
-            <>
-              <div style={{fontSize:11,color:"#888",marginTop:8}}>🌀 {maquinaDe(cCen.maquinaId)?.nombre||cCen.maquinaId} · {cCen.minutosProgramados} min · inició {nombreDe(cCen.empleadaId)}</div>
-              <div style={{fontSize:20,textAlign:"center",margin:"6px 0",fontFamily:"monospace"}}><CuentaRegresiva finProgramado={cCen.finProgramado}/></div>
-              <button style={{...S.btnP,background:"linear-gradient(135deg,#5c6bc0,#7986cb)"}} onClick={()=>setPinFor({folio:v.folio,accion:"retirar_centrifugado",label:"¿Quién retira del centrifugado?",extra:{carga:cCen}})}>📤 Retirar de centrifugado</button>
-            </>
-          )}
-
-          {cCen?.finReal&&!cSec&&(
-            <button style={{...S.btnP,marginTop:10,background:"linear-gradient(135deg,#00838f,#26c6da)"}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"secadora"})}>🔥 Iniciar secado</button>
-          )}
-
-          {cSec&&!cSec.finReal&&(
-            <>
-              <div style={{fontSize:11,color:"#888",marginTop:8}}>🔥 {maquinaDe(cSec.maquinaId)?.nombre||cSec.maquinaId} · {cSec.minutosProgramados} min · inició {nombreDe(cSec.empleadaId)}</div>
-              <div style={{fontSize:20,textAlign:"center",margin:"6px 0",fontFamily:"monospace"}}><CuentaRegresiva finProgramado={cSec.finProgramado}/></div>
-              <button style={{...S.btnP,background:"linear-gradient(135deg,#00838f,#26c6da)"}} onClick={()=>setPinFor({folio:v.folio,accion:"retirar_secado",label:"¿Quién retira de la secadora?",extra:{carga:cSec}})}>📤 Retirar de secadora</button>
-            </>
-          )}
-
-          {cSec?.finReal&&!evDobInicio&&(
-            <button style={{...S.btnP,marginTop:10,background:"linear-gradient(135deg,#7b1fa2,#9c27b0)"}} onClick={()=>setPinFor({folio:v.folio,accion:"doblado_inicio",label:"¿Quién inicia el doblado?"})}>🪄 Iniciar doblado</button>
-          )}
-
-          {evDobInicio&&!evDobFin&&(
-            <>
-              <div style={{fontSize:11,color:"#888",marginTop:8}}>🪄 Doblando desde las {new Date(evDobInicio.timestamp).toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"})} por {nombreDe(evDobInicio.empleadaId)}</div>
-              <div style={{fontSize:22,fontWeight:800,color:"#7b1fa2",textAlign:"center",margin:"8px 0",fontFamily:"monospace"}}><Cronometro desde={evDobInicio.timestamp}/></div>
-              <button style={{...S.btnP,background:"linear-gradient(135deg,#2e7d32,#4caf50)"}} onClick={()=>setPinFor({folio:v.folio,accion:"doblado_fin",label:"¿Quién termina el doblado?"})}>✅ Terminar doblado</button>
-            </>
-          )}
-
-          {evDobFin&&(
-            <>
-              <div style={{fontSize:12,color:"#2e7d32",fontWeight:700,marginTop:8}}>✅ Doblado por {nombreDe(evDobFin.empleadaId)} en {Math.round((new Date(evDobFin.timestamp)-new Date(evDobInicio.timestamp))/60000)} min</div>
-              <button style={{...S.btnP,marginTop:8,background:"linear-gradient(135deg,#2e7d32,#66bb6a)"}} onClick={()=>setPinFor({folio:v.folio,accion:"confirmar_listo",label:"¿Quién confirma que ya está Listo para retirar?"})}>🔔 Confirmar Listo para retirar</button>
-            </>
-          )}
-
-          {(cLav?.comentario||cSec?.comentario||cCen?.comentario)&&(
-            <div style={{fontSize:11,color:"#e65100",background:"#fff3e0",borderRadius:8,padding:"6px 8px",marginTop:8}}>
-              {cLav?.esRepeticion&&cLav?.comentario&&<div>🔁 Se repitió el lavado — {cLav.comentario}</div>}
-              {cSec?.esRepeticion&&cSec?.comentario&&<div>🔁 Se repitió el secado — {cSec.comentario}</div>}
-              {cCen?.comentario&&<div>🌀 Centrifugado — {cCen.comentario}</div>}
-            </div>
-          )}
-
-          {cLav?.finReal&&!(cSec&&!cSec.finReal)&&(
-            <button style={{...S.btnS,marginTop:8,width:"100%",background:"#fff3e0",color:"#e65100",fontSize:12}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"lavadora",repetir:true})}>🔁 Lavar de nuevo</button>
-          )}
-          {cSec?.finReal&&!(evDobInicio&&!evDobFin)&&(
-            <button style={{...S.btnS,marginTop:8,width:"100%",background:"#fff3e0",color:"#e65100",fontSize:12}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"secadora",repetir:true})}>🔁 Secar de nuevo</button>
           )}
         </div>
       );
     })}
 
-    {pickerFor&&<MachinePicker maquinas={maquinas} tipoMaquina={pickerFor.tipoMaquina} tiempoSugerido={45} repetir={!!pickerFor.repetir} onConfirmar={onPickerConfirm} onCancelar={()=>setPickerFor(null)}/>}
+    {clasifFor&&<ClasificacionModal onConfirmar={onClasifConfirm} onCancelar={()=>setClasifFor(null)}/>}
+    {pickerFor&&<MachinePicker maquinas={maquinas} tipoMaquina={pickerFor.tipoMaquina} tiempoSugerido={pickerFor.lote?(pickerFor.lote.tipo==="lavado"?parseInt(minLoteLav)||45:parseInt(minLoteSec)||45):45} repetir={!!pickerFor.repetir} grupo={pickerFor.grupo} centrifugado={!!pickerFor.centrifugado} onConfirmar={onPickerConfirm} onCancelar={()=>setPickerFor(null)}/>}
     {pinFor&&<PinModal pins={pins} empleadas={empleadas} titulo={pinFor.label} onConfirm={onPinOk} onCancelar={()=>setPinFor(null)}/>}
   </div>);
 }
