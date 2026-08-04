@@ -221,7 +221,11 @@ const msgWa = (v, tipo) => {
   const items = (v.items||[]).map(it=>`  ${E.item} ${it.label}${it.piezas>1?` x${it.piezas}`:""}`).join("\n");
   const pend = saldo(v);
   if(tipo==="recibido") return `${E.burbuja} *LAVA & LISTO* ${E.burbuja}\n_Lavanderia & Limpieza Especializada_\n${L}\n¡Hola *${v.clienteNombre}*! ${E.saludo}\nTu orden fue *RECIBIDA* ${E.check}\n\n${E.folio} *Folio:* ${v.folio}\n${L}\n*DETALLE DEL SERVICIO:*\n${items}\n${L}\n${E.dinero} *Total:* $${v.total.toFixed(2)}\n${pend>0?`${E.reloj} *Saldo pendiente:* $${pend.toFixed(2)}`:`${E.check} *Pagado en su totalidad*`}\n${E.fecha} *Entrega estimada:* ${fmtD(v.entrega)}\n${L}\n¡Gracias por confiar en nosotros! ${E.corazon}\n${E.pin} Ricaurte, Cuenca`;
-  return `${E.burbuja} *LAVA & LISTO* ${E.burbuja}\n_Lavanderia & Limpieza Especializada_\n${L}\n¡Hola *${v.clienteNombre}*! ${E.fiesta}\n\nTu pedido *${v.folio}* ya esta\n${E.brillo} *LISTO PARA RETIRAR* ${E.brillo}\n${L}${pend>0?`\n${E.reloj} *Saldo al retirar:* $${pend.toFixed(2)}\n${L}`:""}\n${E.hora} Te esperamos en nuestro local\n¡Gracias por tu preferencia! ${E.corazon}\n${E.pin} Ricaurte, Cuenca`;
+  // 🧽 Detalle del restregado extra (si se solicitó), para que el cliente vea siempre qué se incluyó o no en su cuenta final
+  const rEstado=v.clasificacion?.restregadoEstado;
+  const rCosto=v.clasificacion?.restregadoCosto;
+  const restregadoLinea=rEstado==="autorizado"?`\n${E.item} *Incluye restregado extra autorizado:* $${(rCosto||0).toFixed(2)}\n${L}`:rEstado==="rechazado"?`\n${E.item} *Restregado extra:* no autorizado por el cliente\n${L}`:"";
+  return `${E.burbuja} *LAVA & LISTO* ${E.burbuja}\n_Lavanderia & Limpieza Especializada_\n${L}\n¡Hola *${v.clienteNombre}*! ${E.fiesta}\n\nTu pedido *${v.folio}* ya esta\n${E.brillo} *LISTO PARA RETIRAR* ${E.brillo}\n${L}${restregadoLinea}${pend>0?`\n${E.reloj} *Saldo al retirar:* $${pend.toFixed(2)}\n${L}`:""}\n${E.hora} Te esperamos en nuestro local\n¡Gracias por tu preferencia! ${E.corazon}\n${E.pin} Ricaurte, Cuenca`;
 };
 
 // ===== Cumpleaños =====
@@ -611,6 +615,11 @@ function ProduccionScreen({sesion,onVolver,onLogout,ventas,setVentas,upsertVenta
           <button onClick={onLogout} style={{background:"rgba(255,255,255,.2)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 12px",fontWeight:600,cursor:"pointer"}}>Salir</button>
         </div>
       </div>
+      {ventas.filter(v=>!v.anulada&&v.clasificacion?.restregadoEstado==="pendiente_confirmar").length>0&&(
+        <div style={{background:"#fff3e0",borderBottom:"1.5px solid #e65100",padding:"8px 16px",fontSize:12,fontWeight:700,color:"#e65100"}}>
+          🧽 {ventas.filter(v=>!v.anulada&&v.clasificacion?.restregadoEstado==="pendiente_confirmar").length} restregado(s) esperando respuesta del cliente
+        </div>
+      )}
       <div style={{padding:12,maxWidth:900,margin:"0 auto"}}>
         <Produccion ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} empleadas={empleadas} pins={pins||[]} eventosProduccion={eventosProduccion||[]} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} maquinas={maquinas||[]} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas||[]} setCargas={setCargas} upsertCarga={upsertCarga}/>
       </div>
@@ -1210,6 +1219,42 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
       return next;
     });
   };
+  // 🧽 Avisa al cliente del restregado extra por WhatsApp y marca la orden como "esperando respuesta" — dispara notificación para todo el equipo
+  const avisarRestregado=v=>{
+    const tel=telWa(v.clienteTel);
+    if(!tel){alert("Este cliente no tiene teléfono registrado.");return;}
+    const costo=v.clasificacion?.restregadoCosto||0;
+    const msg=`🫧 *LAVA & LISTO* 🫧\n\n¡Hola *${v.clienteNombre}*! 👋\nAl revisar tu orden *${v.folio}* encontramos que necesita un restregado extra por manchas difíciles.\n\n🧽 *Costo adicional:* $${costo.toFixed(2)}\n\n¿Nos autorizas a hacerlo? Contéstanos por este medio. ¡Gracias! 💙`;
+    window.open(`https://api.whatsapp.com/send/?phone=${tel}&text=${encodeURIComponent(msg)}`,"_blank");
+    setVentas(prev=>{
+      const next=prev.map(vv=>vv.folio===v.folio?{...vv,clasificacion:{...vv.clasificacion,restregadoEstado:"pendiente_confirmar",restregadoAvisadoEn:new Date().toISOString()}}:vv);
+      const updated=next.find(vv=>vv.folio===v.folio);
+      if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+    notificar("🧽 Mensaje de restregado enviado",`${v.clienteNombre} · ${v.folio} · $${costo.toFixed(2)} — falta confirmar respuesta`);
+  };
+  // 🧽 Registra lo que respondió el cliente: si autoriza se suma a la orden, si no queda en observaciones
+  const confirmarRestregado=(v,autorizado)=>{
+    const costo=v.clasificacion?.restregadoCosto||0;
+    if(autorizado){
+      const nuevoItem={servId:null,custom:true,piezas:1,lC:"🧽 Restregado extra autorizado",pC:costo.toFixed(2)};
+      setVentas(prev=>{
+        const next=prev.map(vv=>vv.folio===v.folio?{...vv,items:[...(vv.items||[]),nuevoItem],total:(vv.total||0)+costo,clasificacion:{...vv.clasificacion,restregadoEstado:"autorizado",restregadoConfirmadoEn:new Date().toISOString()}}:vv);
+        const updated=next.find(vv=>vv.folio===v.folio);
+        if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
+        return next;
+      });
+    }else{
+      const notaTxt=`🧽 Restregado extra rechazado por el cliente (hubiera costado $${costo.toFixed(2)})`;
+      setVentas(prev=>{
+        const next=prev.map(vv=>vv.folio===v.folio?{...vv,notas:[vv.notas,notaTxt].filter(Boolean).join(" · "),clasificacion:{...vv.clasificacion,restregadoEstado:"rechazado",restregadoConfirmadoEn:new Date().toISOString()}}:vv);
+        const updated=next.find(vv=>vv.folio===v.folio);
+        if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
+        return next;
+      });
+    }
+  };
   // ✂️ Divide una orden en 2 flujos de producción independientes (ej. Ropa y Zapatos) para que avancen a ritmos distintos
   const dividirGrupos=(folio,grupos)=>{
     setVentas(prev=>{
@@ -1518,9 +1563,24 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
                 ✅ Revisado por {nombreDe(v.clasificacion.empleadaId)}
                 {v.clasificacion.objetosEncontrados&&<div>🔑 Se encontró: {v.clasificacion.objetosEncontrados}</div>}
                 {v.clasificacion.manchasDetectadas&&<div>🟤 Tiene manchas</div>}
-                {v.clasificacion.requiereRestregado&&<div>🧽 Restregado extra: ${v.clasificacion.restregadoCosto?.toFixed(2)}{" "}
-                  <a href="#" onClick={e=>{e.preventDefault();const tel=telWa(v.clienteTel);if(!tel){alert("Este cliente no tiene teléfono registrado.");return;}const msg=`🫧 *LAVA & LISTO* 🫧\n\n¡Hola *${v.clienteNombre}*! 👋\nAl revisar tu orden *${v.folio}* encontramos que necesita un restregado extra por manchas difíciles.\n\n🧽 *Costo adicional:* $${v.clasificacion.restregadoCosto?.toFixed(2)}\n\n¿Nos autorizas a hacerlo? Contéstanos por este medio. ¡Gracias! 💙`;window.open(`https://api.whatsapp.com/send/?phone=${tel}&text=${encodeURIComponent(msg)}`,"_blank");}} style={{color:"#1565c0",fontWeight:700}}>💬 Avisar al cliente</a>
-                </div>}
+                {v.clasificacion.requiereRestregado&&(()=>{
+                  const rEstado=v.clasificacion.restregadoEstado;
+                  return(<div style={{marginTop:4}}>
+                    <div>🧽 Restregado extra: ${v.clasificacion.restregadoCosto?.toFixed(2)}</div>
+                    {!rEstado&&<a href="#" onClick={e=>{e.preventDefault();avisarRestregado(v);}} style={{color:"#1565c0",fontWeight:700}}>💬 Avisar al cliente</a>}
+                    {rEstado==="pendiente_confirmar"&&(
+                      <div style={{marginTop:4}}>
+                        <div style={{color:"#e65100",fontWeight:700}}>⏳ Esperando respuesta del cliente</div>
+                        <div style={{display:"flex",gap:6,marginTop:4}}>
+                          <button style={{...S.btnS,fontSize:11,background:"#e8f5e9",color:"#2e7d32"}} onClick={()=>confirmarRestregado(v,true)}>✅ Cliente autorizó</button>
+                          <button style={{...S.btnS,fontSize:11,background:"#ffebee",color:"#c62828"}} onClick={()=>confirmarRestregado(v,false)}>❌ Cliente rechazó</button>
+                        </div>
+                      </div>
+                    )}
+                    {rEstado==="autorizado"&&<div style={{color:"#2e7d32",fontWeight:700,marginTop:2}}>✅ Autorizado — se sumó ${v.clasificacion.restregadoCosto?.toFixed(2)} a la orden</div>}
+                    {rEstado==="rechazado"&&<div style={{color:"#c62828",fontWeight:700,marginTop:2}}>❌ Rechazado — quedó en observaciones de la orden</div>}
+                  </div>);
+                })()}
               </div>
 
               {puedeDividir&&(
@@ -1901,6 +1961,8 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
   const [showNueva,setShowNueva]=useState(false);
   const [filtroTile,setFiltroTile]=useState(null); // 🔎 filtro rápido al tocar un contador (recibido/proceso/listo/entregado_pend)
   const [showCaja,setShowCaja]=useState(false);const [ticket,setTicket]=useState(null);const [cuponSugE,setCuponSugE]=useState(null);const [showSalidaEmp,setShowSalidaEmp]=useState(false);
+  // 🧽 Restregados esperando respuesta del cliente — visible para todo el equipo hasta que se confirme
+  const restregadosPendientes=ventas.filter(v=>!v.anulada&&v.clasificacion?.restregadoEstado==="pendiente_confirmar");
   // 📋 Todas las órdenes pendientes del negocio (sin importar fecha ni empleada), ordenadas Recibido → En proceso → Listo → Entregado (sin cobrar)
   // 🔒 Solo desaparece cuando está Entregada Y además pagada por completo — si falta cobrar, se queda visible como pendiente
   const pendientesRaw=ventas.filter(v=>!v.anulada&&!((v.estado||"recibido")==="entregado"&&pagada(v))).sort((a,b)=>{
@@ -1939,6 +2001,11 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
           </div>
         </div>
       </div>
+      {restregadosPendientes.length>0&&(
+        <div style={{background:"#fff3e0",borderBottom:"1.5px solid #e65100",padding:"8px 14px",fontSize:12,fontWeight:700,color:"#e65100"}}>
+          🧽 {restregadosPendientes.length} restregado(s) esperando respuesta del cliente: {restregadosPendientes.map(v=>`${v.clienteNombre} (${v.folio})`).join(" · ")}
+        </div>
+      )}
       <div style={{background:"#fff",display:"flex",borderBottom:"2px solid #e8f0f7",position:"sticky",top:0,zIndex:10}}>
         {[{id:"hoy",l:"📋 Ordenes",c:pendientesRaw.length},{id:"cobrar",l:"💸 Recibido",c:porCob.length},{id:"proceso",l:"🔄 En proceso",c:porProc.length},{id:"entregar",l:"📦 Listo para retirar",c:porEnt.length},{id:"bonos",l:"📈 Bonos"},{id:"nueva",l:"➕ Nuevo"}].map(t=>(
           <button key={t.id} style={{flex:1,padding:"12px 4px",border:"none",background:"transparent",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:tab===t.id?700:500,color:tab===t.id?"#1a3c5e":"#888",borderBottom:tab===t.id?"2px solid #4db6e4":"none",marginBottom:-2,fontSize:11,position:"relative"}}
