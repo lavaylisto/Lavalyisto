@@ -500,6 +500,20 @@ function NotificacionesPanel({ventas,setVentas,upsertVenta,addAbono,soloLectura,
   const tieneAlgoAutorizado=v=>v.clasificacion?.restregadoEstado==="autorizado"||(v.clasificacion?.serviciosAdicionales||[]).some(s=>s.estado==="autorizado");
   const pendientesConfirmar=ventas.filter(v=>!v.anulada&&tieneAlgoP(v));
   const autorizadosPorCobrar=ventas.filter(v=>!v.anulada&&tieneAlgoAutorizado(v)&&saldo(v)>0);
+  // 📢 Órdenes que ya pasaron a "Listo" (automático desde Producción) y todavía no se le avisó al cliente
+  const listasSinAvisar=ventas.filter(v=>!v.anulada&&(v.estado||"recibido")==="listo"&&!v.checkMsgRetiro);
+  const enviarMsgListo=v=>{
+    if(!v.clienteTel){alert("Este cliente no tiene teléfono registrado.");return;}
+    const tel=telWa(v.clienteTel);
+    const msg=msgWa(v,"listo");
+    window.open(`https://api.whatsapp.com/send/?phone=${tel}&text=${encodeURIComponent(msg)}`,"_blank");
+    setVentas(prev=>{
+      const next=prev.map(vv=>vv.folio===v.folio?{...vv,checkMsgRetiro:true}:vv);
+      const updated=next.find(vv=>vv.folio===v.folio);
+      if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+  };
 
   const confirmarRestregado=(v,autorizado)=>{
     const costo=v.clasificacion?.restregadoCosto||0;
@@ -559,8 +573,21 @@ function NotificacionesPanel({ventas,setVentas,upsertVenta,addAbono,soloLectura,
           <button onClick={onClose} style={{background:"#f0f4f8",border:"none",borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:13}}>✕ Cerrar</button>
         </div>
 
-        {pendientesConfirmar.length===0&&autorizadosPorCobrar.length===0&&(
+        {pendientesConfirmar.length===0&&autorizadosPorCobrar.length===0&&listasSinAvisar.length===0&&(
           <div style={{textAlign:"center",padding:"40px 20px",color:"#aaa"}}><div style={{fontSize:44,marginBottom:8}}>🔔</div><div>Sin notificaciones pendientes</div></div>
+        )}
+
+        {listasSinAvisar.length>0&&(
+          <div style={{marginBottom:20}}>
+            <div style={{fontSize:13,fontWeight:800,color:"#1565c0",marginBottom:8}}>📢 Listas para retirar — falta avisar ({listasSinAvisar.length})</div>
+            {listasSinAvisar.map(v=>(
+              <div key={v.folio} style={{...S.vcard,borderLeft:"4px solid #1565c0"}}>
+                <div style={{fontWeight:700,fontSize:14}}>{v.clienteNombre}</div>
+                <div style={{fontSize:11,color:"#888"}}>{v.folio}</div>
+                <button style={{...S.btnP,marginTop:8,width:"100%",background:"linear-gradient(135deg,#1565c0,#42a5f5)"}} onClick={()=>enviarMsgListo(v)}>📤 Enviar mensaje de Listo</button>
+              </div>
+            ))}
+          </div>
         )}
 
         {pendientesConfirmar.length>0&&(
@@ -760,7 +787,7 @@ function SelectorVista({sesion,onElegir,onLogout}){
 // 🏭 PRODUCCIÓN — pantalla completa, independiente de Facturación. Sin tabs de caja/ventas; todo aquí se identifica por PIN.
 function ProduccionScreen({sesion,onVolver,onLogout,ventas,setVentas,upsertVenta,empleadas,pins,eventosProduccion,setEventosProduccion,upsertEvento,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga}){
   const [showNotifs,setShowNotifs]=useState(false);
-  const totalNotifs=ventas.filter(v=>!v.anulada&&(v.clasificacion?.restregadoEstado==="pendiente_confirmar"||v.clasificacion?.restregadoEstado==="autorizado"&&saldo(v)>0||(v.clasificacion?.serviciosAdicionales||[]).some(s=>s.estado==="pendiente_confirmar"||(s.estado==="autorizado"&&saldo(v)>0)))).length;
+  const totalNotifs=ventas.filter(v=>!v.anulada&&(v.clasificacion?.restregadoEstado==="pendiente_confirmar"||v.clasificacion?.restregadoEstado==="autorizado"&&saldo(v)>0||(v.clasificacion?.serviciosAdicionales||[]).some(s=>s.estado==="pendiente_confirmar"||(s.estado==="autorizado"&&saldo(v)>0))||((v.estado||"recibido")==="listo"&&!v.checkMsgRetiro))).length;
   // 🔔 Suena cuando aumentan las notificaciones (ej. llega un restregado nuevo o ya lo autorizaron en otra pantalla)
   const notifsPrevRef=useRef(totalNotifs);
   useEffect(()=>{
@@ -997,7 +1024,8 @@ function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta,clientes,setClien
           <button style={{width:26,height:26,padding:0,background:"#e3f2fd",color:"#1565c0",border:"1px solid #90caf9",borderRadius:7,fontSize:12,cursor:"pointer",flexShrink:0}} onClick={()=>reenviarWa("listo")} title="Reenviar mensaje de listo para retirar">✅</button>
         </div>
         <div style={{display:"flex",gap:8,marginTop:10,flexWrap:"wrap"}}>
-          {sig&&<button style={{flex:1,padding:"10px",background:sig.bg,color:sig.color,border:`1.5px solid ${sig.color}`,borderRadius:10,fontWeight:700,fontSize:13,cursor:"pointer"}} onClick={cambiar}>{sig.icon} {sig.label}</button>}
+          {sig&&sig.id==="entregado"&&<button style={{flex:1,padding:"10px",background:sig.bg,color:sig.color,border:`1.5px solid ${sig.color}`,borderRadius:10,fontWeight:700,fontSize:13,cursor:"pointer"}} onClick={cambiar}>{sig.icon} {sig.label}</button>}
+          {sig&&sig.id!=="entregado"&&<div style={{flex:1,padding:"10px",background:"#f0f4f8",color:"#888",border:"1.5px dashed #d0dce8",borderRadius:10,fontWeight:600,fontSize:12,textAlign:"center"}}>🏭 Se actualiza desde Producción</div>}
           {!esPag&&<button style={{flex:1,padding:"10px",background:"#e8f5e9",color:"#2e7d32",border:"1.5px solid #2e7d32",borderRadius:10,fontWeight:700,fontSize:13,cursor:"pointer"}} onClick={()=>setShowAb(true)}>💰 Cobrar</button>}
           <button style={{padding:"10px 14px",background:"#f0f4f8",color:"#1a3c5e",border:"none",borderRadius:10,fontSize:12,cursor:"pointer"}} onClick={()=>setTicket(v)}>🧾</button>
         </div>
@@ -2256,7 +2284,8 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
   // 🧽 Restregados y servicios adicionales esperando respuesta del cliente — visible para todo el equipo hasta que se confirme
   const restregadosPendientes=ventas.filter(v=>!v.anulada&&(v.clasificacion?.restregadoEstado==="pendiente_confirmar"||(v.clasificacion?.serviciosAdicionales||[]).some(s=>s.estado==="pendiente_confirmar")));
   const restregadosPorCobrar=ventas.filter(v=>!v.anulada&&(v.clasificacion?.restregadoEstado==="autorizado"||(v.clasificacion?.serviciosAdicionales||[]).some(s=>s.estado==="autorizado"))&&saldo(v)>0);
-  const totalNotifs=restregadosPendientes.length+restregadosPorCobrar.length;
+  const listasSinAvisarCount=ventas.filter(v=>!v.anulada&&(v.estado||"recibido")==="listo"&&!v.checkMsgRetiro).length;
+  const totalNotifs=restregadosPendientes.length+restregadosPorCobrar.length+listasSinAvisarCount;
   // 🔔 Suena cuando aumentan las notificaciones (ej. llega un restregado nuevo o ya lo autorizaron en otra pantalla)
   const notifsPrevRef=useRef(totalNotifs);
   useEffect(()=>{
