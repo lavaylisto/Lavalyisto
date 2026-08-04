@@ -905,13 +905,13 @@ function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta,clientes,setClien
           </div>
           <div style={{fontSize:12,color:"#888"}}>📅 {fmtD(v.entrega)}</div>
         </div>
-        <label style={{...S.chk,fontSize:13,marginTop:8}}>
-          <input type="checkbox" checked={v.checkMsgRetiro||false} onChange={()=>toggle("checkMsgRetiro")}/>
-          <span>📲 Avisé al cliente</span>
-        </label>
-        <div style={{display:"flex",gap:6,marginTop:6}}>
-          <button style={{flex:1,padding:"6px 8px",background:"#e8f5e9",color:"#2e7d32",border:"1px solid #a5d6a7",borderRadius:8,fontSize:11,fontWeight:700,cursor:"pointer"}} onClick={()=>reenviarWa("recibido")} title="Reenviar mensaje de orden recibida">🔁📥 Reenviar "Recibido"</button>
-          <button style={{flex:1,padding:"6px 8px",background:"#e3f2fd",color:"#1565c0",border:"1px solid #90caf9",borderRadius:8,fontSize:11,fontWeight:700,cursor:"pointer"}} onClick={()=>reenviarWa("listo")} title="Reenviar mensaje de listo para retirar">🔁✅ Reenviar "Listo"</button>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginTop:8}}>
+          <label style={{...S.chk,fontSize:13,margin:0}}>
+            <input type="checkbox" checked={v.checkMsgRetiro||false} onChange={()=>toggle("checkMsgRetiro")}/>
+            <span>📲 Avisé al cliente</span>
+          </label>
+          <button style={{width:26,height:26,padding:0,background:"#e8f5e9",color:"#2e7d32",border:"1px solid #a5d6a7",borderRadius:7,fontSize:12,cursor:"pointer",flexShrink:0}} onClick={()=>reenviarWa("recibido")} title="Reenviar mensaje de orden recibida">📥</button>
+          <button style={{width:26,height:26,padding:0,background:"#e3f2fd",color:"#1565c0",border:"1px solid #90caf9",borderRadius:7,fontSize:12,cursor:"pointer",flexShrink:0}} onClick={()=>reenviarWa("listo")} title="Reenviar mensaje de listo para retirar">✅</button>
         </div>
         <div style={{display:"flex",gap:8,marginTop:10,flexWrap:"wrap"}}>
           {sig&&<button style={{flex:1,padding:"10px",background:sig.bg,color:sig.color,border:`1.5px solid ${sig.color}`,borderRadius:10,fontWeight:700,fontSize:13,cursor:"pointer"}} onClick={cambiar}>{sig.icon} {sig.label}</button>}
