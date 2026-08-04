@@ -1,5 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "firebase/firestore";
+import { getStorage } from "firebase/storage";
 
 // ============================================================
 // OPCIÓN A (recomendada): variables de entorno
@@ -29,6 +30,7 @@ const firebaseConfig = {
 export const firebaseListo = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId);
 
 let _db = null;
+let _storage = null; // 📷 Fotos de tareas (inventarios, evidencias) — mismo proyecto de Firebase, servicio Storage
 if (firebaseListo) {
   try {
     const app = initializeApp(firebaseConfig);
@@ -36,6 +38,7 @@ if (firebaseListo) {
     _db = initializeFirestore(app, {
       localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
     });
+    _storage = getStorage(app);
   } catch (e) {
     console.error("Firebase no pudo inicializarse:", e);
   }
@@ -44,3 +47,4 @@ if (firebaseListo) {
 }
 
 export const db = _db;
+export const storage = _storage;
