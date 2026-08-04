@@ -719,9 +719,17 @@ function TareasChecklist({tareasDiarias,setTareasDiarias,upsertTareaDiaria,pins,
 }
 
 // 📋 TAREAS — pantalla independiente (misma lógica de separación que Producción)
-function TareasScreen({sesion,onVolver,onLogout,tareasDiarias,setTareasDiarias,upsertTareaDiaria,pins,empleadas}){
+function TareasScreen({sesion,onVolver,onLogout,tareasDiarias,setTareasDiarias,upsertTareaDiaria,pins,empleadas,notas,setNotas,upsertNota}){
+  const [showNota,setShowNota]=useState(false);
+  const guardarNota=datos=>{
+    const nota={id:"nota_"+Date.now(),fecha:new Date().toISOString(),...datos,estado:"abierta",revisadaEn:null,respuestaAdmin:null};
+    setNotas(prev=>[...prev,nota]);
+    if(upsertNota)upsertNota(nota);
+    setShowNota(false);
+    alert("✅ Nota guardada — la administradora la va a revisar.");
+  };
   return(
-    <div style={{minHeight:"100vh",background:"#f0f4f8",fontFamily:"'DM Sans',sans-serif"}}>
+    <div style={{minHeight:"100vh",background:"#f0f4f8",fontFamily:"'DM Sans',sans-serif",position:"relative"}}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=DM+Sans:wght@400;500;600;700&display=swap');`}</style>
       <div style={{background:"linear-gradient(135deg,#00838f,#26c6da)",padding:"14px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <div>
@@ -733,9 +741,11 @@ function TareasScreen({sesion,onVolver,onLogout,tareasDiarias,setTareasDiarias,u
           <button onClick={onLogout} style={{background:"rgba(255,255,255,.2)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 12px",fontWeight:600,cursor:"pointer"}}>Salir</button>
         </div>
       </div>
-      <div style={{padding:12,maxWidth:900,margin:"0 auto"}}>
+      <div style={{padding:12,maxWidth:900,margin:"0 auto",paddingBottom:90}}>
         <TareasChecklist tareasDiarias={tareasDiarias||[]} setTareasDiarias={setTareasDiarias} upsertTareaDiaria={upsertTareaDiaria} pins={pins||[]} empleadas={empleadas}/>
       </div>
+      <button onClick={()=>setShowNota(true)} style={{position:"fixed",bottom:24,right:20,background:"linear-gradient(135deg,#1a3c5e,#2563a8)",color:"#fff",border:"none",borderRadius:30,padding:"14px 20px",fontWeight:800,fontSize:14,boxShadow:"0 6px 20px rgba(0,0,0,.25)",cursor:"pointer",zIndex:50}}>📝 + Dejar nota</button>
+      {showNota&&<NotaFormModal pins={pins} empleadas={empleadas} onGuardar={guardarNota} onCancelar={()=>setShowNota(false)}/>}
     </div>
   );
 }
@@ -887,6 +897,105 @@ function TarjetaMaquina({m,cargas,ventas}){
 // 🏭 PRODUCCIÓN — selector de máquina libre + minutos programados, antes de pedir el PIN
 // 🏭 PRODUCCIÓN — Fase 4: revisión/clasificación de prendas, obligatoria antes de iniciar el lavado
 // 📋 TAREAS — Fase 3: modal para tomar/adjuntar la foto requerida antes de completar una tarea
+// 📝 NOTAS — tipos y etiquetas
+const TIPO_NOTA={
+  pendiente:{label:"📌 Pendiente",color:"#1565c0",bg:"#e3f2fd"},
+  novedad:{label:"ℹ️ Novedad",color:"#7b1fa2",bg:"#f3e5f5"},
+  falta_insumo:{label:"📦 Falta insumo",color:"#e65100",bg:"#fff3e0"},
+  reclamo_cliente:{label:"😠 Reclamo cliente",color:"#c62828",bg:"#ffebee"},
+  daño_maquina:{label:"🔧 Daño máquina",color:"#5d4037",bg:"#efebe9"},
+};
+const ESTADO_NOTA={
+  abierta:{label:"🔴 Abierta",color:"#c62828"},
+  revisada:{label:"🟡 Revisada",color:"#e65100"},
+  resuelta:{label:"✅ Resuelta",color:"#2e7d32"},
+};
+
+// 📝 NOTAS — formulario rápido: tipo, área, texto, foto opcional, orden relacionada (opcional) y PIN
+function NotaFormModal({pins,empleadas,onGuardar,onCancelar}){
+  const [tipo,setTipo]=useState("pendiente");
+  const [area,setArea]=useState("atras");
+  const [texto,setTexto]=useState("");
+  const [ordenId,setOrdenId]=useState("");
+  const [file,setFile]=useState(null);
+  const [preview,setPreview]=useState(null);
+  const [subiendo,setSubiendo]=useState(false);
+  const [err,setErr]=useState("");
+  const [pinAbierto,setPinAbierto]=useState(false);
+  const elegirFoto=e=>{
+    const f=e.target.files?.[0];
+    if(!f)return;
+    setFile(f);setPreview(URL.createObjectURL(f));
+  };
+  const continuar=()=>{
+    if(!texto.trim()){setErr("Escribe el texto de la nota");return;}
+    setPinAbierto(true);
+  };
+  const onPinOk=async emp=>{
+    setPinAbierto(false);
+    setSubiendo(true);
+    let fotoUrl=null;
+    try{
+      if(file)fotoUrl=await subirFoto(file,"notas");
+      onGuardar({tipo,area,texto:texto.trim(),ordenId:ordenId.trim()||null,fotoUrl,autoraId:emp?.id||null});
+    }catch(e){
+      setErr("No se pudo subir la foto: "+(e.message||"intenta de nuevo"));
+      setSubiendo(false);
+    }
+  };
+  return(
+    <div style={S.ov}>
+      <div style={{background:"#fff",borderRadius:18,width:"100%",maxWidth:400,maxHeight:"88vh",overflowY:"auto",padding:20}}>
+        <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e",marginBottom:14,textAlign:"center"}}>📝 Dejar nota</div>
+
+        <div style={{marginBottom:10}}>
+          <label style={S.lbl}>Tipo</label>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+            {Object.entries(TIPO_NOTA).map(([k,v])=>(
+              <button key={k} onClick={()=>setTipo(k)} style={{padding:"8px 6px",borderRadius:10,border:tipo===k?`2px solid ${v.color}`:"1.5px solid #e8f0f7",background:tipo===k?v.bg:"#f8fbfd",fontSize:12,fontWeight:700,color:v.color,cursor:"pointer"}}>{v.label}</button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{marginBottom:10}}>
+          <label style={S.lbl}>Área</label>
+          <div style={{display:"flex",gap:6}}>
+            <button onClick={()=>setArea("atras")} style={{flex:1,padding:"8px",borderRadius:10,border:area==="atras"?"2px solid #1a3c5e":"1.5px solid #e8f0f7",background:area==="atras"?"#eaf3fb":"#f8fbfd",fontWeight:700,fontSize:12,color:"#1a3c5e",cursor:"pointer"}}>🧺 Atrás</button>
+            <button onClick={()=>setArea("adelante")} style={{flex:1,padding:"8px",borderRadius:10,border:area==="adelante"?"2px solid #1a3c5e":"1.5px solid #e8f0f7",background:area==="adelante"?"#eaf3fb":"#f8fbfd",fontWeight:700,fontSize:12,color:"#1a3c5e",cursor:"pointer"}}>🛎️ Adelante</button>
+          </div>
+        </div>
+
+        <div style={{marginBottom:10}}>
+          <label style={S.lbl}>Texto</label>
+          <textarea style={{...S.inp,minHeight:70,resize:"vertical"}} placeholder="Escribe aquí..." value={texto} onChange={e=>{setTexto(e.target.value);setErr("");}}/>
+        </div>
+
+        <div style={{marginBottom:10}}>
+          <label style={S.lbl}>Folio de orden relacionada (opcional)</label>
+          <input style={S.inp} placeholder="ej. LL-MS9EDXD7" value={ordenId} onChange={e=>setOrdenId(e.target.value)}/>
+        </div>
+
+        <div style={{marginBottom:10}}>
+          <label style={S.lbl}>Foto (opcional)</label>
+          {preview&&<img src={preview} alt="preview" style={{width:"100%",maxHeight:160,objectFit:"cover",borderRadius:10,marginBottom:8}}/>}
+          <label style={{...S.btnS,display:"block",cursor:"pointer",textAlign:"center"}}>
+            📷 {preview?"Cambiar foto":"Adjuntar foto"}
+            <input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={elegirFoto}/>
+          </label>
+        </div>
+
+        {err&&<div style={{color:"#c62828",fontSize:12,fontWeight:600,marginBottom:8}}>{err}</div>}
+
+        <div style={{display:"flex",gap:8,marginTop:10}}>
+          <button style={{...S.btnP,flex:1,opacity:subiendo?0.6:1}} disabled={subiendo} onClick={continuar}>{subiendo?"Guardando...":"✓ Continuar"}</button>
+          <button style={{...S.btnS,flex:1}} onClick={onCancelar} disabled={subiendo}>Cancelar</button>
+        </div>
+      </div>
+      {pinAbierto&&<PinModal pins={pins} empleadas={empleadas} titulo="¿Quién deja esta nota?" onConfirm={onPinOk} onCancelar={()=>setPinAbierto(false)}/>}
+    </div>
+  );
+}
+
 function FotoTareaModal({onConfirmar,onCancelar}){
   const [preview,setPreview]=useState(null);
   const [file,setFile]=useState(null);
@@ -1537,6 +1646,103 @@ function IncentivosAdmin({cfgInc,setIncentivosArr,upsertIncentivo,ventas,emplead
 // 📋 TAREAS — Fase 1: panel admin de plantillas + verificación de la generación diaria
 const BLOQUE_LBL={apertura:"🌅 Apertura",media_jornada:"🕐 Media jornada",cambio_turno:"🔄 Cambio de turno",cierre:"🌙 Cierre",semanal:"📆 Semanal"};
 const AREA_LBL={atras:"🧺 Atrás",adelante:"🛎️ Adelante",general:"👥 General"};
+// 📝 NOTAS — bandeja del admin: filtros, resumen del día, revisar/resolver y responder
+function NotasAdminPanel({notas,setNotas,upsertNota,empleadas}){
+  const [fArea,setFArea]=useState("todas");
+  const [fTipo,setFTipo]=useState("todos");
+  const [fEstado,setFEstado]=useState("todas");
+  const [respondiendo,setRespondiendo]=useState(null); // notaId
+  const [respuestaTxt,setRespuestaTxt]=useState("");
+  const nombreDe=id=>empleadas.find(e=>String(e.id)===String(id))?.nombre||"—";
+
+  const hoyK=fechaHoyLocal();
+  const notasHoy=notas.filter(n=>fechaLocal(n.fecha)===hoyK);
+  const abiertasHoy=notasHoy.filter(n=>n.estado==="abierta");
+  const resumenPorTipo=Object.keys(TIPO_NOTA).map(t=>({tipo:t,n:abiertasHoy.filter(x=>x.tipo===t).length})).filter(x=>x.n>0);
+
+  const filtradas=notas.filter(n=>
+    (fArea==="todas"||n.area===fArea)&&
+    (fTipo==="todos"||n.tipo===fTipo)&&
+    (fEstado==="todas"||n.estado===fEstado)
+  ).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha));
+
+  const cambiarEstado=(n,estado)=>{
+    setNotas(prev=>{
+      const next=prev.map(x=>x.id===n.id?{...x,estado,revisadaEn:estado!=="abierta"?new Date().toISOString():x.revisadaEn}:x);
+      const updated=next.find(x=>x.id===n.id);
+      if(updated&&upsertNota)upsertNota({...updated,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+  };
+  const guardarRespuesta=n=>{
+    setNotas(prev=>{
+      const next=prev.map(x=>x.id===n.id?{...x,respuestaAdmin:respuestaTxt.trim()||null}:x);
+      const updated=next.find(x=>x.id===n.id);
+      if(updated&&upsertNota)upsertNota({...updated,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+    setRespondiendo(null);setRespuestaTxt("");
+  };
+
+  return(<div style={S.panel}>
+    <h2 style={S.ptitle}>📝 Bandeja de notas</h2>
+
+    <div style={{...S.alrt,background:abiertasHoy.length>0?"#fff3e0":"#e8f5e9",color:abiertasHoy.length>0?"#e65100":"#2e7d32",marginBottom:14}}>
+      {abiertasHoy.length===0?"✅ Sin notas abiertas hoy":`Hoy: ${abiertasHoy.length} nota(s) abierta(s) — ${resumenPorTipo.map(r=>`${r.n} ${TIPO_NOTA[r.tipo].label.replace(/^\S+\s/,"")}`).join(", ")}`}
+    </div>
+
+    <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap"}}>
+      <select style={{...S.inp,width:"auto",fontSize:12}} value={fArea} onChange={e=>setFArea(e.target.value)}>
+        <option value="todas">Todas las áreas</option>
+        <option value="atras">🧺 Atrás</option>
+        <option value="adelante">🛎️ Adelante</option>
+      </select>
+      <select style={{...S.inp,width:"auto",fontSize:12}} value={fTipo} onChange={e=>setFTipo(e.target.value)}>
+        <option value="todos">Todos los tipos</option>
+        {Object.entries(TIPO_NOTA).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+      </select>
+      <select style={{...S.inp,width:"auto",fontSize:12}} value={fEstado} onChange={e=>setFEstado(e.target.value)}>
+        <option value="todas">Todos los estados</option>
+        {Object.entries(ESTADO_NOTA).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+      </select>
+    </div>
+
+    {filtradas.length===0&&<div style={{textAlign:"center",padding:"30px 20px",color:"#aaa"}}>Sin notas con esos filtros</div>}
+    {filtradas.map(n=>{
+      const t=TIPO_NOTA[n.tipo]||{label:n.tipo,color:"#888",bg:"#f0f4f8"};
+      const e=ESTADO_NOTA[n.estado]||{label:n.estado,color:"#888"};
+      return(
+        <div key={n.id} style={{...S.vcard,borderLeft:`4px solid ${t.color}`}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+            <div style={{fontSize:12,fontWeight:700,color:t.color,background:t.bg,borderRadius:6,padding:"2px 8px",display:"inline-block"}}>{t.label}</div>
+            <div style={{fontSize:11,fontWeight:700,color:e.color}}>{e.label}</div>
+          </div>
+          <div style={{fontSize:14,color:"#1a3c5e",fontWeight:600,marginTop:8}}>{n.texto}</div>
+          <div style={{fontSize:11,color:"#888",marginTop:4}}>{nombreDe(n.autoraId)} · {(n.area==="atras"?"🧺 Atrás":"🛎️ Adelante")} · {fmt(n.fecha)}{n.ordenId?` · Orden: ${n.ordenId}`:""}</div>
+          {n.fotoUrl&&<img src={n.fotoUrl} alt="foto de la nota" style={{width:"100%",maxHeight:200,objectFit:"cover",borderRadius:10,marginTop:8}}/>}
+          {n.respuestaAdmin&&<div style={{fontSize:12,color:"#2e7d32",background:"#e8f5e9",borderRadius:8,padding:"6px 8px",marginTop:8}}>💬 Tu respuesta: {n.respuestaAdmin}</div>}
+
+          <div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
+            {n.estado==="abierta"&&<button style={{...S.btnS,fontSize:11}} onClick={()=>cambiarEstado(n,"revisada")}>👁️ Marcar revisada</button>}
+            {n.estado!=="resuelta"&&<button style={{...S.btnS,fontSize:11,background:"#e8f5e9",color:"#2e7d32"}} onClick={()=>cambiarEstado(n,"resuelta")}>✅ Marcar resuelta</button>}
+            <button style={{...S.btnS,fontSize:11}} onClick={()=>{setRespondiendo(n.id);setRespuestaTxt(n.respuestaAdmin||"");}}>💬 Responder</button>
+          </div>
+
+          {respondiendo===n.id&&(
+            <div style={{marginTop:8}}>
+              <textarea style={{...S.inp,minHeight:50,resize:"vertical"}} placeholder="Tu respuesta..." value={respuestaTxt} onChange={e=>setRespuestaTxt(e.target.value)}/>
+              <div style={{display:"flex",gap:6,marginTop:6}}>
+                <button style={{...S.btnS,flex:1,background:"#e8f5e9",color:"#2e7d32"}} onClick={()=>guardarRespuesta(n)}>Guardar</button>
+                <button style={{...S.btnS,flex:1}} onClick={()=>setRespondiendo(null)}>Cancelar</button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    })}
+  </div>);
+}
+
 function TareasAdminPanel({plantillasTareas,setPlantillasTareas,upsertPlantillaTarea,tareasDiarias,empleadas}){
   const hoyK=fechaHoyLocal();
   const tareasHoy=tareasDiarias.filter(t=>t.fecha===hoyK).sort((a,b)=>a.orden-b.orden);
@@ -4443,6 +4649,8 @@ const { data: cargas, setData: setCargas, upsert: upsertCarga } = useCollection(
 // 📋 TAREAS — Fase 1: plantillas de tareas + generación diaria
 const { data: plantillasTareas, setData: setPlantillasTareas, upsert: upsertPlantillaTarea } = useCollection("plantillasTareas", "ll_plantillas_tareas", PLANTILLAS_TAREAS_DEFAULT);
 const { data: tareasDiarias, setData: setTareasDiarias, upsert: upsertTareaDiaria } = useCollection("tareasDiarias", "ll_tareas_diarias", []);
+// 📝 NOTAS — canal para que las empleadas dejen pendientes/novedades que revisa la admin
+const { data: notas, setData: setNotas, upsert: upsertNota } = useCollection("notas", "ll_notas", []);
 // 📋 Generación lazy: si hoy todavía no tiene tareas generadas, las crea una sola vez desde las plantillas activas del día
 const tareasGeneradasRef=useRef(false);
 useEffect(()=>{
@@ -4487,7 +4695,7 @@ const [showSalida,setShowSalida]=useState(false);
     setCajaOk(false);
     setEsperandoApertura(true);
   };
-  const exportarDatos=()=>{const d={ventas,clientes,empleadas,inventario,servicios,gastos,depositos,salidasCaja,cajas,cupones,promos,maquinas,cargas,plantillasTareas,tareasDiarias};const blob=new Blob([JSON.stringify(d,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="respaldo-"+hoy+".json";a.click();};
+  const exportarDatos=()=>{const d={ventas,clientes,empleadas,inventario,servicios,gastos,depositos,salidasCaja,cajas,cupones,promos,maquinas,cargas,plantillasTareas,tareasDiarias,notas};const blob=new Blob([JSON.stringify(d,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="respaldo-"+hoy+".json";a.click();};
   // Importa un respaldo .json Y lo sube a Firestore (antes solo quedaba en este dispositivo)
   const importarDatos=e=>{
     const f=e.target.files[0];if(!f)return;
@@ -4511,6 +4719,7 @@ const [showSalida,setShowSalida]=useState(false);
           [d.cargas,setCargas,upsertCarga],
           [d.plantillasTareas,setPlantillasTareas,upsertPlantillaTarea],
           [d.tareasDiarias,setTareasDiarias,upsertTareaDiaria],
+          [d.notas,setNotas,upsertNota],
         ];
         let tot=0;
         cols.forEach(([arr,setter,upsertFn])=>{
@@ -4529,7 +4738,7 @@ const [showSalida,setShowSalida]=useState(false);
   // Producción NO requiere caja abierta (es un área/dispositivo aparte del taller).
   if(!esAdmin&&!vista)return <SelectorVista sesion={sesion} onElegir={setVista} onLogout={onLogout}/>;
   if(!esAdmin&&vista==="produccion")return <ProduccionScreen sesion={sesion} onVolver={()=>setVista(null)} onLogout={onLogout} ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} empleadas={empleadas} pins={pins} eventosProduccion={eventosProduccion} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga}/>;
-  if(!esAdmin&&vista==="tareas")return <TareasScreen sesion={sesion} onVolver={()=>setVista(null)} onLogout={onLogout} tareasDiarias={tareasDiarias} setTareasDiarias={setTareasDiarias} upsertTareaDiaria={upsertTareaDiaria} pins={pins} empleadas={empleadas}/>;
+  if(!esAdmin&&vista==="tareas")return <TareasScreen sesion={sesion} onVolver={()=>setVista(null)} onLogout={onLogout} tareasDiarias={tareasDiarias} setTareasDiarias={setTareasDiarias} upsertTareaDiaria={upsertTareaDiaria} pins={pins} empleadas={empleadas} notas={notas} setNotas={setNotas} upsertNota={upsertNota}/>;
 
   // Si cerró caja y quiere seguir trabajando, DEBE abrir caja nuevamente
   if(!cajaOk||esperandoApertura)return <AperturaObligatoria
@@ -4551,7 +4760,7 @@ const [showSalida,setShowSalida]=useState(false);
     {id:"reportes",icon:"📊",l:"Reportes"},{id:"depositos",icon:"🏦",l:"Depósitos"},
     {id:"conciliacion",icon:"🏛️",l:"Conciliación"},
     {id:"gastos",icon:"🛒",l:"Gastos"},{id:"inventario",icon:"📦",l:"Inventario"},
-    {id:"equipo",icon:"👩",l:"Equipo"},{id:"incentivosAdmin",icon:"🎯",l:"Incentivos"},{id:"maquinasAdmin",icon:"🏭",l:"Máquinas"},{id:"pinsAdmin",icon:"🔒",l:"PINs"},{id:"produccionAdmin",icon:"🧺",l:"Producción"},{id:"tareasAdmin",icon:"📋",l:"Tareas"},{id:"caja",icon:"💰",l:"Caja"},
+    {id:"equipo",icon:"👩",l:"Equipo"},{id:"incentivosAdmin",icon:"🎯",l:"Incentivos"},{id:"maquinasAdmin",icon:"🏭",l:"Máquinas"},{id:"pinsAdmin",icon:"🔒",l:"PINs"},{id:"produccionAdmin",icon:"🧺",l:"Producción"},{id:"tareasAdmin",icon:"📋",l:"Tareas"},{id:"notasAdmin",icon:"📝",l:"Notas"},{id:"caja",icon:"💰",l:"Caja"},
     {id:"config",icon:"⚙️",l:"Config"},{id:"usuarios",icon:"🔑",l:"Usuarios"},
   ];
   return(<div style={S.app}>
@@ -4592,6 +4801,7 @@ const [showSalida,setShowSalida]=useState(false);
         <ReportesProduccionPanel cargas={cargas||[]} eventosProduccion={eventosProduccion||[]} ventas={ventas} empleadas={empleadas}/>
         <Produccion ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} empleadas={empleadas} pins={pins||[]} eventosProduccion={eventosProduccion||[]} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} maquinas={maquinas||[]} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas||[]} setCargas={setCargas} upsertCarga={upsertCarga}/></div>)}
       {tab==="tareasAdmin"&&<TareasAdminPanel plantillasTareas={plantillasTareas||[]} setPlantillasTareas={setPlantillasTareas} upsertPlantillaTarea={upsertPlantillaTarea} tareasDiarias={tareasDiarias||[]} empleadas={empleadas}/>}
+      {tab==="notasAdmin"&&<NotasAdminPanel notas={notas||[]} setNotas={setNotas} upsertNota={upsertNota} empleadas={empleadas}/>}
       {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={handleCierreListo} onResetCierre={()=>setCierreOk(false)} sesion={sesion} salidasCaja={salidasCaja} setVentas={setVentas} upsertVenta={upsertVenta} upsertCaja={upsertCaja}/>}
       {tab==="config"&&<Configuracion servicios={servicios} setServicios={setServicios} exportarDatos={exportarDatos} importarDatos={importarDatos} upsertVenta={upsertVenta} upsertServicio={upsertServicio}/>}
       {tab==="usuarios"&&<GestionUsuarios/>}
