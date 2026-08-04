@@ -225,7 +225,9 @@ const msgWa = (v, tipo) => {
   const rEstado=v.clasificacion?.restregadoEstado;
   const rCosto=v.clasificacion?.restregadoCosto;
   const restregadoLinea=rEstado==="autorizado"?`\n${E.item} *Incluye restregado extra autorizado:* $${(rCosto||0).toFixed(2)}\n${L}`:rEstado==="rechazado"?`\n${E.item} *Restregado extra:* no autorizado por el cliente\n${L}`:"";
-  return `${E.burbuja} *LAVA & LISTO* ${E.burbuja}\n_Lavanderia & Limpieza Especializada_\n${L}\n¡Hola *${v.clienteNombre}*! ${E.fiesta}\n\nTu pedido *${v.folio}* ya esta\n${E.brillo} *LISTO PARA RETIRAR* ${E.brillo}\n${L}${restregadoLinea}${pend>0?`\n${E.reloj} *Saldo al retirar:* $${pend.toFixed(2)}\n${L}`:""}\n${E.hora} Te esperamos en nuestro local\n¡Gracias por tu preferencia! ${E.corazon}\n${E.pin} Ricaurte, Cuenca`;
+  // 🔑 Objetos personales encontrados al revisar la prenda (billetes, llaves, etc.), para que el cliente sepa que están guardados
+  const objetosLinea=v.clasificacion?.objetosEncontrados?`\n${E.item} *Encontramos y guardamos:* ${v.clasificacion.objetosEncontrados}\n${L}`:"";
+  return `${E.burbuja} *LAVA & LISTO* ${E.burbuja}\n_Lavanderia & Limpieza Especializada_\n${L}\n¡Hola *${v.clienteNombre}*! ${E.fiesta}\n\nTu pedido *${v.folio}* ya esta\n${E.brillo} *LISTO PARA RETIRAR* ${E.brillo}\n${L}${restregadoLinea}${objetosLinea}${pend>0?`\n${E.reloj} *Saldo al retirar:* $${pend.toFixed(2)}\n${L}`:""}\n${E.hora} Te esperamos en nuestro local\n¡Gracias por tu preferencia! ${E.corazon}\n${E.pin} Ricaurte, Cuenca`;
 };
 
 // ===== Cumpleaños =====
