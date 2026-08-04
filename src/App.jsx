@@ -81,6 +81,25 @@ const subirFoto=async(file,carpeta)=>{
   await uploadBytes(r,blob,{contentType:"image/jpeg"});
   return await getDownloadURL(r);
 };
+// 🔔 Sonido de alerta corto (sin archivo externo) para avisos nuevos, ej. restregado que llega
+const reproducirSonidoAlerta=()=>{
+  try{
+    const Ctx=window.AudioContext||window.webkitAudioContext;
+    if(!Ctx)return;
+    const ctx=new Ctx();
+    [880,660].forEach((freq,i)=>{
+      const o=ctx.createOscillator();
+      const g=ctx.createGain();
+      o.connect(g);g.connect(ctx.destination);
+      o.type="sine";o.frequency.value=freq;
+      const t0=ctx.currentTime+i*0.18;
+      g.gain.setValueAtTime(0.0001,t0);
+      g.gain.exponentialRampToValueAtTime(0.35,t0+0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001,t0+0.3);
+      o.start(t0);o.stop(t0+0.32);
+    });
+  }catch{}
+};
 const PLANTILLAS_TAREAS_DEFAULT=[
   // — LUNES A VIERNES: APERTURA (Karen, límite 9:30) —
   {id:"t01",titulo:"Abrir local y dejar mostrador operativo para clientes de la mañana",descripcion:null,area:"general",bloque:"apertura",diasSemana:LV,horaLimite:"09:30",orden:1,activa:true,requiereFoto:false},
@@ -227,7 +246,10 @@ const msgWa = (v, tipo) => {
   const restregadoLinea=rEstado==="autorizado"?`\n${E.item} *Incluye restregado extra autorizado:* $${(rCosto||0).toFixed(2)}\n${L}`:rEstado==="rechazado"?`\n${E.item} *Restregado extra:* no autorizado por el cliente\n${L}`:"";
   // 🔑 Objetos personales encontrados al revisar la prenda (billetes, llaves, etc.), para que el cliente sepa que están guardados
   const objetosLinea=v.clasificacion?.objetosEncontrados?`\n${E.item} *Encontramos y guardamos:* ${v.clasificacion.objetosEncontrados}\n${L}`:"";
-  return `${E.burbuja} *LAVA & LISTO* ${E.burbuja}\n_Lavanderia & Limpieza Especializada_\n${L}\n¡Hola *${v.clienteNombre}*! ${E.fiesta}\n\nTu pedido *${v.folio}* ya esta\n${E.brillo} *LISTO PARA RETIRAR* ${E.brillo}\n${L}${restregadoLinea}${objetosLinea}${pend>0?`\n${E.reloj} *Saldo al retirar:* $${pend.toFixed(2)}\n${L}`:""}\n${E.hora} Te esperamos en nuestro local\n¡Gracias por tu preferencia! ${E.corazon}\n${E.pin} Ricaurte, Cuenca`;
+  // 🧾 Servicios adicionales encontrados (zapatos, sábanas, peluches, etc.) ya resueltos con el cliente
+  const decididos=(v.clasificacion?.serviciosAdicionales||[]).filter(s=>s.estado==="autorizado"||s.estado==="rechazado");
+  const adicionalesLinea=decididos.length>0?`\n${decididos.map(s=>s.estado==="autorizado"?`${E.item} *Incluye ${s.descripcion} autorizado:* $${s.costo.toFixed(2)}`:`${E.item} *${s.descripcion}:* no autorizado por el cliente`).join("\n")}\n${L}`:"";
+  return `${E.burbuja} *LAVA & LISTO* ${E.burbuja}\n_Lavanderia & Limpieza Especializada_\n${L}\n¡Hola *${v.clienteNombre}*! ${E.fiesta}\n\nTu pedido *${v.folio}* ya esta\n${E.brillo} *LISTO PARA RETIRAR* ${E.brillo}\n${L}${restregadoLinea}${adicionalesLinea}${objetosLinea}${pend>0?`\n${E.reloj} *Saldo al retirar:* $${pend.toFixed(2)}\n${L}`:""}\n${E.hora} Te esperamos en nuestro local\n¡Gracias por tu preferencia! ${E.corazon}\n${E.pin} Ricaurte, Cuenca`;
 };
 
 // ===== Cumpleaños =====
@@ -471,10 +493,13 @@ function TicketModal({venta,empleadas,onClose}){
 }
 
 // 🔔 Panel de notificaciones: restregados por confirmar y restregados ya autorizados con saldo pendiente de cobro
-function NotificacionesPanel({ventas,setVentas,upsertVenta,addAbono,onClose}){
+function NotificacionesPanel({ventas,setVentas,upsertVenta,addAbono,soloLectura,onClose}){
   const [cobrarVenta,setCobrarVenta]=useState(null);
-  const pendientesConfirmar=ventas.filter(v=>!v.anulada&&v.clasificacion?.restregadoEstado==="pendiente_confirmar");
-  const autorizadosPorCobrar=ventas.filter(v=>!v.anulada&&v.clasificacion?.restregadoEstado==="autorizado"&&saldo(v)>0);
+
+  const tieneAlgoP=v=>v.clasificacion?.restregadoEstado==="pendiente_confirmar"||(v.clasificacion?.serviciosAdicionales||[]).some(s=>s.estado==="pendiente_confirmar");
+  const tieneAlgoAutorizado=v=>v.clasificacion?.restregadoEstado==="autorizado"||(v.clasificacion?.serviciosAdicionales||[]).some(s=>s.estado==="autorizado");
+  const pendientesConfirmar=ventas.filter(v=>!v.anulada&&tieneAlgoP(v));
+  const autorizadosPorCobrar=ventas.filter(v=>!v.anulada&&tieneAlgoAutorizado(v)&&saldo(v)>0);
 
   const confirmarRestregado=(v,autorizado)=>{
     const costo=v.clasificacion?.restregadoCosto||0;
@@ -490,6 +515,35 @@ function NotificacionesPanel({ventas,setVentas,upsertVenta,addAbono,onClose}){
       const notaTxt=`🧽 Restregado extra rechazado por el cliente (hubiera costado $${costo.toFixed(2)})`;
       setVentas(prev=>{
         const next=prev.map(vv=>vv.folio===v.folio?{...vv,notas:[vv.notas,notaTxt].filter(Boolean).join(" · "),clasificacion:{...vv.clasificacion,restregadoEstado:"rechazado",restregadoConfirmadoEn:new Date().toISOString()}}:vv);
+        const updated=next.find(vv=>vv.folio===v.folio);
+        if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
+        return next;
+      });
+    }
+  };
+  const confirmarServicioAdicional=(v,itemId,autorizado)=>{
+    const item=(v.clasificacion?.serviciosAdicionales||[]).find(s=>s.id===itemId);
+    if(!item)return;
+    if(autorizado){
+      const nuevoItem={servId:null,custom:true,piezas:1,lC:`🧾 ${item.descripcion} (encontrado, autorizado)`,pC:item.costo.toFixed(2)};
+      setVentas(prev=>{
+        const next=prev.map(vv=>{
+          if(vv.folio!==v.folio)return vv;
+          const sa=(vv.clasificacion?.serviciosAdicionales||[]).map(s=>s.id===itemId?{...s,estado:"autorizado",confirmadoEn:new Date().toISOString()}:s);
+          return{...vv,items:[...(vv.items||[]),nuevoItem],total:(vv.total||0)+item.costo,clasificacion:{...vv.clasificacion,serviciosAdicionales:sa}};
+        });
+        const updated=next.find(vv=>vv.folio===v.folio);
+        if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
+        return next;
+      });
+    }else{
+      const notaTxt=`🧾 ${item.descripcion} encontrado y rechazado por el cliente (hubiera costado $${item.costo.toFixed(2)})`;
+      setVentas(prev=>{
+        const next=prev.map(vv=>{
+          if(vv.folio!==v.folio)return vv;
+          const sa=(vv.clasificacion?.serviciosAdicionales||[]).map(s=>s.id===itemId?{...s,estado:"rechazado",confirmadoEn:new Date().toISOString()}:s);
+          return{...vv,notas:[vv.notas,notaTxt].filter(Boolean).join(" · "),clasificacion:{...vv.clasificacion,serviciosAdicionales:sa}};
+        });
         const updated=next.find(vv=>vv.folio===v.folio);
         if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
         return next;
@@ -516,11 +570,34 @@ function NotificacionesPanel({ventas,setVentas,upsertVenta,addAbono,onClose}){
               <div key={v.folio} style={{...S.vcard,borderLeft:"4px solid #e65100"}}>
                 <div style={{fontWeight:700,fontSize:14}}>{v.clienteNombre}</div>
                 <div style={{fontSize:11,color:"#888"}}>{v.folio}</div>
-                <div style={{fontSize:13,color:"#1a3c5e",marginTop:4}}>Restregado extra: <strong>${(v.clasificacion.restregadoCosto||0).toFixed(2)}</strong></div>
-                <div style={{display:"flex",gap:6,marginTop:8}}>
-                  <button style={{...S.btnS,flex:1,background:"#e8f5e9",color:"#2e7d32"}} onClick={()=>confirmarRestregado(v,true)}>✅ Autorizó</button>
-                  <button style={{...S.btnS,flex:1,background:"#ffebee",color:"#c62828"}} onClick={()=>confirmarRestregado(v,false)}>❌ Rechazó</button>
-                </div>
+
+                {v.clasificacion?.restregadoEstado==="pendiente_confirmar"&&(
+                  <div style={{marginTop:6}}>
+                    <div style={{fontSize:13,color:"#1a3c5e"}}>🧽 Restregado extra: <strong>${(v.clasificacion.restregadoCosto||0).toFixed(2)}</strong></div>
+                    {soloLectura?(
+                      <div style={{fontSize:11,color:"#888",marginTop:4}}>Se confirma desde cualquiera de las 2 pantallas.</div>
+                    ):(
+                      <div style={{display:"flex",gap:6,marginTop:6}}>
+                        <button style={{...S.btnS,flex:1,background:"#e8f5e9",color:"#2e7d32"}} onClick={()=>confirmarRestregado(v,true)}>✅ Autorizó</button>
+                        <button style={{...S.btnS,flex:1,background:"#ffebee",color:"#c62828"}} onClick={()=>confirmarRestregado(v,false)}>❌ Rechazó</button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {(v.clasificacion?.serviciosAdicionales||[]).filter(s=>s.estado==="pendiente_confirmar").map(s=>(
+                  <div key={s.id} style={{marginTop:6}}>
+                    <div style={{fontSize:13,color:"#1a3c5e"}}>🧾 {s.descripcion}: <strong>${s.costo.toFixed(2)}</strong></div>
+                    {soloLectura?(
+                      <div style={{fontSize:11,color:"#888",marginTop:4}}>Se confirma desde cualquiera de las 2 pantallas.</div>
+                    ):(
+                      <div style={{display:"flex",gap:6,marginTop:6}}>
+                        <button style={{...S.btnS,flex:1,background:"#e8f5e9",color:"#2e7d32"}} onClick={()=>confirmarServicioAdicional(v,s.id,true)}>✅ Autorizó</button>
+                        <button style={{...S.btnS,flex:1,background:"#ffebee",color:"#c62828"}} onClick={()=>confirmarServicioAdicional(v,s.id,false)}>❌ Rechazó</button>
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
             ))}
           </div>
@@ -528,7 +605,7 @@ function NotificacionesPanel({ventas,setVentas,upsertVenta,addAbono,onClose}){
 
         {autorizadosPorCobrar.length>0&&(
           <div>
-            <div style={{fontSize:13,fontWeight:800,color:"#2e7d32",marginBottom:8}}>💰 Restregado autorizado — falta cobrar ({autorizadosPorCobrar.length})</div>
+            <div style={{fontSize:13,fontWeight:800,color:"#2e7d32",marginBottom:8}}>💰 Autorizado — falta cobrar ({autorizadosPorCobrar.length})</div>
             {autorizadosPorCobrar.map(v=>(
               <div key={v.folio} style={{...S.vcard,borderLeft:"4px solid #2e7d32"}}>
                 <div style={{fontWeight:700,fontSize:14}}>{v.clienteNombre}</div>
@@ -683,7 +760,13 @@ function SelectorVista({sesion,onElegir,onLogout}){
 // 🏭 PRODUCCIÓN — pantalla completa, independiente de Facturación. Sin tabs de caja/ventas; todo aquí se identifica por PIN.
 function ProduccionScreen({sesion,onVolver,onLogout,ventas,setVentas,upsertVenta,empleadas,pins,eventosProduccion,setEventosProduccion,upsertEvento,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga}){
   const [showNotifs,setShowNotifs]=useState(false);
-  const totalNotifs=ventas.filter(v=>!v.anulada&&(v.clasificacion?.restregadoEstado==="pendiente_confirmar"||(v.clasificacion?.restregadoEstado==="autorizado"&&saldo(v)>0))).length;
+  const totalNotifs=ventas.filter(v=>!v.anulada&&(v.clasificacion?.restregadoEstado==="pendiente_confirmar"||v.clasificacion?.restregadoEstado==="autorizado"&&saldo(v)>0||(v.clasificacion?.serviciosAdicionales||[]).some(s=>s.estado==="pendiente_confirmar"||(s.estado==="autorizado"&&saldo(v)>0)))).length;
+  // 🔔 Suena cuando aumentan las notificaciones (ej. llega un restregado nuevo o ya lo autorizaron en otra pantalla)
+  const notifsPrevRef=useRef(totalNotifs);
+  useEffect(()=>{
+    if(totalNotifs>notifsPrevRef.current)reproducirSonidoAlerta();
+    notifsPrevRef.current=totalNotifs;
+  },[totalNotifs]);
   return(
     <div style={{minHeight:"100vh",background:"#f0f4f8",fontFamily:"'DM Sans',sans-serif"}}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=DM+Sans:wght@400;500;600;700&display=swap');`}</style>
@@ -700,9 +783,9 @@ function ProduccionScreen({sesion,onVolver,onLogout,ventas,setVentas,upsertVenta
           <button onClick={onLogout} style={{background:"rgba(255,255,255,.2)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 12px",fontWeight:600,cursor:"pointer"}}>Salir</button>
         </div>
       </div>
-      {ventas.filter(v=>!v.anulada&&v.clasificacion?.restregadoEstado==="pendiente_confirmar").length>0&&(
+      {ventas.filter(v=>!v.anulada&&(v.clasificacion?.restregadoEstado==="pendiente_confirmar"||(v.clasificacion?.serviciosAdicionales||[]).some(s=>s.estado==="pendiente_confirmar"))).length>0&&(
         <div style={{background:"#fff3e0",borderBottom:"1.5px solid #e65100",padding:"8px 16px",fontSize:12,fontWeight:700,color:"#e65100"}}>
-          🧽 {ventas.filter(v=>!v.anulada&&v.clasificacion?.restregadoEstado==="pendiente_confirmar").length} restregado(s) esperando respuesta del cliente
+          🧽 {ventas.filter(v=>!v.anulada&&(v.clasificacion?.restregadoEstado==="pendiente_confirmar"||(v.clasificacion?.serviciosAdicionales||[]).some(s=>s.estado==="pendiente_confirmar"))).length} orden(es) con extras esperando respuesta del cliente
         </div>
       )}
       {showNotifs&&<NotificacionesPanel ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} addAbono={null} onClose={()=>setShowNotifs(false)}/>}
@@ -1154,7 +1237,21 @@ function ClasificacionModal({onConfirmar,onCancelar}){
   const [manchasDetectadas,setManchasDetectadas]=useState(false);
   const [requiereRestregado,setRequiereRestregado]=useState(false);
   const [restregadoCosto,setRestregadoCosto]=useState("");
+  const [serviciosAdicionales,setServiciosAdicionales]=useState([]); // [{id,descripcion,costo}]
+  const [nuevoServ,setNuevoServ]=useState(null); // {descripcion,costo} en edición
   const [err,setErr]=useState("");
+
+  const PRESETS_SERV=[
+    {emoji:"👟",label:"Zapatos"},{emoji:"🛏️",label:"Sábanas"},{emoji:"🧸",label:"Peluches"},
+    {emoji:"🛌",label:"Almohadas"},{emoji:"🎒",label:"Mochilas"},{emoji:"➕",label:"Otro"},
+  ];
+  const agregarServicio=()=>{
+    if(!nuevoServ?.descripcion?.trim()||!nuevoServ?.costo){return;}
+    setServiciosAdicionales([...serviciosAdicionales,{id:"sa_"+Date.now(),descripcion:nuevoServ.descripcion.trim(),costo:parseFloat(nuevoServ.costo)||0}]);
+    setNuevoServ(null);
+  };
+  const quitarServicio=id=>setServiciosAdicionales(serviciosAdicionales.filter(s=>s.id!==id));
+
   const confirmar=()=>{
     if(!bolsillosRevisados){setErr("Confirma que ya revisaste los bolsillos");return;}
     if(requiereRestregado&&!restregadoCosto){setErr("Escribe el costo del restregado extra");return;}
@@ -1164,6 +1261,7 @@ function ClasificacionModal({onConfirmar,onCancelar}){
       manchasDetectadas,
       requiereRestregado,
       restregadoCosto:requiereRestregado?parseFloat(restregadoCosto)||0:null,
+      serviciosAdicionales,
     });
   };
   return(
@@ -1198,6 +1296,33 @@ function ClasificacionModal({onConfirmar,onCancelar}){
             <div style={{fontSize:11,color:"#888",marginTop:4}}>Después de confirmar, podrás avisarle al cliente por WhatsApp con este costo.</div>
           </div>
         )}
+
+        <div style={{marginTop:6,marginBottom:6}}>
+          <label style={S.lbl}>🧾 Servicios adicionales encontrados (opcional)</label>
+          <div style={{fontSize:11,color:"#888",marginBottom:6}}>Ej. zapatos, sábanas, peluches, almohadas, mochilas que no venían en la orden original</div>
+          {serviciosAdicionales.map(s=>(
+            <div key={s.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"#f8fbfd",border:"1.5px solid #e8f0f7",borderRadius:8,padding:"6px 10px",marginBottom:6}}>
+              <span style={{fontSize:13,fontWeight:600,color:"#1a3c5e"}}>{s.descripcion} — ${s.costo.toFixed(2)}</span>
+              <button onClick={()=>quitarServicio(s.id)} style={{background:"none",border:"none",color:"#c62828",fontWeight:800,cursor:"pointer",fontSize:14}}>✕</button>
+            </div>
+          ))}
+          {nuevoServ?(
+            <div style={{background:"#eaf3fb",border:"1.5px solid #90caf9",borderRadius:8,padding:8,marginBottom:6}}>
+              <input style={{...S.inp,marginBottom:6}} placeholder="Descripción (ej. Zapatos)" value={nuevoServ.descripcion||""} onChange={e=>setNuevoServ({...nuevoServ,descripcion:e.target.value})}/>
+              <input type="number" style={{...S.inp,marginBottom:6}} placeholder="Costo" value={nuevoServ.costo||""} onChange={e=>setNuevoServ({...nuevoServ,costo:e.target.value})}/>
+              <div style={{display:"flex",gap:6}}>
+                <button style={{...S.btnS,flex:1,background:"#e8f5e9",color:"#2e7d32"}} onClick={agregarServicio}>✓ Agregar</button>
+                <button style={{...S.btnS,flex:1}} onClick={()=>setNuevoServ(null)}>Cancelar</button>
+              </div>
+            </div>
+          ):(
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>
+              {PRESETS_SERV.map(p=>(
+                <button key={p.label} onClick={()=>setNuevoServ({descripcion:p.label==="Otro"?"":p.label,costo:""})} style={{padding:"8px 4px",borderRadius:8,border:"1.5px solid #e8f0f7",background:"#f8fbfd",fontSize:11,fontWeight:700,color:"#1a3c5e",cursor:"pointer"}}>{p.emoji} {p.label}</button>
+              ))}
+            </div>
+          )}
+        </div>
 
         {err&&<div style={{color:"#c62828",fontSize:12,fontWeight:600,marginBottom:8}}>{err}</div>}
 
@@ -1305,7 +1430,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
       return next;
     });
   };
-  // 🧽 Avisa al cliente del restregado extra por WhatsApp y marca la orden como "esperando respuesta" — dispara notificación para todo el equipo
+  // 🧽 Avisa al cliente del restregado extra por WhatsApp y marca la orden como "esperando respuesta" — disponible también desde Producción
   const avisarRestregado=v=>{
     const tel=telWa(v.clienteTel);
     if(!tel){alert("Este cliente no tiene teléfono registrado.");return;}
@@ -1320,7 +1445,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
     });
     notificar("🧽 Mensaje de restregado enviado",`${v.clienteNombre} · ${v.folio} · $${costo.toFixed(2)} — falta confirmar respuesta`);
   };
-  // 🧽 Registra lo que respondió el cliente: si autoriza se suma a la orden, si no queda en observaciones
+  // 🧽 Registra lo que respondió el cliente: si autoriza se suma a la orden, si no queda en observaciones — disponible también desde Producción
   const confirmarRestregado=(v,autorizado)=>{
     const costo=v.clasificacion?.restregadoCosto||0;
     if(autorizado){
@@ -1341,6 +1466,58 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
       });
     }
   };
+  // 🧾 Avisa al cliente por WhatsApp de TODOS los servicios adicionales encontrados que aún no se han avisado, en un solo mensaje
+  const avisarServiciosAdicionales=v=>{
+    const tel=telWa(v.clienteTel);
+    if(!tel){alert("Este cliente no tiene teléfono registrado.");return;}
+    const pendientes=(v.clasificacion?.serviciosAdicionales||[]).filter(s=>!s.estado);
+    if(pendientes.length===0)return;
+    const lineas=pendientes.map(s=>`🔹 ${s.descripcion}: $${s.costo.toFixed(2)}`).join("\n");
+    const total=pendientes.reduce((a,s)=>a+s.costo,0);
+    const msg=`🫧 *LAVA & LISTO* 🫧\n\n¡Hola *${v.clienteNombre}*! 👋\nAl revisar tu orden *${v.folio}* encontramos prendas adicionales que no venían en tu pedido original:\n\n${lineas}\n\n🧾 *Total adicional:* $${total.toFixed(2)}\n\n¿Nos autorizas a incluirlas en el lavado? Contéstanos por este medio. ¡Gracias! 💙`;
+    window.open(`https://api.whatsapp.com/send/?phone=${tel}&text=${encodeURIComponent(msg)}`,"_blank");
+    setVentas(prev=>{
+      const next=prev.map(vv=>{
+        if(vv.folio!==v.folio)return vv;
+        const sa=(vv.clasificacion?.serviciosAdicionales||[]).map(s=>!s.estado?{...s,estado:"pendiente_confirmar",avisadoEn:new Date().toISOString()}:s);
+        return{...vv,clasificacion:{...vv.clasificacion,serviciosAdicionales:sa}};
+      });
+      const updated=next.find(vv=>vv.folio===v.folio);
+      if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+    notificar("🧾 Servicios adicionales avisados",`${v.clienteNombre} · ${v.folio} · $${total.toFixed(2)} — falta confirmar respuesta`);
+  };
+  // 🧾 Registra lo que respondió el cliente para UN servicio adicional puntual
+  const confirmarServicioAdicional=(v,itemId,autorizado)=>{
+    const item=(v.clasificacion?.serviciosAdicionales||[]).find(s=>s.id===itemId);
+    if(!item)return;
+    if(autorizado){
+      const nuevoItem={servId:null,custom:true,piezas:1,lC:`🧾 ${item.descripcion} (encontrado, autorizado)`,pC:item.costo.toFixed(2)};
+      setVentas(prev=>{
+        const next=prev.map(vv=>{
+          if(vv.folio!==v.folio)return vv;
+          const sa=(vv.clasificacion?.serviciosAdicionales||[]).map(s=>s.id===itemId?{...s,estado:"autorizado",confirmadoEn:new Date().toISOString()}:s);
+          return{...vv,items:[...(vv.items||[]),nuevoItem],total:(vv.total||0)+item.costo,clasificacion:{...vv.clasificacion,serviciosAdicionales:sa}};
+        });
+        const updated=next.find(vv=>vv.folio===v.folio);
+        if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
+        return next;
+      });
+    }else{
+      const notaTxt=`🧾 ${item.descripcion} encontrado y rechazado por el cliente (hubiera costado $${item.costo.toFixed(2)})`;
+      setVentas(prev=>{
+        const next=prev.map(vv=>{
+          if(vv.folio!==v.folio)return vv;
+          const sa=(vv.clasificacion?.serviciosAdicionales||[]).map(s=>s.id===itemId?{...s,estado:"rechazado",confirmadoEn:new Date().toISOString()}:s);
+          return{...vv,notas:[vv.notas,notaTxt].filter(Boolean).join(" · "),clasificacion:{...vv.clasificacion,serviciosAdicionales:sa}};
+        });
+        const updated=next.find(vv=>vv.folio===v.folio);
+        if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
+        return next;
+      });
+    }
+  };
   // ✂️ Divide una orden en 2 flujos de producción independientes (ej. Ropa y Zapatos) para que avancen a ritmos distintos
   const dividirGrupos=(folio,grupos)=>{
     setVentas(prev=>{
@@ -1352,14 +1529,19 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
   };
   // 🔍 Guarda la revisión de prendas (checklist de bolsillos/manchas/restregado) antes de permitir lavar
   const guardarClasificacion=(folio,datos,empleadaId)=>{
-    const clasificacion={...datos,empleadaId:empleadaId||null,timestamp:new Date().toISOString()};
+    const clasificacion={
+      ...datos,
+      serviciosAdicionales:(datos.serviciosAdicionales||[]).map(s=>({...s,estado:null,avisadoEn:null,confirmadoEn:null})),
+      empleadaId:empleadaId||null,timestamp:new Date().toISOString()
+    };
     setVentas(prev=>{
       const next=prev.map(v=>v.folio===folio?{...v,clasificacion}:v);
       const updated=next.find(v=>v.folio===folio);
       if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
       return next;
     });
-    registrar(folio,"clasificacion",empleadaId,datos.requiereRestregado?`Requiere restregado extra ($${datos.restregadoCosto?.toFixed(2)})`:datos.manchasDetectadas?"Tiene manchas":null);
+    const extraTxt=(datos.serviciosAdicionales||[]).length>0?` · Servicios adicionales: ${datos.serviciosAdicionales.map(s=>`${s.descripcion} $${s.costo.toFixed(2)}`).join(", ")}`:"";
+    registrar(folio,"clasificacion",empleadaId,(datos.requiereRestregado?`Requiere restregado extra ($${datos.restregadoCosto?.toFixed(2)})`:datos.manchasDetectadas?"Tiene manchas":"")+extraTxt||null);
   };
   const setMaquinaEstado=(maquinaId,cambios)=>{
     setMaquinas(prev=>{
@@ -1665,6 +1847,29 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
                     )}
                     {rEstado==="autorizado"&&<div style={{color:"#2e7d32",fontWeight:700,marginTop:2}}>✅ Autorizado — se sumó ${v.clasificacion.restregadoCosto?.toFixed(2)} a la orden</div>}
                     {rEstado==="rechazado"&&<div style={{color:"#c62828",fontWeight:700,marginTop:2}}>❌ Rechazado — quedó en observaciones de la orden</div>}
+                  </div>);
+                })()}
+                {(v.clasificacion.serviciosAdicionales||[]).length>0&&(()=>{
+                  const sinAvisar=(v.clasificacion.serviciosAdicionales||[]).filter(s=>!s.estado);
+                  return(<div style={{marginTop:6}}>
+                    <div style={{fontWeight:700}}>🧾 Servicios adicionales encontrados:</div>
+                    {v.clasificacion.serviciosAdicionales.map(s=>(
+                      <div key={s.id} style={{marginTop:3,marginLeft:6}}>
+                        <div>• {s.descripcion}: ${s.costo.toFixed(2)}</div>
+                        {s.estado==="pendiente_confirmar"&&(
+                          <div style={{marginTop:2}}>
+                            <div style={{color:"#e65100",fontWeight:700}}>⏳ Esperando respuesta del cliente</div>
+                            <div style={{display:"flex",gap:6,marginTop:2}}>
+                              <button style={{...S.btnS,fontSize:11,background:"#e8f5e9",color:"#2e7d32"}} onClick={()=>confirmarServicioAdicional(v,s.id,true)}>✅ Autorizó</button>
+                              <button style={{...S.btnS,fontSize:11,background:"#ffebee",color:"#c62828"}} onClick={()=>confirmarServicioAdicional(v,s.id,false)}>❌ Rechazó</button>
+                            </div>
+                          </div>
+                        )}
+                        {s.estado==="autorizado"&&<div style={{color:"#2e7d32",fontWeight:700}}>✅ Autorizado — se sumó a la orden</div>}
+                        {s.estado==="rechazado"&&<div style={{color:"#c62828",fontWeight:700}}>❌ Rechazado — quedó en observaciones</div>}
+                      </div>
+                    ))}
+                    {sinAvisar.length>0&&<a href="#" onClick={e=>{e.preventDefault();avisarServiciosAdicionales(v);}} style={{color:"#1565c0",fontWeight:700,display:"inline-block",marginTop:4}}>💬 Avisar al cliente ({sinAvisar.length})</a>}
                   </div>);
                 })()}
               </div>
@@ -2048,10 +2253,16 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
   const [filtroTile,setFiltroTile]=useState(null); // 🔎 filtro rápido al tocar un contador (recibido/proceso/listo/entregado_pend)
   const [showCaja,setShowCaja]=useState(false);const [ticket,setTicket]=useState(null);const [cuponSugE,setCuponSugE]=useState(null);const [showSalidaEmp,setShowSalidaEmp]=useState(false);
   const [showNotifs,setShowNotifs]=useState(false);
-  // 🧽 Restregados esperando respuesta del cliente — visible para todo el equipo hasta que se confirme
-  const restregadosPendientes=ventas.filter(v=>!v.anulada&&v.clasificacion?.restregadoEstado==="pendiente_confirmar");
-  const restregadosPorCobrar=ventas.filter(v=>!v.anulada&&v.clasificacion?.restregadoEstado==="autorizado"&&saldo(v)>0);
+  // 🧽 Restregados y servicios adicionales esperando respuesta del cliente — visible para todo el equipo hasta que se confirme
+  const restregadosPendientes=ventas.filter(v=>!v.anulada&&(v.clasificacion?.restregadoEstado==="pendiente_confirmar"||(v.clasificacion?.serviciosAdicionales||[]).some(s=>s.estado==="pendiente_confirmar")));
+  const restregadosPorCobrar=ventas.filter(v=>!v.anulada&&(v.clasificacion?.restregadoEstado==="autorizado"||(v.clasificacion?.serviciosAdicionales||[]).some(s=>s.estado==="autorizado"))&&saldo(v)>0);
   const totalNotifs=restregadosPendientes.length+restregadosPorCobrar.length;
+  // 🔔 Suena cuando aumentan las notificaciones (ej. llega un restregado nuevo o ya lo autorizaron en otra pantalla)
+  const notifsPrevRef=useRef(totalNotifs);
+  useEffect(()=>{
+    if(totalNotifs>notifsPrevRef.current)reproducirSonidoAlerta();
+    notifsPrevRef.current=totalNotifs;
+  },[totalNotifs]);
   // 📋 Todas las órdenes pendientes del negocio (sin importar fecha ni empleada), ordenadas Recibido → En proceso → Listo → Entregado (sin cobrar)
   // 🔒 Solo desaparece cuando está Entregada Y además pagada por completo — si falta cobrar, se queda visible como pendiente
   const pendientesRaw=ventas.filter(v=>!v.anulada&&!((v.estado||"recibido")==="entregado"&&pagada(v))).sort((a,b)=>{
@@ -2095,7 +2306,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
       </div>
       {restregadosPendientes.length>0&&(
         <div style={{background:"#fff3e0",borderBottom:"1.5px solid #e65100",padding:"8px 14px",fontSize:12,fontWeight:700,color:"#e65100"}}>
-          🧽 {restregadosPendientes.length} restregado(s) esperando respuesta del cliente: {restregadosPendientes.map(v=>`${v.clienteNombre} (${v.folio})`).join(" · ")}
+          🧽 {restregadosPendientes.length} orden(es) con extras esperando respuesta del cliente: {restregadosPendientes.map(v=>`${v.clienteNombre} (${v.folio})`).join(" · ")}
         </div>
       )}
       <div style={{background:"#fff",display:"flex",borderBottom:"2px solid #e8f0f7",position:"sticky",top:0,zIndex:10}}>
