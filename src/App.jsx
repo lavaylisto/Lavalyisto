@@ -494,12 +494,8 @@ function TicketModal({venta,empleadas,onClose}){
 
 // 🔔 Panel de notificaciones: restregados por confirmar y restregados ya autorizados con saldo pendiente de cobro
 function NotificacionesPanel({ventas,setVentas,upsertVenta,addAbono,soloLectura,onClose}){
-  const [cobrarVenta,setCobrarVenta]=useState(null);
-
   const tieneAlgoP=v=>v.clasificacion?.restregadoEstado==="pendiente_confirmar"||(v.clasificacion?.serviciosAdicionales||[]).some(s=>s.estado==="pendiente_confirmar");
-  const tieneAlgoAutorizado=v=>v.clasificacion?.restregadoEstado==="autorizado"||(v.clasificacion?.serviciosAdicionales||[]).some(s=>s.estado==="autorizado");
   const pendientesConfirmar=ventas.filter(v=>!v.anulada&&tieneAlgoP(v));
-  const autorizadosPorCobrar=ventas.filter(v=>!v.anulada&&tieneAlgoAutorizado(v)&&saldo(v)>0);
   // 📢 Órdenes que ya pasaron a "Listo" (automático desde Producción) y todavía no se le avisó al cliente
   const listasSinAvisar=ventas.filter(v=>!v.anulada&&(v.estado||"recibido")==="listo"&&!v.checkMsgRetiro);
   const enviarMsgListo=v=>{
@@ -573,7 +569,7 @@ function NotificacionesPanel({ventas,setVentas,upsertVenta,addAbono,soloLectura,
           <button onClick={onClose} style={{background:"#f0f4f8",border:"none",borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:13}}>✕ Cerrar</button>
         </div>
 
-        {pendientesConfirmar.length===0&&autorizadosPorCobrar.length===0&&listasSinAvisar.length===0&&(
+        {pendientesConfirmar.length===0&&listasSinAvisar.length===0&&(
           <div style={{textAlign:"center",padding:"40px 20px",color:"#aaa"}}><div style={{fontSize:44,marginBottom:8}}>🔔</div><div>Sin notificaciones pendientes</div></div>
         )}
 
@@ -629,26 +625,7 @@ function NotificacionesPanel({ventas,setVentas,upsertVenta,addAbono,soloLectura,
             ))}
           </div>
         )}
-
-        {autorizadosPorCobrar.length>0&&(
-          <div>
-            <div style={{fontSize:13,fontWeight:800,color:"#2e7d32",marginBottom:8}}>💰 Autorizado — falta cobrar ({autorizadosPorCobrar.length})</div>
-            {autorizadosPorCobrar.map(v=>(
-              <div key={v.folio} style={{...S.vcard,borderLeft:"4px solid #2e7d32"}}>
-                <div style={{fontWeight:700,fontSize:14}}>{v.clienteNombre}</div>
-                <div style={{fontSize:11,color:"#888"}}>{v.folio}</div>
-                <div style={{fontSize:13,color:"#c62828",fontWeight:700,marginTop:4}}>Saldo pendiente: ${saldo(v).toFixed(2)}</div>
-                {addAbono?(
-                  <button style={{...S.btnP,marginTop:8,width:"100%",background:"linear-gradient(135deg,#2e7d32,#66bb6a)"}} onClick={()=>setCobrarVenta(v)}>💰 Cobrar ahora</button>
-                ):(
-                  <div style={{fontSize:11,color:"#888",marginTop:6}}>Ve a "🧾 Facturación" para cobrar este saldo.</div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
       </div>
-      {cobrarVenta&&addAbono&&<AbonoModal venta={cobrarVenta} onSave={ab=>{addAbono(cobrarVenta.folio,ab);setCobrarVenta(null);}} onClose={()=>setCobrarVenta(null)}/>}
     </div>
   );
 }
@@ -787,7 +764,7 @@ function SelectorVista({sesion,onElegir,onLogout}){
 // 🏭 PRODUCCIÓN — pantalla completa, independiente de Facturación. Sin tabs de caja/ventas; todo aquí se identifica por PIN.
 function ProduccionScreen({sesion,onVolver,onLogout,ventas,setVentas,upsertVenta,empleadas,pins,eventosProduccion,setEventosProduccion,upsertEvento,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga}){
   const [showNotifs,setShowNotifs]=useState(false);
-  const totalNotifs=ventas.filter(v=>!v.anulada&&(v.clasificacion?.restregadoEstado==="pendiente_confirmar"||v.clasificacion?.restregadoEstado==="autorizado"&&saldo(v)>0||(v.clasificacion?.serviciosAdicionales||[]).some(s=>s.estado==="pendiente_confirmar"||(s.estado==="autorizado"&&saldo(v)>0))||((v.estado||"recibido")==="listo"&&!v.checkMsgRetiro))).length;
+  const totalNotifs=ventas.filter(v=>!v.anulada&&(v.clasificacion?.restregadoEstado==="pendiente_confirmar"||(v.clasificacion?.serviciosAdicionales||[]).some(s=>s.estado==="pendiente_confirmar")||((v.estado||"recibido")==="listo"&&!v.checkMsgRetiro))).length;
   // 🔔 Suena cuando aumentan las notificaciones (ej. llega un restregado nuevo o ya lo autorizaron en otra pantalla)
   const notifsPrevRef=useRef(totalNotifs);
   useEffect(()=>{
@@ -2283,9 +2260,8 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
   const [showNotifs,setShowNotifs]=useState(false);
   // 🧽 Restregados y servicios adicionales esperando respuesta del cliente — visible para todo el equipo hasta que se confirme
   const restregadosPendientes=ventas.filter(v=>!v.anulada&&(v.clasificacion?.restregadoEstado==="pendiente_confirmar"||(v.clasificacion?.serviciosAdicionales||[]).some(s=>s.estado==="pendiente_confirmar")));
-  const restregadosPorCobrar=ventas.filter(v=>!v.anulada&&(v.clasificacion?.restregadoEstado==="autorizado"||(v.clasificacion?.serviciosAdicionales||[]).some(s=>s.estado==="autorizado"))&&saldo(v)>0);
   const listasSinAvisarCount=ventas.filter(v=>!v.anulada&&(v.estado||"recibido")==="listo"&&!v.checkMsgRetiro).length;
-  const totalNotifs=restregadosPendientes.length+restregadosPorCobrar.length+listasSinAvisarCount;
+  const totalNotifs=restregadosPendientes.length+listasSinAvisarCount;
   // 🔔 Suena cuando aumentan las notificaciones (ej. llega un restregado nuevo o ya lo autorizaron en otra pantalla)
   const notifsPrevRef=useRef(totalNotifs);
   useEffect(()=>{
