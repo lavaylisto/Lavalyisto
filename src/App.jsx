@@ -582,9 +582,13 @@ function SelectorVista({sesion,onElegir,onLogout}){
           <div style={{fontSize:32}}>🧾</div>
           <div><div style={{fontWeight:800,fontSize:16}}>Facturación</div><div style={{fontSize:12,opacity:.85}}>Órdenes, cobros, ventas nuevas</div></div>
         </button>
-        <button onClick={()=>onElegir("produccion")} style={{width:"100%",padding:"20px",background:"linear-gradient(135deg,#7b1fa2,#9c27b0)",color:"#fff",border:"none",borderRadius:14,marginBottom:16,cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:14}}>
+        <button onClick={()=>onElegir("produccion")} style={{width:"100%",padding:"20px",background:"linear-gradient(135deg,#7b1fa2,#9c27b0)",color:"#fff",border:"none",borderRadius:14,marginBottom:12,cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:14}}>
           <div style={{fontSize:32}}>🏭</div>
           <div><div style={{fontWeight:800,fontSize:16}}>Producción</div><div style={{fontSize:12,opacity:.85}}>Lavado y doblado — se identifica con PIN</div></div>
+        </button>
+        <button onClick={()=>onElegir("tareas")} style={{width:"100%",padding:"20px",background:"linear-gradient(135deg,#00838f,#26c6da)",color:"#fff",border:"none",borderRadius:14,marginBottom:16,cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:14}}>
+          <div style={{fontSize:32}}>📋</div>
+          <div><div style={{fontWeight:800,fontSize:16}}>Tareas del día</div><div style={{fontSize:12,opacity:.85}}>Checklist de apertura, cierre y más</div></div>
         </button>
         <button style={{width:"100%",padding:"10px",background:"transparent",color:"#888",border:"1px solid #d0dce8",borderRadius:10,fontSize:13,cursor:"pointer"}} onClick={onLogout}>Cerrar sesión</button>
       </div>
@@ -609,6 +613,128 @@ function ProduccionScreen({sesion,onVolver,onLogout,ventas,setVentas,upsertVenta
       </div>
       <div style={{padding:12,maxWidth:900,margin:"0 auto"}}>
         <Produccion ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} empleadas={empleadas} pins={pins||[]} eventosProduccion={eventosProduccion||[]} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} maquinas={maquinas||[]} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas||[]} setCargas={setCargas} upsertCarga={upsertCarga}/>
+      </div>
+    </div>
+  );
+}
+
+// 📋 TAREAS — Fase 3: checklist del día, con semáforo, filtro de área y confirmación por PIN (+ foto si se requiere)
+function TareasChecklist({tareasDiarias,setTareasDiarias,upsertTareaDiaria,pins,empleadas}){
+  const [filtroArea,setFiltroArea]=useState("todas");
+  const [pinFor,setPinFor]=useState(null); // {tareaId, fotoUrl}
+  const [fotoFor,setFotoFor]=useState(null); // tareaId esperando foto
+
+  const hoyK=fechaHoyLocal();
+  const todasHoy=tareasDiarias.filter(t=>t.fecha===hoyK);
+  const visibles=filtroArea==="todas"?todasHoy:todasHoy.filter(t=>t.area===filtroArea);
+  const ordenBloque=["apertura","media_jornada","cambio_turno","cierre","semanal"];
+  const nombreDe=id=>empleadas.find(e=>String(e.id)===String(id))?.nombre||"—";
+
+  const completadas=todasHoy.filter(t=>t.estado==="completada").length;
+  const pct=todasHoy.length?Math.round((completadas/todasHoy.length)*100):0;
+
+  const horaLimiteMin=hl=>{const[h,m]=hl.split(":").map(Number);return h*60+m;};
+  const semaforo=t=>{
+    if(t.estado==="completada")return{color:"#2e7d32",bg:"#e8f5e9",label:t.atrasada?"✅ Completada (atrasada)":"✅ Completada"};
+    if(t.estado==="no_realizada")return{color:"#c62828",bg:"#ffebee",label:"⛔ No realizada"};
+    const ahoraD=new Date();
+    const ahora=ahoraD.getHours()*60+ahoraD.getMinutes();
+    const lim=horaLimiteMin(t.horaLimite);
+    if(ahora>lim)return{color:"#c62828",bg:"#ffebee",label:"🔴 Vencida"};
+    if(lim-ahora<=15)return{color:"#e65100",bg:"#fff3e0",label:"🟡 Por vencer"};
+    return{color:"#2e7d32",bg:"#e8f5e9",label:"🟢 A tiempo"};
+  };
+
+  const tocar=t=>{
+    if(t.estado!=="pendiente")return;
+    if(t.requiereFoto)setFotoFor(t.id);
+    else setPinFor({tareaId:t.id,fotoUrl:null});
+  };
+  const onFoto=url=>{
+    const tareaId=fotoFor;
+    setFotoFor(null);
+    setPinFor({tareaId,fotoUrl:url});
+  };
+  const onPinOk=emp=>{
+    if(!pinFor)return;
+    const{tareaId,fotoUrl}=pinFor;
+    const t=tareasDiarias.find(x=>x.id===tareaId);
+    if(!t){setPinFor(null);return;}
+    const ahora=new Date();
+    const[h,m]=t.horaLimite.split(":").map(Number);
+    const lim=new Date();lim.setHours(h,m,0,0);
+    const atrasada=ahora>lim;
+    setTareasDiarias(prev=>{
+      const next=prev.map(x=>x.id===tareaId?{...x,estado:"completada",completadaPor:emp?.id||null,completadaEn:ahora.toISOString(),atrasada,fotoUrl:fotoUrl||x.fotoUrl||null}:x);
+      const updated=next.find(x=>x.id===tareaId);
+      if(updated&&upsertTareaDiaria)upsertTareaDiaria({...updated,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+    setPinFor(null);
+  };
+
+  const porBloque=b=>visibles.filter(t=>t.bloque===b).sort((a,b2)=>a.orden-b2.orden);
+
+  return(<div style={{padding:"4px 4px 20px"}}>
+    <div style={{background:"linear-gradient(135deg,#1a3c5e,#2563a8)",borderRadius:14,padding:16,marginBottom:14,color:"#fff"}}>
+      <div style={{fontSize:12,color:"#a0c4da",fontWeight:600}}>PROGRESO DE HOY</div>
+      <div style={{fontSize:24,fontWeight:800,marginTop:2}}>{completadas} / {todasHoy.length} tareas</div>
+      <div style={{marginTop:8,background:"rgba(255,255,255,.15)",borderRadius:8,height:10,overflow:"hidden"}}>
+        <div style={{width:`${pct}%`,height:"100%",background:pct===100?"#4caf50":"#4db6e4",borderRadius:8}}/>
+      </div>
+    </div>
+
+    <div style={{display:"flex",gap:8,marginBottom:14,overflowX:"auto"}}>
+      {[["todas","Todas"],["atras","🧺 Atrás"],["adelante","🛎️ Adelante"],["general","👥 General"]].map(([val,l])=>(
+        <button key={val} onClick={()=>setFiltroArea(val)} style={{padding:"6px 14px",borderRadius:20,border:filtroArea===val?"2px solid #1a3c5e":"1.5px solid #e0e8f0",background:filtroArea===val?"#eaf3fb":"#fff",color:"#1a3c5e",fontWeight:700,fontSize:12,whiteSpace:"nowrap",cursor:"pointer"}}>{l}</button>
+      ))}
+    </div>
+
+    {todasHoy.length===0&&<div style={{textAlign:"center",padding:"40px 20px",color:"#aaa"}}><div style={{fontSize:48,marginBottom:8}}>📋</div><div>Aún no hay tareas generadas para hoy</div></div>}
+
+    {ordenBloque.map(b=>{
+      const lista=porBloque(b);
+      if(lista.length===0)return null;
+      return(<div key={b} style={{marginBottom:16}}>
+        <div style={{fontSize:13,fontWeight:800,color:"#1a3c5e",marginBottom:6}}>{BLOQUE_LBL[b]||b}</div>
+        {lista.map(t=>{
+          const s=semaforo(t);
+          return(
+            <button key={t.id} onClick={()=>tocar(t)} disabled={t.estado!=="pendiente"} style={{display:"block",width:"100%",textAlign:"left",background:s.bg,border:`1.5px solid ${s.color}`,borderRadius:12,padding:"12px 14px",marginBottom:8,cursor:t.estado==="pendiente"?"pointer":"default"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                <div style={{fontWeight:700,fontSize:14,color:"#1a3c5e",flex:1}}>{t.titulo}{t.requiereFoto?" 📷":""}</div>
+                <div style={{fontSize:11,fontWeight:700,color:s.color,whiteSpace:"nowrap",marginLeft:8}}>{s.label}</div>
+              </div>
+              {t.descripcion&&<div style={{fontSize:12,color:"#888",marginTop:2}}>{t.descripcion}</div>}
+              <div style={{fontSize:11,color:"#888",marginTop:4}}>{AREA_LBL[t.area]||t.area} · límite {t.horaLimite}{t.completadaPor?` · ${nombreDe(t.completadaPor)}`:""}</div>
+            </button>
+          );
+        })}
+      </div>);
+    })}
+
+    {fotoFor&&<FotoTareaModal onConfirmar={onFoto} onCancelar={()=>setFotoFor(null)}/>}
+    {pinFor&&<PinModal pins={pins} empleadas={empleadas} titulo="¿Quién completó esta tarea?" onConfirm={onPinOk} onCancelar={()=>setPinFor(null)}/>}
+  </div>);
+}
+
+// 📋 TAREAS — pantalla independiente (misma lógica de separación que Producción)
+function TareasScreen({sesion,onVolver,onLogout,tareasDiarias,setTareasDiarias,upsertTareaDiaria,pins,empleadas}){
+  return(
+    <div style={{minHeight:"100vh",background:"#f0f4f8",fontFamily:"'DM Sans',sans-serif"}}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=DM+Sans:wght@400;500;600;700&display=swap');`}</style>
+      <div style={{background:"linear-gradient(135deg,#00838f,#26c6da)",padding:"14px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,color:"#fff",fontWeight:700}}>📋 Tareas del día</div>
+          <div style={{fontSize:11,color:"#d0f4f8"}}>Cada tarea se confirma con PIN</div>
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={onVolver} style={{background:"rgba(255,255,255,.2)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 12px",fontWeight:600,cursor:"pointer"}}>🧾 Ir a Facturación</button>
+          <button onClick={onLogout} style={{background:"rgba(255,255,255,.2)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 12px",fontWeight:600,cursor:"pointer"}}>Salir</button>
+        </div>
+      </div>
+      <div style={{padding:12,maxWidth:900,margin:"0 auto"}}>
+        <TareasChecklist tareasDiarias={tareasDiarias||[]} setTareasDiarias={setTareasDiarias} upsertTareaDiaria={upsertTareaDiaria} pins={pins||[]} empleadas={empleadas}/>
       </div>
     </div>
   );
@@ -760,6 +886,54 @@ function TarjetaMaquina({m,cargas,ventas}){
 }
 // 🏭 PRODUCCIÓN — selector de máquina libre + minutos programados, antes de pedir el PIN
 // 🏭 PRODUCCIÓN — Fase 4: revisión/clasificación de prendas, obligatoria antes de iniciar el lavado
+// 📋 TAREAS — Fase 3: modal para tomar/adjuntar la foto requerida antes de completar una tarea
+function FotoTareaModal({onConfirmar,onCancelar}){
+  const [preview,setPreview]=useState(null);
+  const [file,setFile]=useState(null);
+  const [subiendo,setSubiendo]=useState(false);
+  const [err,setErr]=useState("");
+  const elegir=e=>{
+    const f=e.target.files?.[0];
+    if(!f)return;
+    setFile(f);
+    setPreview(URL.createObjectURL(f));
+    setErr("");
+  };
+  const confirmar=async()=>{
+    if(!file){setErr("Toma o elige una foto primero");return;}
+    setSubiendo(true);
+    try{
+      const url=await subirFoto(file,"tareas");
+      onConfirmar(url);
+    }catch(e){
+      setErr("No se pudo subir la foto: "+(e.message||"intenta de nuevo"));
+      setSubiendo(false);
+    }
+  };
+  return(
+    <div style={S.ov}>
+      <div style={{background:"#fff",borderRadius:18,width:"100%",maxWidth:380,padding:20,textAlign:"center"}}>
+        <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e",marginBottom:4}}>📷 Esta tarea requiere foto</div>
+        <div style={{fontSize:12,color:"#888",marginBottom:14}}>Adjunta la evidencia antes de marcarla completada</div>
+        {preview?(
+          <img src={preview} alt="preview" style={{width:"100%",maxHeight:220,objectFit:"cover",borderRadius:12,marginBottom:12}}/>
+        ):(
+          <div style={{width:"100%",height:140,background:"#f8fbfd",border:"1.5px dashed #d0dce8",borderRadius:12,marginBottom:12,display:"flex",alignItems:"center",justifyContent:"center",color:"#888",fontSize:13}}>Sin foto todavía</div>
+        )}
+        <label style={{...S.btnS,display:"block",cursor:"pointer",marginBottom:10}}>
+          📷 {preview?"Tomar otra foto":"Tomar / elegir foto"}
+          <input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={elegir}/>
+        </label>
+        {err&&<div style={{color:"#c62828",fontSize:12,fontWeight:600,marginBottom:8}}>{err}</div>}
+        <div style={{display:"flex",gap:8}}>
+          <button style={{...S.btnP,flex:1,opacity:file&&!subiendo?1:0.5}} disabled={!file||subiendo} onClick={confirmar}>{subiendo?"Subiendo...":"✓ Continuar"}</button>
+          <button style={{...S.btnS,flex:1}} onClick={onCancelar} disabled={subiendo}>Cancelar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ClasificacionModal({onConfirmar,onCancelar}){
   const [bolsillosRevisados,setBolsillosRevisados]=useState(false);
   const [objetosEncontrados,setObjetosEncontrados]=useState("");
@@ -4276,6 +4450,15 @@ useEffect(()=>{
   if(!Array.isArray(plantillasTareas)||plantillasTareas.length===0)return;
   if(!Array.isArray(tareasDiarias))return;
   const hoyK=fechaHoyLocal();
+  // 🔒 Cierre automático: las pendientes de días ANTERIORES a hoy pasan a "no_realizada" (queda registro, nunca se borran)
+  const vencidas=tareasDiarias.filter(t=>t.fecha<hoyK&&t.estado==="pendiente");
+  if(vencidas.length>0){
+    setTareasDiarias(prev=>{
+      const next=prev.map(t=>(t.fecha<hoyK&&t.estado==="pendiente")?{...t,estado:"no_realizada"}:t);
+      vencidas.forEach(v=>{const updated=next.find(t=>t.id===v.id);if(updated&&upsertTareaDiaria)upsertTareaDiaria({...updated,_updatedAt:new Date().toISOString()});});
+      return next;
+    });
+  }
   const yaGenerado=tareasDiarias.some(t=>t.fecha===hoyK);
   if(yaGenerado){tareasGeneradasRef.current=true;return;}
   const diaSemana=DIAS_KEY[new Date().getDay()];
@@ -4346,6 +4529,7 @@ const [showSalida,setShowSalida]=useState(false);
   // Producción NO requiere caja abierta (es un área/dispositivo aparte del taller).
   if(!esAdmin&&!vista)return <SelectorVista sesion={sesion} onElegir={setVista} onLogout={onLogout}/>;
   if(!esAdmin&&vista==="produccion")return <ProduccionScreen sesion={sesion} onVolver={()=>setVista(null)} onLogout={onLogout} ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} empleadas={empleadas} pins={pins} eventosProduccion={eventosProduccion} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga}/>;
+  if(!esAdmin&&vista==="tareas")return <TareasScreen sesion={sesion} onVolver={()=>setVista(null)} onLogout={onLogout} tareasDiarias={tareasDiarias} setTareasDiarias={setTareasDiarias} upsertTareaDiaria={upsertTareaDiaria} pins={pins} empleadas={empleadas}/>;
 
   // Si cerró caja y quiere seguir trabajando, DEBE abrir caja nuevamente
   if(!cajaOk||esperandoApertura)return <AperturaObligatoria
