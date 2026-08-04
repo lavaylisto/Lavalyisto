@@ -1,5 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useCollection } from "./hooks/useFirestore";
+import { storage } from "./firebase";
+import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 
 
 const KEYS = { ventas:"ll_ventas", clientes:"ll_clientes", empleadas:"ll_empleadas", inventario:"ll_inventario", servicios:"ll_servicios" };
@@ -49,6 +51,91 @@ const MAQUINAS_DEFAULT = [
   {id:"S4",nombre:"Secadora 4",tipo:"secadora",categoria:"general",zona:"Afuera",capacidadKg:null,estado:"libre",cargaActualId:null,finProgramado:null},
   {id:"1LZ",nombre:"Lavadora Zapatos",tipo:"lavadora",categoria:"zapatos",zona:"Afuera",capacidadKg:null,estado:"libre",cargaActualId:null,finProgramado:null},
   {id:"1SZ",nombre:"Secadora Zapatos",tipo:"secadora",categoria:"zapatos",zona:"Afuera",capacidadKg:null,estado:"libre",cargaActualId:null,finProgramado:null},
+];
+// 📋 TAREAS — Fase 1: plantillas semilla (§4 de la especificación). LV=lun-vie, SAB=sábado, DOM=domingo.
+const LV=["lun","mar","mie","jue","vie"];
+const DIAS_KEY=["dom","lun","mar","mie","jue","vie","sab"]; // índice = Date.getDay()
+// 📷 TAREAS — comprime una foto (máx 800px, como pide la especificación) y la sube a Firebase Storage; devuelve la URL de descarga
+const comprimirImagen=(file,maxDim=800)=>new Promise((resolve,reject)=>{
+  const img=new Image();
+  const url=URL.createObjectURL(file);
+  img.onload=()=>{
+    let{width,height}=img;
+    if(width>maxDim||height>maxDim){
+      if(width>height){height=Math.round(height*(maxDim/width));width=maxDim;}
+      else{width=Math.round(width*(maxDim/height));height=maxDim;}
+    }
+    const canvas=document.createElement("canvas");
+    canvas.width=width;canvas.height=height;
+    canvas.getContext("2d").drawImage(img,0,0,width,height);
+    canvas.toBlob(blob=>{URL.revokeObjectURL(url);blob?resolve(blob):reject(new Error("No se pudo comprimir la imagen"));},"image/jpeg",0.8);
+  };
+  img.onerror=()=>{URL.revokeObjectURL(url);reject(new Error("No se pudo leer la imagen"));};
+  img.src=url;
+});
+const subirFoto=async(file,carpeta)=>{
+  if(!storage)throw new Error("Firebase Storage no está configurado.");
+  const blob=await comprimirImagen(file);
+  const nombre=`${carpeta}/${Date.now()}_${Math.random().toString(36).slice(2,8)}.jpg`;
+  const r=storageRef(storage,nombre);
+  await uploadBytes(r,blob,{contentType:"image/jpeg"});
+  return await getDownloadURL(r);
+};
+const PLANTILLAS_TAREAS_DEFAULT=[
+  // — LUNES A VIERNES: APERTURA (Karen, límite 9:30) —
+  {id:"t01",titulo:"Abrir local y dejar mostrador operativo para clientes de la mañana",descripcion:null,area:"general",bloque:"apertura",diasSemana:LV,horaLimite:"09:30",orden:1,activa:true,requiereFoto:false},
+  {id:"t02",titulo:"Encender máquinas y verificar funcionamiento (L1–L3, S1–S4)",descripcion:null,area:"atras",bloque:"apertura",diasSemana:LV,horaLimite:"09:30",orden:2,activa:true,requiereFoto:false},
+  {id:"t03",titulo:"Limpiar área de lavado: mesa de clasificación y pisos",descripcion:null,area:"atras",bloque:"apertura",diasSemana:LV,horaLimite:"09:30",orden:3,activa:true,requiereFoto:false},
+  {id:"t04",titulo:"Verificar insumos de lavado: detergente, suavizante, quitamanchas",descripcion:"Dejar nota si falta algo",area:"atras",bloque:"apertura",diasSemana:LV,horaLimite:"09:30",orden:4,activa:true,requiereFoto:false},
+  {id:"t05",titulo:"Revisar órdenes pendientes del día anterior y priorizar entregas de hoy",descripcion:null,area:"general",bloque:"apertura",diasSemana:LV,horaLimite:"09:30",orden:5,activa:true,requiereFoto:false},
+  // — MEDIA JORNADA (Karen, límite 13:00) —
+  {id:"t06",titulo:"Actualizar estados de todas las órdenes en el sistema",descripcion:"Nada 'lavando' que ya terminó",area:"atras",bloque:"media_jornada",diasSemana:LV,horaLimite:"13:00",orden:6,activa:true,requiereFoto:false},
+  {id:"t07",titulo:"Guardar objetos encontrados en fundas ziploc etiquetadas con nº de orden",descripcion:null,area:"atras",bloque:"media_jornada",diasSemana:LV,horaLimite:"13:00",orden:7,activa:true,requiereFoto:false},
+  {id:"t08",titulo:"Limpiar mesa de doblado",descripcion:null,area:"atras",bloque:"media_jornada",diasSemana:LV,horaLimite:"13:00",orden:8,activa:true,requiereFoto:false},
+  // — CAMBIO DE TURNO (Karen y Nicole juntas, límite 13:45) —
+  {id:"t09",titulo:"Repaso de órdenes en proceso y entregas de la tarde (2 min)",descripcion:null,area:"general",bloque:"cambio_turno",diasSemana:LV,horaLimite:"13:45",orden:9,activa:true,requiereFoto:false},
+  {id:"t10",titulo:"Confirmar en el tablero que ninguna máquina tenga carga vencida (roja)",descripcion:null,area:"general",bloque:"cambio_turno",diasSemana:LV,horaLimite:"13:45",orden:10,activa:true,requiereFoto:false},
+  // — TARDE (Nicole, límite 15:00) —
+  {id:"t11",titulo:"Limpiar y ordenar mostrador y área de atención",descripcion:null,area:"adelante",bloque:"media_jornada",diasSemana:LV,horaLimite:"15:00",orden:11,activa:true,requiereFoto:false},
+  {id:"t12",titulo:"Revisar insumos de adelante: fundas, perfume, hojas, cintas, insumos de oficina",descripcion:"Dejar nota si falta algo",area:"adelante",bloque:"media_jornada",diasSemana:LV,horaLimite:"15:00",orden:12,activa:true,requiereFoto:false},
+  {id:"t13",titulo:"Verificar órdenes listas etiquetadas y organizadas para entrega",descripcion:null,area:"adelante",bloque:"media_jornada",diasSemana:LV,horaLimite:"15:00",orden:13,activa:true,requiereFoto:false},
+  // — CIERRE (límite 18:00) —
+  {id:"t14",titulo:"Limpiar filtros de pelusa de las 4 secadoras",descripcion:null,area:"atras",bloque:"cierre",diasSemana:LV,horaLimite:"18:00",orden:14,activa:true,requiereFoto:false},
+  {id:"t15",titulo:"Revisar tambores de lavadoras (que no queden prendas) y limpiar empaques",descripcion:null,area:"atras",bloque:"cierre",diasSemana:LV,horaLimite:"18:00",orden:15,activa:true,requiereFoto:false},
+  {id:"t16",titulo:"Barrer/trapear área de lavado y sacar basura de atrás",descripcion:null,area:"atras",bloque:"cierre",diasSemana:LV,horaLimite:"18:00",orden:16,activa:true,requiereFoto:false},
+  {id:"t17",titulo:"Limpiar mostrador y barrer área de atención",descripcion:null,area:"adelante",bloque:"cierre",diasSemana:LV,horaLimite:"18:00",orden:17,activa:true,requiereFoto:false},
+  {id:"t18",titulo:"Sacar basura de adelante",descripcion:null,area:"adelante",bloque:"cierre",diasSemana:LV,horaLimite:"18:00",orden:18,activa:true,requiereFoto:false},
+  {id:"t19",titulo:"Cuadre de caja",descripcion:"Módulo Caja",area:"adelante",bloque:"cierre",diasSemana:LV,horaLimite:"18:00",orden:19,activa:true,requiereFoto:false},
+  {id:"t20",titulo:"Dejar nota a administración con pendientes del día (si los hay) y apagar equipos",descripcion:null,area:"general",bloque:"cierre",diasSemana:LV,horaLimite:"18:00",orden:20,activa:true,requiereFoto:false},
+  // — SÁBADO —
+  {id:"s01",titulo:"Encender máquinas y verificar funcionamiento (L1–L3, S1–S4)",descripcion:null,area:"atras",bloque:"apertura",diasSemana:["sab"],horaLimite:"08:30",orden:1,activa:true,requiereFoto:false},
+  {id:"s02",titulo:"Revisar órdenes pendientes del día anterior y priorizar entregas de hoy",descripcion:null,area:"general",bloque:"apertura",diasSemana:["sab"],horaLimite:"08:30",orden:2,activa:true,requiereFoto:false},
+  {id:"s03",titulo:"Limpiar y ordenar mostrador y área de atención",descripcion:null,area:"adelante",bloque:"apertura",diasSemana:["sab"],horaLimite:"08:30",orden:3,activa:true,requiereFoto:false},
+  {id:"s04",titulo:"Actualizar estados de todas las órdenes en el sistema",descripcion:"Nada 'lavando' que ya terminó",area:"atras",bloque:"cierre",diasSemana:["sab"],horaLimite:"13:00",orden:4,activa:true,requiereFoto:false},
+  {id:"s05",titulo:"Revisar insumos de adelante: fundas, perfume, hojas, cintas, insumos de oficina",descripcion:"Dejar nota si falta algo",area:"adelante",bloque:"cierre",diasSemana:["sab"],horaLimite:"13:00",orden:5,activa:true,requiereFoto:false},
+  {id:"s06",titulo:"Cuadre de caja parcial",descripcion:"Módulo Caja",area:"adelante",bloque:"cierre",diasSemana:["sab"],horaLimite:"13:00",orden:6,activa:true,requiereFoto:false},
+  {id:"s07",titulo:"Dejar nota con pendientes para Karen (turno de la tarde)",descripcion:null,area:"general",bloque:"cierre",diasSemana:["sab"],horaLimite:"13:00",orden:7,activa:true,requiereFoto:false},
+  {id:"s08",titulo:"Leer nota dejada por Nicole en la mañana",descripcion:null,area:"general",bloque:"apertura",diasSemana:["sab"],horaLimite:"14:15",orden:8,activa:true,requiereFoto:false},
+  {id:"s09",titulo:"Verificar máquinas y órdenes en proceso",descripcion:null,area:"atras",bloque:"apertura",diasSemana:["sab"],horaLimite:"14:15",orden:9,activa:true,requiereFoto:false},
+  {id:"s10",titulo:"Limpiar filtros de pelusa de las 4 secadoras",descripcion:null,area:"atras",bloque:"cierre",diasSemana:["sab"],horaLimite:"18:00",orden:10,activa:true,requiereFoto:false},
+  {id:"s11",titulo:"Revisar tambores de lavadoras (que no queden prendas) y limpiar empaques",descripcion:null,area:"atras",bloque:"cierre",diasSemana:["sab"],horaLimite:"18:00",orden:11,activa:true,requiereFoto:false},
+  {id:"s12",titulo:"Barrer/trapear área de lavado y sacar basura de atrás",descripcion:null,area:"atras",bloque:"cierre",diasSemana:["sab"],horaLimite:"18:00",orden:12,activa:true,requiereFoto:false},
+  {id:"s13",titulo:"Limpiar mostrador y barrer área de atención",descripcion:null,area:"adelante",bloque:"cierre",diasSemana:["sab"],horaLimite:"18:00",orden:13,activa:true,requiereFoto:false},
+  {id:"s14",titulo:"Sacar basura de adelante",descripcion:null,area:"adelante",bloque:"cierre",diasSemana:["sab"],horaLimite:"18:00",orden:14,activa:true,requiereFoto:false},
+  {id:"s15",titulo:"Cuadre de caja",descripcion:"Módulo Caja",area:"adelante",bloque:"cierre",diasSemana:["sab"],horaLimite:"18:00",orden:15,activa:true,requiereFoto:false},
+  {id:"s16",titulo:"Dejar nota a administración con pendientes del día (si los hay) y apagar equipos",descripcion:null,area:"general",bloque:"cierre",diasSemana:["sab"],horaLimite:"18:00",orden:16,activa:true,requiereFoto:false},
+  // — DOMINGO (Natalia o Micaela) —
+  {id:"d01",titulo:"Encender equipos, dejar mostrador operativo",descripcion:null,area:"general",bloque:"apertura",diasSemana:["dom"],horaLimite:"09:30",orden:1,activa:true,requiereFoto:false},
+  {id:"d02",titulo:"Revisar órdenes del día",descripcion:null,area:"general",bloque:"apertura",diasSemana:["dom"],horaLimite:"09:30",orden:2,activa:true,requiereFoto:false},
+  {id:"d03",titulo:"Limpiar filtros de pelusa de las secadoras",descripcion:null,area:"general",bloque:"cierre",diasSemana:["dom"],horaLimite:"18:00",orden:3,activa:true,requiereFoto:false},
+  {id:"d04",titulo:"Barrer y sacar basura",descripcion:null,area:"general",bloque:"cierre",diasSemana:["dom"],horaLimite:"18:00",orden:4,activa:true,requiereFoto:false},
+  {id:"d05",titulo:"Cuadre de caja",descripcion:"Módulo Caja",area:"general",bloque:"cierre",diasSemana:["dom"],horaLimite:"18:00",orden:5,activa:true,requiereFoto:false},
+  // — SEMANALES (límite 18:00 del día indicado) —
+  {id:"w01",titulo:"Limpieza profunda de baño/lavabo",descripcion:null,area:"general",bloque:"semanal",diasSemana:["lun"],horaLimite:"18:00",orden:1,activa:true,requiereFoto:false},
+  {id:"w02",titulo:"Limpiar vidrios y puerta de entrada",descripcion:null,area:"adelante",bloque:"semanal",diasSemana:["mie"],horaLimite:"18:00",orden:2,activa:true,requiereFoto:false},
+  {id:"w03",titulo:"Inventario completo de atrás: detergente, suavizante, quitamanchas, cloro y demás químicos",descripcion:"Registrar cantidades y dejar nota de compras",area:"atras",bloque:"semanal",diasSemana:["vie"],horaLimite:"18:00",orden:3,activa:true,requiereFoto:true},
+  {id:"w04",titulo:"Inventario completo de adelante: fundas, perfume, hojas, cinta masking, cinta adhesiva, insumos de oficina",descripcion:"Registrar cantidades y dejar nota de compras",area:"adelante",bloque:"semanal",diasSemana:["vie"],horaLimite:"18:00",orden:4,activa:true,requiereFoto:true},
+  {id:"w05",titulo:"Limpieza exterior de máquinas (paneles, puertas, detrás)",descripcion:null,area:"atras",bloque:"semanal",diasSemana:["vie"],horaLimite:"18:00",orden:5,activa:true,requiereFoto:false},
 ];
 // 🎯 INCENTIVOS: comisión por impulsación de promo + bonos por meta grupal (editable desde el panel admin)
 const INCENTIVOS_DEFAULT = [{id:"config",comisionImpulso:0.40,bonoMetaPct:1,bonoExcedentePct:10}];
@@ -1273,6 +1360,63 @@ function IncentivosAdmin({cfgInc,setIncentivosArr,upsertIncentivo,ventas,emplead
 
 // 🏭 PRODUCCIÓN — Fase 2: administración de PINs por empleada (solo admin)
 // 🏭 PRODUCCIÓN — panel de descarga de reportes (día/semana/mes/rango personalizado)
+// 📋 TAREAS — Fase 1: panel admin de plantillas + verificación de la generación diaria
+const BLOQUE_LBL={apertura:"🌅 Apertura",media_jornada:"🕐 Media jornada",cambio_turno:"🔄 Cambio de turno",cierre:"🌙 Cierre",semanal:"📆 Semanal"};
+const AREA_LBL={atras:"🧺 Atrás",adelante:"🛎️ Adelante",general:"👥 General"};
+function TareasAdminPanel({plantillasTareas,setPlantillasTareas,upsertPlantillaTarea,tareasDiarias,empleadas}){
+  const hoyK=fechaHoyLocal();
+  const tareasHoy=tareasDiarias.filter(t=>t.fecha===hoyK).sort((a,b)=>a.orden-b.orden);
+  const toggleActiva=p=>{
+    setPlantillasTareas(prev=>{
+      const next=prev.map(pp=>pp.id===p.id?{...pp,activa:!pp.activa}:pp);
+      const updated=next.find(pp=>pp.id===p.id);
+      if(updated&&upsertPlantillaTarea)upsertPlantillaTarea({...updated,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+  };
+  const bloques=["apertura","media_jornada","cambio_turno","cierre","semanal"];
+  const nombreDe=id=>empleadas.find(e=>String(e.id)===String(id))?.nombre||"—";
+  return(<div style={S.panel}>
+    <h2 style={S.ptitle}>📋 Tareas diarias</h2>
+    <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ Fase 1: catálogo de plantillas + generación automática diaria. La pantalla de checklist para las empleadas (con PIN) llega en la siguiente fase.</div>
+
+    <Card title={`✅ Tareas generadas hoy (${tareasHoy.length})`}>
+      {tareasHoy.length===0&&<div style={{fontSize:13,color:"#888"}}>Todavía no se han generado tareas para hoy — se crean solas al abrir la app.</div>}
+      {bloques.map(b=>{
+        const deEsteBloque=tareasHoy.filter(t=>t.bloque===b);
+        if(deEsteBloque.length===0)return null;
+        return(<div key={b} style={{marginBottom:10}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#1a3c5e",marginBottom:4}}>{BLOQUE_LBL[b]||b}</div>
+          {deEsteBloque.map(t=>(
+            <div key={t.id} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"4px 0",borderBottom:"1px solid #f0f4f8"}}>
+              <span>{t.estado==="completada"?"✅":t.estado==="no_realizada"?"⛔":"⬜"} {t.titulo} <span style={{color:"#888",fontSize:11}}>({AREA_LBL[t.area]||t.area} · {t.horaLimite})</span></span>
+              {t.completadaPor&&<span style={{color:"#2e7d32",fontSize:11,fontWeight:600}}>{nombreDe(t.completadaPor)}</span>}
+            </div>
+          ))}
+        </div>);
+      })}
+    </Card>
+
+    {bloques.map(b=>{
+      const deEsteBloque=plantillasTareas.filter(p=>p.bloque===b).sort((a,b2)=>a.orden-b2.orden);
+      if(deEsteBloque.length===0)return null;
+      return(
+        <Card key={b} title={BLOQUE_LBL[b]||b}>
+          {deEsteBloque.map(p=>(
+            <div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #f0f4f8"}}>
+              <div>
+                <div style={{fontSize:13,fontWeight:600,color:p.activa?"#1a3c5e":"#bbb"}}>{p.titulo}</div>
+                <div style={{fontSize:11,color:"#888"}}>{AREA_LBL[p.area]||p.area} · {(p.diasSemana||[]).join(", ")} · límite {p.horaLimite}{p.requiereFoto?" · 📷 requiere foto":""}</div>
+              </div>
+              <button style={{...S.btnS,fontSize:11}} onClick={()=>toggleActiva(p)}>{p.activa?"✅ Activa":"⏸️ Inactiva"}</button>
+            </div>
+          ))}
+        </Card>
+      );
+    })}
+  </div>);
+}
+
 function ReportesProduccionPanel({cargas,eventosProduccion,ventas,empleadas}){
   const [desde,setDesde]=useState(fechaHoyLocal());
   const [hasta,setHasta]=useState(fechaHoyLocal());
@@ -4122,6 +4266,31 @@ const { data: pins, setData: setPins, upsert: upsertPin } = useCollection("pins"
 const { data: eventosProduccion, setData: setEventosProduccion, upsert: upsertEvento } = useCollection("eventosProduccion", "ll_eventos_produccion", []);
 // 🏭 PRODUCCIÓN — Fase 5: cargas de lavado/secado (máquina + tiempo programado)
 const { data: cargas, setData: setCargas, upsert: upsertCarga } = useCollection("cargas", "ll_cargas", []);
+// 📋 TAREAS — Fase 1: plantillas de tareas + generación diaria
+const { data: plantillasTareas, setData: setPlantillasTareas, upsert: upsertPlantillaTarea } = useCollection("plantillasTareas", "ll_plantillas_tareas", PLANTILLAS_TAREAS_DEFAULT);
+const { data: tareasDiarias, setData: setTareasDiarias, upsert: upsertTareaDiaria } = useCollection("tareasDiarias", "ll_tareas_diarias", []);
+// 📋 Generación lazy: si hoy todavía no tiene tareas generadas, las crea una sola vez desde las plantillas activas del día
+const tareasGeneradasRef=useRef(false);
+useEffect(()=>{
+  if(tareasGeneradasRef.current)return;
+  if(!Array.isArray(plantillasTareas)||plantillasTareas.length===0)return;
+  if(!Array.isArray(tareasDiarias))return;
+  const hoyK=fechaHoyLocal();
+  const yaGenerado=tareasDiarias.some(t=>t.fecha===hoyK);
+  if(yaGenerado){tareasGeneradasRef.current=true;return;}
+  const diaSemana=DIAS_KEY[new Date().getDay()];
+  const activas=plantillasTareas.filter(p=>p.activa&&(p.diasSemana||[]).includes(diaSemana));
+  if(activas.length>0){
+    const nuevas=activas.map(p=>({
+      id:hoyK+"_"+p.id,fecha:hoyK,plantillaId:p.id,titulo:p.titulo,descripcion:p.descripcion||null,
+      area:p.area,bloque:p.bloque,horaLimite:p.horaLimite,orden:p.orden,requiereFoto:!!p.requiereFoto,
+      estado:"pendiente",completadaPor:null,completadaEn:null,atrasada:false,fotoUrl:null,observacion:null,
+    }));
+    setTareasDiarias(prev=>[...prev,...nuevas]);
+    nuevas.forEach(t=>{if(upsertTareaDiaria)upsertTareaDiaria(t);});
+  }
+  tareasGeneradasRef.current=true;
+},[plantillasTareas,tareasDiarias]);
 const [showSalida,setShowSalida]=useState(false);
   const [ticketV,setTicketV]=useState(null);
   const [cuponSug,setCuponSug]=useState(null); // 🎟️ cupón sugerido tras imprimir la venta
@@ -4135,7 +4304,7 @@ const [showSalida,setShowSalida]=useState(false);
     setCajaOk(false);
     setEsperandoApertura(true);
   };
-  const exportarDatos=()=>{const d={ventas,clientes,empleadas,inventario,servicios,gastos,depositos,salidasCaja,cajas,cupones,promos,maquinas,cargas};const blob=new Blob([JSON.stringify(d,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="respaldo-"+hoy+".json";a.click();};
+  const exportarDatos=()=>{const d={ventas,clientes,empleadas,inventario,servicios,gastos,depositos,salidasCaja,cajas,cupones,promos,maquinas,cargas,plantillasTareas,tareasDiarias};const blob=new Blob([JSON.stringify(d,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="respaldo-"+hoy+".json";a.click();};
   // Importa un respaldo .json Y lo sube a Firestore (antes solo quedaba en este dispositivo)
   const importarDatos=e=>{
     const f=e.target.files[0];if(!f)return;
@@ -4157,6 +4326,8 @@ const [showSalida,setShowSalida]=useState(false);
           [d.promos,setPromos,upsertPromo],
           [d.maquinas,setMaquinas,upsertMaquina],
           [d.cargas,setCargas,upsertCarga],
+          [d.plantillasTareas,setPlantillasTareas,upsertPlantillaTarea],
+          [d.tareasDiarias,setTareasDiarias,upsertTareaDiaria],
         ];
         let tot=0;
         cols.forEach(([arr,setter,upsertFn])=>{
@@ -4196,7 +4367,7 @@ const [showSalida,setShowSalida]=useState(false);
     {id:"reportes",icon:"📊",l:"Reportes"},{id:"depositos",icon:"🏦",l:"Depósitos"},
     {id:"conciliacion",icon:"🏛️",l:"Conciliación"},
     {id:"gastos",icon:"🛒",l:"Gastos"},{id:"inventario",icon:"📦",l:"Inventario"},
-    {id:"equipo",icon:"👩",l:"Equipo"},{id:"incentivosAdmin",icon:"🎯",l:"Incentivos"},{id:"maquinasAdmin",icon:"🏭",l:"Máquinas"},{id:"pinsAdmin",icon:"🔒",l:"PINs"},{id:"produccionAdmin",icon:"🧺",l:"Producción"},{id:"caja",icon:"💰",l:"Caja"},
+    {id:"equipo",icon:"👩",l:"Equipo"},{id:"incentivosAdmin",icon:"🎯",l:"Incentivos"},{id:"maquinasAdmin",icon:"🏭",l:"Máquinas"},{id:"pinsAdmin",icon:"🔒",l:"PINs"},{id:"produccionAdmin",icon:"🧺",l:"Producción"},{id:"tareasAdmin",icon:"📋",l:"Tareas"},{id:"caja",icon:"💰",l:"Caja"},
     {id:"config",icon:"⚙️",l:"Config"},{id:"usuarios",icon:"🔑",l:"Usuarios"},
   ];
   return(<div style={S.app}>
@@ -4236,6 +4407,7 @@ const [showSalida,setShowSalida]=useState(false);
       {tab==="produccionAdmin"&&(<div style={S.panel}><h2 style={S.ptitle}>🧺 Producción</h2>
         <ReportesProduccionPanel cargas={cargas||[]} eventosProduccion={eventosProduccion||[]} ventas={ventas} empleadas={empleadas}/>
         <Produccion ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} empleadas={empleadas} pins={pins||[]} eventosProduccion={eventosProduccion||[]} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} maquinas={maquinas||[]} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas||[]} setCargas={setCargas} upsertCarga={upsertCarga}/></div>)}
+      {tab==="tareasAdmin"&&<TareasAdminPanel plantillasTareas={plantillasTareas||[]} setPlantillasTareas={setPlantillasTareas} upsertPlantillaTarea={upsertPlantillaTarea} tareasDiarias={tareasDiarias||[]} empleadas={empleadas}/>}
       {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={handleCierreListo} onResetCierre={()=>setCierreOk(false)} sesion={sesion} salidasCaja={salidasCaja} setVentas={setVentas} upsertVenta={upsertVenta} upsertCaja={upsertCaja}/>}
       {tab==="config"&&<Configuracion servicios={servicios} setServicios={setServicios} exportarDatos={exportarDatos} importarDatos={importarDatos} upsertVenta={upsertVenta} upsertServicio={upsertServicio}/>}
       {tab==="usuarios"&&<GestionUsuarios/>}
