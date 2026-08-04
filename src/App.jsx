@@ -763,6 +763,12 @@ function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta,clientes,setClien
     if(sig.id==="listo"){setWaListo(true);return;} // WhatsApp obligatorio antes de "listo"
     aplicarEstado(sig.id);
   };
+  const reenviarWa=tipo=>{
+    if(!v.clienteTel){alert("Este cliente no tiene teléfono registrado.");return;}
+    const tel=telWa(v.clienteTel);
+    const msg=msgWa(v,tipo);
+    window.open(`https://api.whatsapp.com/send/?phone=${tel}&text=${encodeURIComponent(msg)}`,"_blank");
+  };
   const toggle=f=>setVentas(prev=>{const next=prev.map(vv=>vv.folio===v.folio?{...vv,[f]:!vv[f]}:vv);const updated=next.find(vv=>vv.folio===v.folio);if(updated&&upsertVenta)upsertVenta(updated);return next;});
   const guardarEdicionCliente=datos=>{
     setVentas(prev=>{
@@ -808,6 +814,10 @@ function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta,clientes,setClien
           <input type="checkbox" checked={v.checkMsgRetiro||false} onChange={()=>toggle("checkMsgRetiro")}/>
           <span>📲 Avisé al cliente</span>
         </label>
+        <div style={{display:"flex",gap:6,marginTop:6}}>
+          <button style={{flex:1,padding:"6px 8px",background:"#e8f5e9",color:"#2e7d32",border:"1px solid #a5d6a7",borderRadius:8,fontSize:11,fontWeight:700,cursor:"pointer"}} onClick={()=>reenviarWa("recibido")} title="Reenviar mensaje de orden recibida">🔁📥 Reenviar "Recibido"</button>
+          <button style={{flex:1,padding:"6px 8px",background:"#e3f2fd",color:"#1565c0",border:"1px solid #90caf9",borderRadius:8,fontSize:11,fontWeight:700,cursor:"pointer"}} onClick={()=>reenviarWa("listo")} title="Reenviar mensaje de listo para retirar">🔁✅ Reenviar "Listo"</button>
+        </div>
         <div style={{display:"flex",gap:8,marginTop:10,flexWrap:"wrap"}}>
           {sig&&<button style={{flex:1,padding:"10px",background:sig.bg,color:sig.color,border:`1.5px solid ${sig.color}`,borderRadius:10,fontWeight:700,fontSize:13,cursor:"pointer"}} onClick={cambiar}>{sig.icon} {sig.label}</button>}
           {!esPag&&<button style={{flex:1,padding:"10px",background:"#e8f5e9",color:"#2e7d32",border:"1.5px solid #2e7d32",borderRadius:10,fontWeight:700,fontSize:13,cursor:"pointer"}} onClick={()=>setShowAb(true)}>💰 Cobrar</button>}
