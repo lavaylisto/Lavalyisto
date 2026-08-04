@@ -470,6 +470,84 @@ function TicketModal({venta,empleadas,onClose}){
   );
 }
 
+// 🔔 Panel de notificaciones: restregados por confirmar y restregados ya autorizados con saldo pendiente de cobro
+function NotificacionesPanel({ventas,setVentas,upsertVenta,addAbono,onClose}){
+  const [cobrarVenta,setCobrarVenta]=useState(null);
+  const pendientesConfirmar=ventas.filter(v=>!v.anulada&&v.clasificacion?.restregadoEstado==="pendiente_confirmar");
+  const autorizadosPorCobrar=ventas.filter(v=>!v.anulada&&v.clasificacion?.restregadoEstado==="autorizado"&&saldo(v)>0);
+
+  const confirmarRestregado=(v,autorizado)=>{
+    const costo=v.clasificacion?.restregadoCosto||0;
+    if(autorizado){
+      const nuevoItem={servId:null,custom:true,piezas:1,lC:"🧽 Restregado extra autorizado",pC:costo.toFixed(2)};
+      setVentas(prev=>{
+        const next=prev.map(vv=>vv.folio===v.folio?{...vv,items:[...(vv.items||[]),nuevoItem],total:(vv.total||0)+costo,clasificacion:{...vv.clasificacion,restregadoEstado:"autorizado",restregadoConfirmadoEn:new Date().toISOString()}}:vv);
+        const updated=next.find(vv=>vv.folio===v.folio);
+        if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
+        return next;
+      });
+    }else{
+      const notaTxt=`🧽 Restregado extra rechazado por el cliente (hubiera costado $${costo.toFixed(2)})`;
+      setVentas(prev=>{
+        const next=prev.map(vv=>vv.folio===v.folio?{...vv,notas:[vv.notas,notaTxt].filter(Boolean).join(" · "),clasificacion:{...vv.clasificacion,restregadoEstado:"rechazado",restregadoConfirmadoEn:new Date().toISOString()}}:vv);
+        const updated=next.find(vv=>vv.folio===v.folio);
+        if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
+        return next;
+      });
+    }
+  };
+
+  return(
+    <div style={{...S.ov,justifyContent:"flex-end",alignItems:"stretch",padding:0}}>
+      <div style={{background:"#fff",width:"100%",maxWidth:420,height:"100%",overflowY:"auto",padding:18,boxShadow:"-8px 0 30px rgba(0,0,0,.2)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:19,fontWeight:700,color:"#1a3c5e"}}>🔔 Notificaciones</div>
+          <button onClick={onClose} style={{background:"#f0f4f8",border:"none",borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:13}}>✕ Cerrar</button>
+        </div>
+
+        {pendientesConfirmar.length===0&&autorizadosPorCobrar.length===0&&(
+          <div style={{textAlign:"center",padding:"40px 20px",color:"#aaa"}}><div style={{fontSize:44,marginBottom:8}}>🔔</div><div>Sin notificaciones pendientes</div></div>
+        )}
+
+        {pendientesConfirmar.length>0&&(
+          <div style={{marginBottom:20}}>
+            <div style={{fontSize:13,fontWeight:800,color:"#e65100",marginBottom:8}}>🧽 Esperando respuesta del cliente ({pendientesConfirmar.length})</div>
+            {pendientesConfirmar.map(v=>(
+              <div key={v.folio} style={{...S.vcard,borderLeft:"4px solid #e65100"}}>
+                <div style={{fontWeight:700,fontSize:14}}>{v.clienteNombre}</div>
+                <div style={{fontSize:11,color:"#888"}}>{v.folio}</div>
+                <div style={{fontSize:13,color:"#1a3c5e",marginTop:4}}>Restregado extra: <strong>${(v.clasificacion.restregadoCosto||0).toFixed(2)}</strong></div>
+                <div style={{display:"flex",gap:6,marginTop:8}}>
+                  <button style={{...S.btnS,flex:1,background:"#e8f5e9",color:"#2e7d32"}} onClick={()=>confirmarRestregado(v,true)}>✅ Autorizó</button>
+                  <button style={{...S.btnS,flex:1,background:"#ffebee",color:"#c62828"}} onClick={()=>confirmarRestregado(v,false)}>❌ Rechazó</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {autorizadosPorCobrar.length>0&&(
+          <div>
+            <div style={{fontSize:13,fontWeight:800,color:"#2e7d32",marginBottom:8}}>💰 Restregado autorizado — falta cobrar ({autorizadosPorCobrar.length})</div>
+            {autorizadosPorCobrar.map(v=>(
+              <div key={v.folio} style={{...S.vcard,borderLeft:"4px solid #2e7d32"}}>
+                <div style={{fontWeight:700,fontSize:14}}>{v.clienteNombre}</div>
+                <div style={{fontSize:11,color:"#888"}}>{v.folio}</div>
+                <div style={{fontSize:13,color:"#c62828",fontWeight:700,marginTop:4}}>Saldo pendiente: ${saldo(v).toFixed(2)}</div>
+                {addAbono?(
+                  <button style={{...S.btnP,marginTop:8,width:"100%",background:"linear-gradient(135deg,#2e7d32,#66bb6a)"}} onClick={()=>setCobrarVenta(v)}>💰 Cobrar ahora</button>
+                ):(
+                  <div style={{fontSize:11,color:"#888",marginTop:6}}>Ve a "🧾 Facturación" para cobrar este saldo.</div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      {cobrarVenta&&addAbono&&<AbonoModal venta={cobrarVenta} onSave={ab=>{addAbono(cobrarVenta.folio,ab);setCobrarVenta(null);}} onClose={()=>setCobrarVenta(null)}/>}
+    </div>
+  );
+}
 function AbonoModal({venta,onSave,onClose}){
   const [monto,setMonto]=useState("");const [metodo,setMetodo]=useState("Efectivo");
   const pend=saldo(venta);
@@ -604,6 +682,8 @@ function SelectorVista({sesion,onElegir,onLogout}){
 
 // 🏭 PRODUCCIÓN — pantalla completa, independiente de Facturación. Sin tabs de caja/ventas; todo aquí se identifica por PIN.
 function ProduccionScreen({sesion,onVolver,onLogout,ventas,setVentas,upsertVenta,empleadas,pins,eventosProduccion,setEventosProduccion,upsertEvento,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga}){
+  const [showNotifs,setShowNotifs]=useState(false);
+  const totalNotifs=ventas.filter(v=>!v.anulada&&(v.clasificacion?.restregadoEstado==="pendiente_confirmar"||(v.clasificacion?.restregadoEstado==="autorizado"&&saldo(v)>0))).length;
   return(
     <div style={{minHeight:"100vh",background:"#f0f4f8",fontFamily:"'DM Sans',sans-serif"}}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=DM+Sans:wght@400;500;600;700&display=swap');`}</style>
@@ -613,6 +693,9 @@ function ProduccionScreen({sesion,onVolver,onLogout,ventas,setVentas,upsertVenta
           <div style={{fontSize:11,color:"#e8d5f0"}}>Dispositivo del taller · cada acción se identifica con PIN</div>
         </div>
         <div style={{display:"flex",gap:8}}>
+          <button onClick={()=>setShowNotifs(true)} style={{position:"relative",background:"rgba(255,255,255,.2)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 12px",cursor:"pointer",fontWeight:600}}>
+            🔔{totalNotifs>0&&<span style={{position:"absolute",top:-4,right:-4,background:"#e53935",color:"#fff",borderRadius:10,fontSize:9,fontWeight:800,padding:"1px 5px"}}>{totalNotifs}</span>}
+          </button>
           <button onClick={onVolver} style={{background:"rgba(255,255,255,.2)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 12px",fontWeight:600,cursor:"pointer"}}>🧾 Ir a Facturación</button>
           <button onClick={onLogout} style={{background:"rgba(255,255,255,.2)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 12px",fontWeight:600,cursor:"pointer"}}>Salir</button>
         </div>
@@ -622,6 +705,7 @@ function ProduccionScreen({sesion,onVolver,onLogout,ventas,setVentas,upsertVenta
           🧽 {ventas.filter(v=>!v.anulada&&v.clasificacion?.restregadoEstado==="pendiente_confirmar").length} restregado(s) esperando respuesta del cliente
         </div>
       )}
+      {showNotifs&&<NotificacionesPanel ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} addAbono={null} onClose={()=>setShowNotifs(false)}/>}
       <div style={{padding:12,maxWidth:900,margin:"0 auto"}}>
         <Produccion ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} empleadas={empleadas} pins={pins||[]} eventosProduccion={eventosProduccion||[]} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} maquinas={maquinas||[]} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas||[]} setCargas={setCargas} upsertCarga={upsertCarga}/>
       </div>
@@ -1963,8 +2047,11 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
   const [showNueva,setShowNueva]=useState(false);
   const [filtroTile,setFiltroTile]=useState(null); // 🔎 filtro rápido al tocar un contador (recibido/proceso/listo/entregado_pend)
   const [showCaja,setShowCaja]=useState(false);const [ticket,setTicket]=useState(null);const [cuponSugE,setCuponSugE]=useState(null);const [showSalidaEmp,setShowSalidaEmp]=useState(false);
+  const [showNotifs,setShowNotifs]=useState(false);
   // 🧽 Restregados esperando respuesta del cliente — visible para todo el equipo hasta que se confirme
   const restregadosPendientes=ventas.filter(v=>!v.anulada&&v.clasificacion?.restregadoEstado==="pendiente_confirmar");
+  const restregadosPorCobrar=ventas.filter(v=>!v.anulada&&v.clasificacion?.restregadoEstado==="autorizado"&&saldo(v)>0);
+  const totalNotifs=restregadosPendientes.length+restregadosPorCobrar.length;
   // 📋 Todas las órdenes pendientes del negocio (sin importar fecha ni empleada), ordenadas Recibido → En proceso → Listo → Entregado (sin cobrar)
   // 🔒 Solo desaparece cuando está Entregada Y además pagada por completo — si falta cobrar, se queda visible como pendiente
   const pendientesRaw=ventas.filter(v=>!v.anulada&&!((v.estado||"recibido")==="entregado"&&pagada(v))).sort((a,b)=>{
@@ -1994,6 +2081,9 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
             <div style={{fontSize:12,color:"#a0c4da"}}>Hola, {sesion.nombre} 👋</div>
           </div>
           <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>setShowNotifs(true)} style={{position:"relative",background:"rgba(255,255,255,.2)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 12px",cursor:"pointer",fontWeight:600}}>
+              🔔{totalNotifs>0&&<span style={{position:"absolute",top:-4,right:-4,background:"#e53935",color:"#fff",borderRadius:10,fontSize:9,fontWeight:800,padding:"1px 5px"}}>{totalNotifs}</span>}
+            </button>
             <button onClick={()=>setShowCaja(true)} style={{background:"rgba(255,255,255,.2)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 12px",cursor:"pointer",fontWeight:600}}>💰 Caja</button>
             <button onClick={()=>setShowSalidaEmp(true)} style={{background:"rgba(220,50,50,.35)",border:"none",borderRadius:8,color:"#ffcccc",fontSize:12,padding:"6px 12px",cursor:"pointer",fontWeight:600}}>💸 Salida</button>
             {cierreListo
@@ -2073,6 +2163,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
       {ticket&&<TicketModal venta={ticket} empleadas={empleadas} onClose={()=>{setCuponSugE(ticket);setTicket(null);}}/>}
       {cuponSugE&&<CuponSugerido venta={cuponSugE} clientes={clientes} ventas={ventas} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} sesion={sesion} promos={promos} onClose={()=>setCuponSugE(null)}/>}
       {showSalidaEmp&&<SalidaCaja sesion={sesion} salidasCaja={salidasCaja||[]} setSalidasCaja={setSalidasCaja} onClose={()=>setShowSalidaEmp(false)} upsertSalida={upsertSalida}/>}
+      {showNotifs&&<NotificacionesPanel ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} addAbono={addAbono} onClose={()=>setShowNotifs(false)}/>}
     </div>
   );
 }
