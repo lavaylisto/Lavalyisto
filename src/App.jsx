@@ -1580,10 +1580,11 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
       return next;
     });
   };
-  const iniciarCarga=(folio,tipo,maquinaId,minutos,empleadaId,comentario,esRepeticion,grupo)=>{
+  const iniciarCarga=(folio,tipo,maquinaId,minutos,empleadaId,comentario,esRepeticion,grupo,ciclo)=>{
     const inicio=new Date();
     const finProgramado=new Date(inicio.getTime()+minutos*60000);
-    const carga={id:folio+"_"+tipo+"_"+(grupo||"x")+"_"+Date.now(),ventaFolio:folio,ventaFolios:null,tipo,maquinaId,minutosProgramados:minutos,inicio:inicio.toISOString(),finProgramado:finProgramado.toISOString(),finReal:null,empleadaId:empleadaId||null,empleadaRetiroId:null,notificado:false,comentario:comentario||null,esRepeticion:!!esRepeticion,grupo:grupo||null,pares:null};
+    const cicloFinal=ciclo||(folio+"_"+tipo+"_ciclo_"+Date.now());
+    const carga={id:folio+"_"+tipo+"_"+(grupo||"x")+"_"+Date.now(),ventaFolio:folio,ventaFolios:null,tipo,maquinaId,minutosProgramados:minutos,inicio:inicio.toISOString(),finProgramado:finProgramado.toISOString(),finReal:null,empleadaId:empleadaId||null,empleadaRetiroId:null,notificado:false,comentario:comentario||null,esRepeticion:!!esRepeticion,grupo:grupo||null,pares:null,ciclo:cicloFinal};
     setCargas(prev=>[...prev,carga]);
     if(upsertCarga)upsertCarga(carga);
     setMaquinaEstado(maquinaId,{estado:"ocupada",cargaActualId:carga.id,finProgramado:carga.finProgramado});
@@ -1661,24 +1662,24 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
     setPickerFor({tipoMaquina:"secadora",grupo:"zapatos",lote:{folios,tipo:"secado",pares:paresSeleccionados}});
   };
   const onPickerConfirm=(maquinaId,minutos,comentario)=>{
-    const{folio,tipoMaquina,repetir,centrifugado,grupo,lote}=pickerFor;
+    const{folio,tipoMaquina,repetir,centrifugado,grupo,lote,ciclo}=pickerFor;
     setPickerFor(null);
     if(lote){
       setPinFor({folio:null,accion:"iniciar_lote",label:lote.tipo==="lavado"?"¿Quién pone el lote de zapatos a lavar?":"¿Quién pone el lote de zapatos a secar?",extra:{maquinaId,minutos,lote}});
       return;
     }
     const accion=centrifugado?"iniciar_centrifugado":tipoMaquina==="lavadora"?"iniciar_lavado":"iniciar_secado";
-    const label=centrifugado?"¿Quién pone a centrifugar?":tipoMaquina==="lavadora"?(repetir?"¿Quién vuelve a lavar?":"¿Quién pone la carga a lavar?"):(repetir?"¿Quién vuelve a secar?":"¿Quién pone la carga a secar?");
-    setPinFor({folio,accion,label,extra:{maquinaId,minutos,comentario,repetir,grupo}});
+    const label=centrifugado?"¿Quién pone a centrifugar?":tipoMaquina==="lavadora"?(repetir?"¿Quién vuelve a lavar?":ciclo?"¿Quién pone esta lavadora adicional?":"¿Quién pone la carga a lavar?"):(repetir?"¿Quién vuelve a secar?":ciclo?"¿Quién pone esta secadora adicional?":"¿Quién pone la carga a secar?");
+    setPinFor({folio,accion,label,extra:{maquinaId,minutos,comentario,repetir,grupo,ciclo}});
   };
   const onPinOk=emp=>{
     if(!pinFor)return;
     const{folio,accion,extra}=pinFor;
     if(accion==="clasificacion")guardarClasificacion(folio,extra.datos,emp?.id);
     else if(accion==="iniciar_lote")iniciarCargaLote(extra.lote.folios,extra.lote.tipo,extra.maquinaId,extra.minutos,emp?.id,extra.lote.pares);
-    else if(accion==="iniciar_lavado")iniciarCarga(folio,"lavado",extra.maquinaId,extra.minutos,emp?.id,extra.comentario,extra.repetir,extra.grupo);
+    else if(accion==="iniciar_lavado")iniciarCarga(folio,"lavado",extra.maquinaId,extra.minutos,emp?.id,extra.comentario,extra.repetir,extra.grupo,extra.ciclo);
     else if(accion==="retirar_lavado")retirarCarga(extra.carga,emp?.id);
-    else if(accion==="iniciar_secado")iniciarCarga(folio,"secado",extra.maquinaId,extra.minutos,emp?.id,extra.comentario,extra.repetir,extra.grupo);
+    else if(accion==="iniciar_secado")iniciarCarga(folio,"secado",extra.maquinaId,extra.minutos,emp?.id,extra.comentario,extra.repetir,extra.grupo,extra.ciclo);
     else if(accion==="retirar_secado")retirarCarga(extra.carga,emp?.id);
     else if(accion==="iniciar_centrifugado")iniciarCarga(folio,"centrifugado",extra.maquinaId,extra.minutos,emp?.id,extra.comentario,false,extra.grupo);
     else if(accion==="retirar_centrifugado")retirarCarga(extra.carga,emp?.id);
@@ -1761,40 +1762,64 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
       // 🔁 Un "flujo" completo (lavado→centrifugado→secado→doblado) para un grupo (o null si la orden no está dividida)
       const perteneceCarga=c=>c.ventaFolio===v.folio||(c.ventaFolios||[]).includes(v.folio);
       const renderFlujo=(grupo,etiqueta)=>{
-        const cLav=cargas.filter(c=>perteneceCarga(c)&&c.tipo==="lavado"&&gruposEquivalentes(grupo).includes(c.grupo||null)).sort((a,b)=>new Date(b.inicio)-new Date(a.inicio))[0];
-        const cCen=cargas.filter(c=>perteneceCarga(c)&&c.tipo==="centrifugado"&&gruposEquivalentes(grupo).includes(c.grupo||null)&&(!cLav||new Date(c.inicio)>=new Date(cLav.inicio))).sort((a,b)=>new Date(b.inicio)-new Date(a.inicio))[0];
-        const cSec=cargas.filter(c=>perteneceCarga(c)&&c.tipo==="secado"&&gruposEquivalentes(grupo).includes(c.grupo||null)&&(!cLav||new Date(c.inicio)>=new Date(cLav.inicio))).sort((a,b)=>new Date(b.inicio)-new Date(a.inicio))[0];
+        const lavCargasAll=cargas.filter(c=>perteneceCarga(c)&&c.tipo==="lavado"&&gruposEquivalentes(grupo).includes(c.grupo||null));
+        const cLavUltimo=lavCargasAll.sort((a,b)=>new Date(b.inicio)-new Date(a.inicio))[0];
+        const cicloLav=cLavUltimo?.ciclo;
+        const lavCiclo=cicloLav?lavCargasAll.filter(c=>c.ciclo===cicloLav):[];
+        const lavActivas=lavCiclo.filter(c=>!c.finReal);
+        const lavTerminadoCiclo=lavCiclo.length>0&&lavActivas.length===0;
+
+        const cCen=cargas.filter(c=>perteneceCarga(c)&&c.tipo==="centrifugado"&&gruposEquivalentes(grupo).includes(c.grupo||null)&&(!cLavUltimo||new Date(c.inicio)>=new Date(cLavUltimo.inicio))).sort((a,b)=>new Date(b.inicio)-new Date(a.inicio))[0];
+
+        const secCargasAll=cargas.filter(c=>perteneceCarga(c)&&c.tipo==="secado"&&gruposEquivalentes(grupo).includes(c.grupo||null)&&(!cLavUltimo||new Date(c.inicio)>=new Date(cLavUltimo.inicio)));
+        const cSecUltimo=secCargasAll.sort((a,b)=>new Date(b.inicio)-new Date(a.inicio))[0];
+        const cicloSec=cSecUltimo?.ciclo;
+        const secCiclo=cicloSec?secCargasAll.filter(c=>c.ciclo===cicloSec):[];
+        const secActivas=secCiclo.filter(c=>!c.finReal);
+        const secTerminadoCiclo=secCiclo.length>0&&secActivas.length===0;
+
         const evDobInicio=buscarEventoG(v.folio,"doblado_inicio",grupo);
         const evDobFin=buscarEventoG(v.folio,"doblado_fin",grupo);
         let etapaG="Recibido",colorG="#f59e0b";
-        if(cLav&&!cLav.finReal){etapaG="Lavando";colorG="#1565c0";}
+        if(lavActivas.length>0){etapaG=`Lavando${lavActivas.length>1?` (${lavActivas.length} máquinas)`:""}`;colorG="#1565c0";}
         else if(cCen&&!cCen.finReal){etapaG="Centrifugando";colorG="#5c6bc0";}
-        else if(cLav?.finReal&&!cCen&&!cSec){etapaG="Esperando secadora";colorG="#f59e0b";}
-        else if(cSec&&!cSec.finReal){etapaG="Secando";colorG="#00838f";}
-        else if(cSec?.finReal&&!evDobInicio){etapaG="Esperando doblado";colorG="#f59e0b";}
+        else if(lavTerminadoCiclo&&!cCen&&secCiclo.length===0){etapaG="Esperando secadora";colorG="#f59e0b";}
+        else if(secActivas.length>0){etapaG=`Secando${secActivas.length>1?` (${secActivas.length} máquinas)`:""}`;colorG="#00838f";}
+        else if(secTerminadoCiclo&&!evDobInicio){etapaG="Esperando doblado";colorG="#f59e0b";}
         else if(evDobInicio&&!evDobFin){etapaG="Doblando";colorG="#7b1fa2";}
         else if(evDobFin){etapaG="✅ Doblado";colorG="#2e7d32";}
+
+        const comentariosLav=lavCiclo.filter(c=>c.comentario);
+        const comentariosSec=secCiclo.filter(c=>c.comentario);
+
         return(
           <div key={grupo||"solo"} style={grupo?{background:"#f8fbfd",borderRadius:10,padding:10,marginTop:10,border:"1px solid #e8f0f7"}:null}>
             {etiqueta&&<div style={{fontSize:12,fontWeight:800,color:"#1a3c5e",marginBottom:4}}>{etiqueta}</div>}
             <div style={{fontSize:12,color:colorG,fontWeight:700}}>{etapaG}</div>
 
-            {!cLav&&(
+            {lavCiclo.length===0&&(
               <button style={{...S.btnP,marginTop:8}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"lavadora",grupo})}>🧺 Iniciar lavado</button>
             )}
-            {cLav&&!cLav.finReal&&(
-              <>
-                <div style={{fontSize:11,color:"#888",marginTop:8}}>🧺 {maquinaDe(cLav.maquinaId)?.nombre||cLav.maquinaId} · {cLav.minutosProgramados} min · inició {nombreDe(cLav.empleadaId)}</div>
-                <div style={{fontSize:20,textAlign:"center",margin:"6px 0",fontFamily:"monospace"}}><CuentaRegresiva finProgramado={cLav.finProgramado}/></div>
-                <button style={{...S.btnP,background:"linear-gradient(135deg,#1565c0,#42a5f5)"}} onClick={()=>setPinFor({folio:v.folio,accion:"retirar_lavado",label:"¿Quién retira de la lavadora?",extra:{carga:cLav}})}>📤 Retirar de lavadora</button>
-              </>
+
+            {lavActivas.map(c=>(
+              <div key={c.id} style={{marginTop:8,paddingTop:8,borderTop:lavActivas.indexOf(c)>0?"1px dashed #e0e8f0":"none"}}>
+                <div style={{fontSize:11,color:"#888"}}>🧺 {maquinaDe(c.maquinaId)?.nombre||c.maquinaId} · {c.minutosProgramados} min · inició {nombreDe(c.empleadaId)}</div>
+                <div style={{fontSize:20,textAlign:"center",margin:"4px 0",fontFamily:"monospace"}}><CuentaRegresiva finProgramado={c.finProgramado}/></div>
+                <button style={{...S.btnP,background:"linear-gradient(135deg,#1565c0,#42a5f5)"}} onClick={()=>setPinFor({folio:v.folio,accion:"retirar_lavado",label:"¿Quién retira de la lavadora?",extra:{carga:c}})}>📤 Retirar de {maquinaDe(c.maquinaId)?.nombre||"lavadora"}</button>
+              </div>
+            ))}
+
+            {lavCiclo.length>0&&!cCen&&secCiclo.length===0&&(
+              <button style={{...S.btnS,marginTop:8,width:"100%",background:"#e3f2fd",color:"#1565c0"}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"lavadora",grupo,ciclo:cicloLav})}>➕ Agregar otra lavadora (carga grande)</button>
             )}
-            {cLav?.finReal&&!cCen&&!cSec&&(
+
+            {lavTerminadoCiclo&&!cCen&&secCiclo.length===0&&(
               <div style={{display:"flex",gap:8,marginTop:8}}>
                 <button style={{...S.btnP,flex:1,background:"linear-gradient(135deg,#00838f,#26c6da)"}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"secadora",grupo})}>🔥 Iniciar secado</button>
                 <button style={{...S.btnP,flex:1,background:"linear-gradient(135deg,#5c6bc0,#7986cb)"}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"lavadora",centrifugado:true,grupo})}>🌀 Centrifugar</button>
               </div>
             )}
+
             {cCen&&!cCen.finReal&&(
               <>
                 <div style={{fontSize:11,color:"#888",marginTop:8}}>🌀 {maquinaDe(cCen.maquinaId)?.nombre||cCen.maquinaId} · {cCen.minutosProgramados} min · inició {nombreDe(cCen.empleadaId)}</div>
@@ -1802,17 +1827,23 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
                 <button style={{...S.btnP,background:"linear-gradient(135deg,#5c6bc0,#7986cb)"}} onClick={()=>setPinFor({folio:v.folio,accion:"retirar_centrifugado",label:"¿Quién retira del centrifugado?",extra:{carga:cCen}})}>📤 Retirar de centrifugado</button>
               </>
             )}
-            {cCen?.finReal&&!cSec&&(
+            {cCen?.finReal&&secCiclo.length===0&&(
               <button style={{...S.btnP,marginTop:8,background:"linear-gradient(135deg,#00838f,#26c6da)"}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"secadora",grupo})}>🔥 Iniciar secado</button>
             )}
-            {cSec&&!cSec.finReal&&(
-              <>
-                <div style={{fontSize:11,color:"#888",marginTop:8}}>🔥 {maquinaDe(cSec.maquinaId)?.nombre||cSec.maquinaId} · {cSec.minutosProgramados} min · inició {nombreDe(cSec.empleadaId)}</div>
-                <div style={{fontSize:20,textAlign:"center",margin:"6px 0",fontFamily:"monospace"}}><CuentaRegresiva finProgramado={cSec.finProgramado}/></div>
-                <button style={{...S.btnP,background:"linear-gradient(135deg,#00838f,#26c6da)"}} onClick={()=>setPinFor({folio:v.folio,accion:"retirar_secado",label:"¿Quién retira de la secadora?",extra:{carga:cSec}})}>📤 Retirar de secadora</button>
-              </>
+
+            {secActivas.map(c=>(
+              <div key={c.id} style={{marginTop:8,paddingTop:8,borderTop:secActivas.indexOf(c)>0?"1px dashed #e0e8f0":"none"}}>
+                <div style={{fontSize:11,color:"#888"}}>🔥 {maquinaDe(c.maquinaId)?.nombre||c.maquinaId} · {c.minutosProgramados} min · inició {nombreDe(c.empleadaId)}</div>
+                <div style={{fontSize:20,textAlign:"center",margin:"4px 0",fontFamily:"monospace"}}><CuentaRegresiva finProgramado={c.finProgramado}/></div>
+                <button style={{...S.btnP,background:"linear-gradient(135deg,#00838f,#26c6da)"}} onClick={()=>setPinFor({folio:v.folio,accion:"retirar_secado",label:"¿Quién retira de la secadora?",extra:{carga:c}})}>📤 Retirar de {maquinaDe(c.maquinaId)?.nombre||"secadora"}</button>
+              </div>
+            ))}
+
+            {secCiclo.length>0&&!evDobInicio&&(
+              <button style={{...S.btnS,marginTop:8,width:"100%",background:"#e0f7fa",color:"#00838f"}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"secadora",grupo,ciclo:cicloSec})}>➕ Agregar otra secadora (carga grande)</button>
             )}
-            {cSec?.finReal&&!evDobInicio&&(
+
+            {secTerminadoCiclo&&!evDobInicio&&(
               <button style={{...S.btnP,marginTop:8,background:"linear-gradient(135deg,#7b1fa2,#9c27b0)"}} onClick={()=>setPinFor({folio:v.folio,accion:"doblado_inicio",label:"¿Quién inicia el doblado?",extra:{grupo}})}>🪄 Iniciar doblado</button>
             )}
             {evDobInicio&&!evDobFin&&(
@@ -1825,17 +1856,17 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
             {evDobFin&&(
               <div style={{fontSize:12,color:"#2e7d32",fontWeight:700,marginTop:8}}>✅ Doblado por {nombreDe(evDobFin.empleadaId)} en {Math.round((new Date(evDobFin.timestamp)-new Date(evDobInicio.timestamp))/60000)} min</div>
             )}
-            {(cLav?.comentario||cSec?.comentario||cCen?.comentario)&&(
+            {(comentariosLav.length>0||comentariosSec.length>0||cCen?.comentario)&&(
               <div style={{fontSize:11,color:"#e65100",background:"#fff3e0",borderRadius:8,padding:"6px 8px",marginTop:8}}>
-                {cLav?.esRepeticion&&cLav?.comentario&&<div>🔁 Se repitió el lavado — {cLav.comentario}</div>}
-                {cSec?.esRepeticion&&cSec?.comentario&&<div>🔁 Se repitió el secado — {cSec.comentario}</div>}
+                {comentariosLav.map(c=>c.esRepeticion&&<div key={c.id}>🔁 Se repitió el lavado — {c.comentario}</div>)}
+                {comentariosSec.map(c=>c.esRepeticion&&<div key={c.id}>🔁 Se repitió el secado — {c.comentario}</div>)}
                 {cCen?.comentario&&<div>🌀 Centrifugado — {cCen.comentario}</div>}
               </div>
             )}
-            {cLav?.finReal&&!(cSec&&!cSec.finReal)&&(
+            {lavTerminadoCiclo&&secActivas.length===0&&(
               <button style={{...S.btnS,marginTop:8,width:"100%",background:"#fff3e0",color:"#e65100",fontSize:12}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"lavadora",repetir:true,grupo})}>🔁 Lavar de nuevo</button>
             )}
-            {cSec?.finReal&&!(evDobInicio&&!evDobFin)&&(
+            {secTerminadoCiclo&&!(evDobInicio&&!evDobFin)&&(
               <button style={{...S.btnS,marginTop:8,width:"100%",background:"#fff3e0",color:"#e65100",fontSize:12}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"secadora",repetir:true,grupo})}>🔁 Secar de nuevo</button>
             )}
           </div>
