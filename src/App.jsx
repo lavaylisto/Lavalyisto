@@ -271,7 +271,7 @@ const diasParaCumple=nac=>{
 const DESC_CUMPLE=0.10; // 🎂 10% de descuento el día del cumpleaños
 const msgWaCumple=c=>{
   const L="\u2501".repeat(15);
-  return `\u{1FAE7} *LAVA & LISTO* \u{1FAE7}\n_Lavanderia & Limpieza Especializada_\n${L}\n\u{1F382} *\u00A1FELIZ CUMPLEA\u00D1OS, ${c.nombre}!* \u{1F389}\n\nHoy es tu d\u00EDa y en Lava & Listo\nqueremos celebrarlo contigo \u{1F499}\n${L}\n\u2728 *10% DE DESCUENTO* \u2728\nen todos nuestros servicios,\nsolo por ser tu cumplea\u00F1os \u{1F381}\n\n\u{1F4C5} V\u00E1lido HOY presentando este mensaje\n${L}\n\u00A1Te esperamos para consentirte!\n\u{1F4CD} Ricaurte, Cuenca`;
+  return `\u{1FAE7} *LAVA & LISTO* \u{1FAE7}\n_Lavanderia & Limpieza Especializada_\n${L}\n\u{1F382} *\u00A1FELIZ CUMPLEA\u00D1OS, ${c.nombre}!* \u{1F389}\n\nQue este nuevo a\u00F1o de vida venga cargado\nde salud, bendiciones y muchos momentos\nbonitos junto a quienes m\u00E1s quieres \u{1F499}\n\nGracias por ser parte de la familia\nLava & Listo, para nosotros es un\ngusto consentirte \u{1F60A}\n${L}\n\u2728 *10% DE DESCUENTO* \u2728\nen todos nuestros servicios,\nnuestro regalo para ti \u{1F381}\n\n\u{1F4C5} V\u00E1lido 7 d\u00EDas, presentando tu c\u00E9dula\n${L}\n\u00A1Te esperamos para consentirte!\n\u{1F4CD} Ricaurte, Cuenca`;
 };
 const waCumpleUrl=c=>{
   const tel=telWa(c.tel);
@@ -493,11 +493,18 @@ function TicketModal({venta,empleadas,onClose}){
 }
 
 // 🔔 Panel de notificaciones: restregados por confirmar y restregados ya autorizados con saldo pendiente de cobro
-function NotificacionesPanel({ventas,setVentas,upsertVenta,addAbono,soloLectura,onClose}){
+function NotificacionesPanel({ventas,setVentas,upsertVenta,addAbono,clientes,soloLectura,onClose}){
   const tieneAlgoP=v=>v.clasificacion?.restregadoEstado==="pendiente_confirmar"||(v.clasificacion?.serviciosAdicionales||[]).some(s=>s.estado==="pendiente_confirmar");
   const pendientesConfirmar=ventas.filter(v=>!v.anulada&&tieneAlgoP(v));
   // 📢 Órdenes que ya pasaron a "Listo" (automático desde Producción) y todavía no se le avisó al cliente
   const listasSinAvisar=ventas.filter(v=>!v.anulada&&(v.estado||"recibido")==="listo"&&!v.checkMsgRetiro);
+  // 🎂 Cumpleaños de hoy — visible para cualquier colaboradora, quien esté disponible puede felicitar
+  const cumpleHoy=(clientes||[]).filter(c=>diasParaCumple(c.nacimiento)===0);
+  const enviarMsgCumple=c=>{
+    const url=waCumpleUrl(c);
+    if(!url){alert("Este cliente no tiene teléfono registrado.");return;}
+    window.open(url,"_blank");
+  };
   const enviarMsgListo=v=>{
     if(!v.clienteTel){alert("Este cliente no tiene teléfono registrado.");return;}
     const tel=telWa(v.clienteTel);
@@ -569,8 +576,25 @@ function NotificacionesPanel({ventas,setVentas,upsertVenta,addAbono,soloLectura,
           <button onClick={onClose} style={{background:"#f0f4f8",border:"none",borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:13}}>✕ Cerrar</button>
         </div>
 
-        {pendientesConfirmar.length===0&&listasSinAvisar.length===0&&(
+        {pendientesConfirmar.length===0&&listasSinAvisar.length===0&&cumpleHoy.length===0&&(
           <div style={{textAlign:"center",padding:"40px 20px",color:"#aaa"}}><div style={{fontSize:44,marginBottom:8}}>🔔</div><div>Sin notificaciones pendientes</div></div>
+        )}
+
+        {cumpleHoy.length>0&&(
+          <div style={{marginBottom:20}}>
+            <div style={{fontSize:13,fontWeight:800,color:"#b45309",marginBottom:8}}>🎂 Cumpleaños hoy ({cumpleHoy.length})</div>
+            {cumpleHoy.map(c=>(
+              <div key={c.id} style={{...S.vcard,borderLeft:"4px solid #f59e0b",background:"linear-gradient(135deg,#fff8e1,#ffecb3)"}}>
+                <div style={{fontWeight:700,fontSize:14,color:"#92600a"}}>🎉 ¡Hoy cumple {c.nombre}!</div>
+                <div style={{fontSize:11,color:"#92600a"}}>Envíale su felicitación con el 10% de descuento</div>
+                {c.tel?(
+                  <button style={{...S.btnP,marginTop:8,width:"100%",background:"linear-gradient(135deg,#f59e0b,#fbc02d)"}} onClick={()=>enviarMsgCumple(c)}>💬 Felicitar por WhatsApp</button>
+                ):(
+                  <div style={{fontSize:11,color:"#c62828",marginTop:6}}>Sin teléfono registrado</div>
+                )}
+              </div>
+            ))}
+          </div>
         )}
 
         {listasSinAvisar.length>0&&(
@@ -762,9 +786,9 @@ function SelectorVista({sesion,onElegir,onLogout}){
 }
 
 // 🏭 PRODUCCIÓN — pantalla completa, independiente de Facturación. Sin tabs de caja/ventas; todo aquí se identifica por PIN.
-function ProduccionScreen({sesion,onVolver,onLogout,ventas,setVentas,upsertVenta,empleadas,pins,eventosProduccion,setEventosProduccion,upsertEvento,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga}){
+function ProduccionScreen({sesion,onVolver,onLogout,ventas,setVentas,upsertVenta,empleadas,pins,eventosProduccion,setEventosProduccion,upsertEvento,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga,clientes}){
   const [showNotifs,setShowNotifs]=useState(false);
-  const totalNotifs=ventas.filter(v=>!v.anulada&&(v.clasificacion?.restregadoEstado==="pendiente_confirmar"||(v.clasificacion?.serviciosAdicionales||[]).some(s=>s.estado==="pendiente_confirmar")||((v.estado||"recibido")==="listo"&&!v.checkMsgRetiro))).length;
+  const totalNotifs=ventas.filter(v=>!v.anulada&&(v.clasificacion?.restregadoEstado==="pendiente_confirmar"||(v.clasificacion?.serviciosAdicionales||[]).some(s=>s.estado==="pendiente_confirmar")||((v.estado||"recibido")==="listo"&&!v.checkMsgRetiro))).length+(clientes||[]).filter(c=>diasParaCumple(c.nacimiento)===0).length;
   // 🔔 Suena cuando aumentan las notificaciones (ej. llega un restregado nuevo o ya lo autorizaron en otra pantalla)
   const notifsPrevRef=useRef(totalNotifs);
   useEffect(()=>{
@@ -792,7 +816,7 @@ function ProduccionScreen({sesion,onVolver,onLogout,ventas,setVentas,upsertVenta
           🧽 {ventas.filter(v=>!v.anulada&&(v.clasificacion?.restregadoEstado==="pendiente_confirmar"||(v.clasificacion?.serviciosAdicionales||[]).some(s=>s.estado==="pendiente_confirmar"))).length} orden(es) con extras esperando respuesta del cliente
         </div>
       )}
-      {showNotifs&&<NotificacionesPanel ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} addAbono={null} onClose={()=>setShowNotifs(false)}/>}
+      {showNotifs&&<NotificacionesPanel ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} addAbono={null} clientes={clientes} onClose={()=>setShowNotifs(false)}/>}
       <div style={{padding:12,maxWidth:900,margin:"0 auto"}}>
         <Produccion ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} empleadas={empleadas} pins={pins||[]} eventosProduccion={eventosProduccion||[]} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} maquinas={maquinas||[]} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas||[]} setCargas={setCargas} upsertCarga={upsertCarga}/>
       </div>
@@ -2261,7 +2285,8 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
   // 🧽 Restregados y servicios adicionales esperando respuesta del cliente — visible para todo el equipo hasta que se confirme
   const restregadosPendientes=ventas.filter(v=>!v.anulada&&(v.clasificacion?.restregadoEstado==="pendiente_confirmar"||(v.clasificacion?.serviciosAdicionales||[]).some(s=>s.estado==="pendiente_confirmar")));
   const listasSinAvisarCount=ventas.filter(v=>!v.anulada&&(v.estado||"recibido")==="listo"&&!v.checkMsgRetiro).length;
-  const totalNotifs=restregadosPendientes.length+listasSinAvisarCount;
+  const cumpleHoyCount=(clientes||[]).filter(c=>diasParaCumple(c.nacimiento)===0).length;
+  const totalNotifs=restregadosPendientes.length+listasSinAvisarCount+cumpleHoyCount;
   // 🔔 Suena cuando aumentan las notificaciones (ej. llega un restregado nuevo o ya lo autorizaron en otra pantalla)
   const notifsPrevRef=useRef(totalNotifs);
   useEffect(()=>{
@@ -2379,7 +2404,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
       {ticket&&<TicketModal venta={ticket} empleadas={empleadas} onClose={()=>{setCuponSugE(ticket);setTicket(null);}}/>}
       {cuponSugE&&<CuponSugerido venta={cuponSugE} clientes={clientes} ventas={ventas} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} sesion={sesion} promos={promos} onClose={()=>setCuponSugE(null)}/>}
       {showSalidaEmp&&<SalidaCaja sesion={sesion} salidasCaja={salidasCaja||[]} setSalidasCaja={setSalidasCaja} onClose={()=>setShowSalidaEmp(false)} upsertSalida={upsertSalida}/>}
-      {showNotifs&&<NotificacionesPanel ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} addAbono={addAbono} onClose={()=>setShowNotifs(false)}/>}
+      {showNotifs&&<NotificacionesPanel ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} addAbono={addAbono} clientes={clientes} onClose={()=>setShowNotifs(false)}/>}
     </div>
   );
 }
@@ -5123,7 +5148,7 @@ const [showSalida,setShowSalida]=useState(false);
   // 🏭 PRODUCCIÓN: para quienes no son admin, primero eligen si entran a Facturación o a Producción.
   // Producción NO requiere caja abierta (es un área/dispositivo aparte del taller).
   if(!esAdmin&&!vista)return <SelectorVista sesion={sesion} onElegir={setVista} onLogout={onLogout}/>;
-  if(!esAdmin&&vista==="produccion")return <ProduccionScreen sesion={sesion} onVolver={()=>setVista(null)} onLogout={onLogout} ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} empleadas={empleadas} pins={pins} eventosProduccion={eventosProduccion} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga}/>;
+  if(!esAdmin&&vista==="produccion")return <ProduccionScreen sesion={sesion} onVolver={()=>setVista(null)} onLogout={onLogout} ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} empleadas={empleadas} pins={pins} eventosProduccion={eventosProduccion} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga} clientes={clientes}/>;
   if(!esAdmin&&vista==="tareas")return <TareasScreen sesion={sesion} onVolver={()=>setVista(null)} onLogout={onLogout} tareasDiarias={tareasDiarias} setTareasDiarias={setTareasDiarias} upsertTareaDiaria={upsertTareaDiaria} pins={pins} empleadas={empleadas} notas={notas} setNotas={setNotas} upsertNota={upsertNota}/>;
 
   // Si cerró caja y quiere seguir trabajando, DEBE abrir caja nuevamente
