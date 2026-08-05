@@ -276,7 +276,7 @@ const msgWaCumple=c=>{
 const waCumpleUrl=c=>{
   const tel=telWa(c.tel);
   if(!tel)return null;
-  return `https://wa.me/${tel}?text=${encodeURIComponent(msgWaCumple(c))}`;
+  return `https://api.whatsapp.com/send/?phone=${tel}&text=${encodeURIComponent(msgWaCumple(c))}`;
 };
 
 // Modal obligatorio: no se puede continuar sin abrir WhatsApp y confirmar el envío.
@@ -4243,7 +4243,7 @@ function CuponSugerido({venta,clientes,ventas,cupones,setCupones,upsertCupon,ses
           </div>
           <div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>
             <button style={{...S.btnP,flex:"1 1 100%"}} onClick={()=>{const c=generar();imprimirCupon(c);}}>🖨️ Generar e imprimir cupón</button>
-            {sug.cli.tel&&<a href="#" style={{background:"#25d366",color:"#fff",borderRadius:10,padding:"10px 12px",fontSize:13,fontWeight:700,textDecoration:"none",flex:1,textAlign:"center"}} onClick={e=>{e.preventDefault();const c=generar();window.open(`https://wa.me/${telWa(c.clienteTel)}?text=${encodeURIComponent(msgWaCupon(c))}`,"_blank");}}>💬 Enviar WhatsApp</a>}
+            {sug.cli.tel&&<a href="#" style={{background:"#25d366",color:"#fff",borderRadius:10,padding:"10px 12px",fontSize:13,fontWeight:700,textDecoration:"none",flex:1,textAlign:"center"}} onClick={e=>{e.preventDefault();const c=generar();window.open(`https://api.whatsapp.com/send/?phone=${telWa(c.clienteTel)}&text=${encodeURIComponent(msgWaCupon(c))}`,"_blank");}}>💬 Enviar WhatsApp</a>}
             <button style={{...S.btnC,flex:1}} onClick={onClose}>{generado?"✓ Listo":"Omitir"}</button>
           </div>
         </div>
@@ -4466,7 +4466,7 @@ function Cupones({cupones,setCupones,upsertCupon,clientes,ventas,sesion,promos})
     <Card title={`📜 Cupones emitidos (${lista.length})`}>
       {lista.length===0?<div style={S.empty}>Aún no has emitido cupones. ¡Sortea el primero! 🎲</div>:lista.slice(0,60).map(c=>{
         const est=estadoCupon(c);
-        const url=c.clienteTel?`https://wa.me/${telWa(c.clienteTel)}?text=${encodeURIComponent(msgWaCupon(c))}`:null;
+        const url=c.clienteTel?`https://api.whatsapp.com/send/?phone=${telWa(c.clienteTel)}&text=${encodeURIComponent(msgWaCupon(c))}`:null;
         return(<div key={c.id} style={{...S.vcard,borderLeft:`4px solid ${est.col}`}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
             <div style={{minWidth:0}}>
