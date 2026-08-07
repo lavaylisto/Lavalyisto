@@ -493,11 +493,74 @@ function TicketModal({venta,empleadas,onClose}){
 }
 
 // 🔔 Panel de notificaciones: restregados por confirmar y restregados ya autorizados con saldo pendiente de cobro
-function NotificacionesPanel({ventas,setVentas,upsertVenta,addAbono,clientes,soloLectura,onClose}){
+function NotificacionesPanel({ventas,setVentas,upsertVenta,addAbono,clientes,maquinas,cargas,setCargas,upsertCarga,setMaquinas,upsertMaquina,pins,empleadas,sesion,esAdmin,soloLectura,onClose}){
+  const [pinForMaquina,setPinForMaquina]=useState(null); // {maquina, carga}
+  // 🧾 Solo la administradora o Nicole (encargada de facturar en el SRI) ven y manejan esta sección
+  const puedeFacturar=esAdmin||(sesion?.nombre||"").toUpperCase().includes("NICOLE");
+  const pendientesFacturarSRI=ventas.filter(v=>!v.anulada&&pagada(v)&&!v.facturadoSRI);
+  const marcarFacturado=v=>{
+    setVentas(prev=>{
+      const next=prev.map(vv=>vv.folio===v.folio?{...vv,facturadoSRI:true,facturadoSRIEn:new Date().toISOString(),facturadoSRIPor:sesion?.nombre||null}:vv);
+      const updated=next.find(vv=>vv.folio===v.folio);
+      if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+  };
+  const descargarReporteSRI=()=>{
+    const pagadas=ventas.filter(v=>!v.anulada&&pagada(v));
+    const clienteDe=v=>v.clienteId?(clientes||[]).find(c=>c.id===v.clienteId):null;
+    const enc=["Folio","Fecha","Cliente","Cédula/RUC","Dirección","Email","Teléfono","Total facturado","Facturado SRI","Fecha facturado","Facturado por"];
+    const filas=pagadas.map(v=>{
+      const cl=clienteDe(v);
+      return[
+        v.folio,fmt(v.fecha),v.clienteNombre||"",
+        cl?.cedula||cl?.rfc||"",
+        v.clienteDireccion||cl?.direccion||"",
+        cl?.email||"",
+        v.clienteTel||cl?.tel||"",
+        "$"+v.total.toFixed(2),
+        v.facturadoSRI?"Sí":"No",
+        v.facturadoSRIEn?fmt(v.facturadoSRIEn):"",
+        v.facturadoSRIPor||""
+      ];
+    });
+    const csv=[enc,...filas].map(f=>f.map(c=>'"'+String(c).replace(/"/g,'\\"')+'"').join(",")).join("\n");
+    const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
+    const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="facturacion_sri-"+fechaHoyLocal()+".csv";a.click();
+  };
   const tieneAlgoP=v=>v.clasificacion?.restregadoEstado==="pendiente_confirmar"||(v.clasificacion?.serviciosAdicionales||[]).some(s=>s.estado==="pendiente_confirmar");
   const pendientesConfirmar=ventas.filter(v=>!v.anulada&&tieneAlgoP(v));
   // 📢 Órdenes que ya pasaron a "Listo" (automático desde Producción) y todavía no se le avisó al cliente
   const listasSinAvisar=ventas.filter(v=>!v.anulada&&(v.estado||"recibido")==="listo"&&!v.checkMsgRetiro);
+  // ⏰ Máquinas cuyo tiempo ya se cumplió y nadie las retiró — para que no pasen días sin que nadie se entere
+  const maquinasVencidas=(maquinas||[]).filter(m=>m.estado==="ocupada"&&m.finProgramado&&new Date(m.finProgramado)<new Date());
+  const clienteDeMaquina=m=>{
+    const c=(cargas||[]).find(x=>x.id===m.cargaActualId);
+    if(!c)return null;
+    const folio=c.ventaFolio||(c.ventaFolios||[])[0];
+    return ventas.find(v=>v.folio===folio)?.clienteNombre||null;
+  };
+  const retirarDesdeNotif=(emp)=>{
+    if(!pinForMaquina)return;
+    const{maquina,carga}=pinForMaquina;
+    if(carga&&setCargas){
+      setCargas(prev=>{
+        const next=prev.map(x=>x.id===carga.id?{...x,finReal:new Date().toISOString(),empleadaRetiroId:emp?.id||null}:x);
+        const updated=next.find(x=>x.id===carga.id);
+        if(updated&&upsertCarga)upsertCarga({...updated,_updatedAt:new Date().toISOString()});
+        return next;
+      });
+    }
+    if(setMaquinas){
+      setMaquinas(prev=>{
+        const next=prev.map(m=>m.id===maquina.id?{...m,estado:"libre",cargaActualId:null,finProgramado:null}:m);
+        const updated=next.find(m=>m.id===maquina.id);
+        if(updated&&upsertMaquina)upsertMaquina({...updated,_updatedAt:new Date().toISOString()});
+        return next;
+      });
+    }
+    setPinForMaquina(null);
+  };
   // 🎂 Cumpleaños de hoy — visible para cualquier colaboradora, quien esté disponible puede felicitar
   const cumpleHoy=(clientes||[]).filter(c=>diasParaCumple(c.nacimiento)===0);
   const enviarMsgCumple=c=>{
@@ -576,8 +639,49 @@ function NotificacionesPanel({ventas,setVentas,upsertVenta,addAbono,clientes,sol
           <button onClick={onClose} style={{background:"#f0f4f8",border:"none",borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:13}}>✕ Cerrar</button>
         </div>
 
-        {pendientesConfirmar.length===0&&listasSinAvisar.length===0&&cumpleHoy.length===0&&(
+        {pendientesConfirmar.length===0&&listasSinAvisar.length===0&&cumpleHoy.length===0&&maquinasVencidas.length===0&&(!puedeFacturar||pendientesFacturarSRI.length===0)&&(
           <div style={{textAlign:"center",padding:"40px 20px",color:"#aaa"}}><div style={{fontSize:44,marginBottom:8}}>🔔</div><div>Sin notificaciones pendientes</div></div>
+        )}
+
+        {puedeFacturar&&pendientesFacturarSRI.length>0&&(
+          <div style={{marginBottom:20}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <div style={{fontSize:13,fontWeight:800,color:"#1565c0"}}>🧾 Pendiente facturar SRI ({pendientesFacturarSRI.length})</div>
+              <button onClick={descargarReporteSRI} style={{background:"none",border:"none",color:"#1565c0",fontSize:11,fontWeight:700,cursor:"pointer"}}>⬇️ Descargar reporte</button>
+            </div>
+            {pendientesFacturarSRI.map(v=>(
+              <div key={v.folio} style={{...S.vcard,borderLeft:"4px solid #1565c0"}}>
+                <div style={{fontWeight:700,fontSize:14}}>{v.clienteNombre}</div>
+                <div style={{fontSize:11,color:"#888"}}>{v.folio} · ${v.total.toFixed(2)}</div>
+                <label style={{display:"flex",alignItems:"center",gap:8,marginTop:8,cursor:"pointer"}}>
+                  <input type="checkbox" checked={false} onChange={()=>marcarFacturado(v)}/>
+                  <span style={{fontSize:13,fontWeight:600,color:"#1a3c5e"}}>Ya se facturó en el SRI</span>
+                </label>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {maquinasVencidas.length>0&&(
+          <div style={{marginBottom:20}}>
+            <div style={{fontSize:13,fontWeight:800,color:"#c62828",marginBottom:8}}>⏰ Máquinas vencidas sin retirar ({maquinasVencidas.length})</div>
+            {maquinasVencidas.map(m=>{
+              const carga=(cargas||[]).find(x=>x.id===m.cargaActualId);
+              const cliente=clienteDeMaquina(m);
+              return(
+                <div key={m.id} style={{...S.vcard,borderLeft:"4px solid #c62828"}}>
+                  <div style={{fontWeight:700,fontSize:14}}>{m.tipo==="lavadora"?"🧺":"🔥"} {m.nombre}</div>
+                  {cliente&&<div style={{fontSize:11,color:"#888"}}>{cliente}</div>}
+                  <div style={{fontSize:12,color:"#c62828",fontWeight:700,marginTop:4}}>Tiempo cumplido — falta retirar</div>
+                  {soloLectura?(
+                    <div style={{fontSize:11,color:"#888",marginTop:6}}>Se puede retirar desde cualquiera de las 2 pantallas.</div>
+                  ):(
+                    <button style={{...S.btnP,marginTop:8,width:"100%",background:"linear-gradient(135deg,#c62828,#e57373)"}} onClick={()=>setPinForMaquina({maquina:m,carga})}>📤 Retirar ahora</button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         )}
 
         {cumpleHoy.length>0&&(
@@ -650,6 +754,7 @@ function NotificacionesPanel({ventas,setVentas,upsertVenta,addAbono,clientes,sol
           </div>
         )}
       </div>
+      {pinForMaquina&&<PinModal pins={pins} empleadas={empleadas} titulo="¿Quién retira esta carga?" onConfirm={retirarDesdeNotif} onCancelar={()=>setPinForMaquina(null)}/>}
     </div>
   );
 }
@@ -788,7 +893,9 @@ function SelectorVista({sesion,onElegir,onLogout}){
 // 🏭 PRODUCCIÓN — pantalla completa, independiente de Facturación. Sin tabs de caja/ventas; todo aquí se identifica por PIN.
 function ProduccionScreen({sesion,onVolver,onLogout,ventas,setVentas,upsertVenta,empleadas,pins,eventosProduccion,setEventosProduccion,upsertEvento,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga,clientes}){
   const [showNotifs,setShowNotifs]=useState(false);
-  const totalNotifs=ventas.filter(v=>!v.anulada&&(v.clasificacion?.restregadoEstado==="pendiente_confirmar"||(v.clasificacion?.serviciosAdicionales||[]).some(s=>s.estado==="pendiente_confirmar")||((v.estado||"recibido")==="listo"&&!v.checkMsgRetiro))).length+(clientes||[]).filter(c=>diasParaCumple(c.nacimiento)===0).length;
+  const puedeFacturarAqui=(sesion?.nombre||"").toUpperCase().includes("NICOLE");
+  const facturarSRICount=puedeFacturarAqui?ventas.filter(v=>!v.anulada&&pagada(v)&&!v.facturadoSRI).length:0;
+  const totalNotifs=ventas.filter(v=>!v.anulada&&(v.clasificacion?.restregadoEstado==="pendiente_confirmar"||(v.clasificacion?.serviciosAdicionales||[]).some(s=>s.estado==="pendiente_confirmar")||((v.estado||"recibido")==="listo"&&!v.checkMsgRetiro))).length+(clientes||[]).filter(c=>diasParaCumple(c.nacimiento)===0).length+(maquinas||[]).filter(m=>m.estado==="ocupada"&&m.finProgramado&&new Date(m.finProgramado)<new Date()).length+facturarSRICount;
   // 🔔 Suena cuando aumentan las notificaciones (ej. llega un restregado nuevo o ya lo autorizaron en otra pantalla)
   const notifsPrevRef=useRef(totalNotifs);
   useEffect(()=>{
@@ -816,7 +923,7 @@ function ProduccionScreen({sesion,onVolver,onLogout,ventas,setVentas,upsertVenta
           🧽 {ventas.filter(v=>!v.anulada&&(v.clasificacion?.restregadoEstado==="pendiente_confirmar"||(v.clasificacion?.serviciosAdicionales||[]).some(s=>s.estado==="pendiente_confirmar"))).length} orden(es) con extras esperando respuesta del cliente
         </div>
       )}
-      {showNotifs&&<NotificacionesPanel ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} addAbono={null} clientes={clientes} onClose={()=>setShowNotifs(false)}/>}
+      {showNotifs&&<NotificacionesPanel ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} addAbono={null} clientes={clientes} maquinas={maquinas} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} pins={pins} empleadas={empleadas} sesion={sesion} onClose={()=>setShowNotifs(false)}/>}
       <div style={{padding:12,maxWidth:900,margin:"0 auto"}}>
         <Produccion ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} empleadas={empleadas} pins={pins||[]} eventosProduccion={eventosProduccion||[]} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} maquinas={maquinas||[]} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas||[]} setCargas={setCargas} upsertCarga={upsertCarga}/>
       </div>
@@ -2307,7 +2414,7 @@ function PinsAdmin({empleadas,pins,setPins,upsertPin}){
   </div>);
 }
 
-function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta,upsertSalida,upsertCliente,upsertCaja,cupones,setCupones,upsertCupon,promos,cfgInc,maquinas,pins,eventosProduccion,setEventosProduccion,upsertEvento}){
+function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta,upsertSalida,upsertCliente,upsertCaja,cupones,setCupones,upsertCupon,promos,cfgInc,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga,pins,eventosProduccion,setEventosProduccion,upsertEvento}){
   const [tab,setTab]=useState("hoy");const [busq,setBusq]=useState("");
   const [showNueva,setShowNueva]=useState(false);
   const [filtroTile,setFiltroTile]=useState(null); // 🔎 filtro rápido al tocar un contador (recibido/proceso/listo/entregado_pend)
@@ -2317,7 +2424,10 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
   const restregadosPendientes=ventas.filter(v=>!v.anulada&&(v.clasificacion?.restregadoEstado==="pendiente_confirmar"||(v.clasificacion?.serviciosAdicionales||[]).some(s=>s.estado==="pendiente_confirmar")));
   const listasSinAvisarCount=ventas.filter(v=>!v.anulada&&(v.estado||"recibido")==="listo"&&!v.checkMsgRetiro).length;
   const cumpleHoyCount=(clientes||[]).filter(c=>diasParaCumple(c.nacimiento)===0).length;
-  const totalNotifs=restregadosPendientes.length+listasSinAvisarCount+cumpleHoyCount;
+  const maquinasVencidasCount=(maquinas||[]).filter(m=>m.estado==="ocupada"&&m.finProgramado&&new Date(m.finProgramado)<new Date()).length;
+  const puedeFacturarAqui=(sesion?.nombre||"").toUpperCase().includes("NICOLE");
+  const facturarSRICount=puedeFacturarAqui?ventas.filter(v=>!v.anulada&&pagada(v)&&!v.facturadoSRI).length:0;
+  const totalNotifs=restregadosPendientes.length+listasSinAvisarCount+cumpleHoyCount+maquinasVencidasCount+facturarSRICount;
   // 🔔 Suena cuando aumentan las notificaciones (ej. llega un restregado nuevo o ya lo autorizaron en otra pantalla)
   const notifsPrevRef=useRef(totalNotifs);
   useEffect(()=>{
@@ -2435,7 +2545,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
       {ticket&&<TicketModal venta={ticket} empleadas={empleadas} onClose={()=>{setCuponSugE(ticket);setTicket(null);}}/>}
       {cuponSugE&&<CuponSugerido venta={cuponSugE} clientes={clientes} ventas={ventas} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} sesion={sesion} promos={promos} onClose={()=>setCuponSugE(null)}/>}
       {showSalidaEmp&&<SalidaCaja sesion={sesion} salidasCaja={salidasCaja||[]} setSalidasCaja={setSalidasCaja} onClose={()=>setShowSalidaEmp(false)} upsertSalida={upsertSalida}/>}
-      {showNotifs&&<NotificacionesPanel ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} addAbono={addAbono} clientes={clientes} onClose={()=>setShowNotifs(false)}/>}
+      {showNotifs&&<NotificacionesPanel ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} addAbono={addAbono} clientes={clientes} maquinas={maquinas} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} pins={pins} empleadas={empleadas} sesion={sesion} onClose={()=>setShowNotifs(false)}/>}
     </div>
   );
 }
@@ -3501,6 +3611,25 @@ function MaquinasAdmin({maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upse
     }
     guardarCambio(m.id,{estado:"libre",cargaActualId:null,finProgramado:null});
   };
+  // 🔓 Libera de un jalón TODAS las máquinas que ya pasaron su tiempo programado (vencidas) — para cuando se acumulan varias trabadas
+  const maquinasVencidas=maquinas.filter(m=>m.estado==="ocupada"&&m.finProgramado&&new Date(m.finProgramado)<new Date());
+  const liberarTodasVencidas=()=>{
+    if(!confirm(`¿Liberar las ${maquinasVencidas.length} máquinas vencidas? Esto las marca libres y cierra cualquier carga abierta que tuvieran.`))return;
+    maquinasVencidas.forEach(m=>{
+      if(m.cargaActualId&&cargas){
+        const c=cargas.find(x=>x.id===m.cargaActualId);
+        if(c&&!c.finReal&&setCargas){
+          setCargas(prev=>{
+            const next=prev.map(x=>x.id===c.id?{...x,finReal:new Date().toISOString(),empleadaRetiroId:null}:x);
+            const updated=next.find(x=>x.id===c.id);
+            if(updated&&upsertCarga)upsertCarga({...updated,_updatedAt:new Date().toISOString()});
+            return next;
+          });
+        }
+      }
+      guardarCambio(m.id,{estado:"libre",cargaActualId:null,finProgramado:null});
+    });
+  };
   const agregar=()=>{
     if(!nv.nombre.trim())return;
     const id=nv.tipo==="lavadora"?"L"+(maquinas.filter(m=>m.tipo==="lavadora").length+1)+"_"+Date.now().toString(36).slice(-3):"S"+(maquinas.filter(m=>m.tipo==="secadora").length+1)+"_"+Date.now().toString(36).slice(-3);
@@ -3571,6 +3700,13 @@ function MaquinasAdmin({maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upse
       <div style={{...S.alrt,background:"#fff3e0",color:"#e65100",marginBottom:14}}>
         ⚠️ Faltan {faltantes.length} máquina(s) del catálogo original: {faltantes.map(m=>m.nombre).join(", ")}.
         <button style={{...S.btnP,marginTop:8}} onClick={restaurarFaltantes}>🔄 Restaurar máquina(s) faltante(s)</button>
+      </div>
+    )}
+    {maquinasVencidas.length>0&&(
+      <div style={{...S.alrt,background:"#ffebee",color:"#c62828",marginBottom:14}}>
+        ⏰ {maquinasVencidas.length} máquina(s) llevan tiempo vencido sin retirar: {maquinasVencidas.map(m=>m.nombre).join(", ")}.
+        <div style={{fontSize:11,color:"#c62828",marginTop:4}}>Probablemente ya se retiró la ropa físicamente pero no se tocó "Retirar" en el sistema.</div>
+        <button style={{...S.btnP,marginTop:8,background:"linear-gradient(135deg,#c62828,#e57373)"}} onClick={liberarTodasVencidas}>🔓 Liberar todas las vencidas ({maquinasVencidas.length})</button>
       </div>
     )}
     {zonas.map(z=>(
@@ -5125,6 +5261,7 @@ useEffect(()=>{
   tareasGeneradasRef.current=true;
 },[plantillasTareas,tareasDiarias]);
 const [showSalida,setShowSalida]=useState(false);
+const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
   const [ticketV,setTicketV]=useState(null);
   const [cuponSug,setCuponSug]=useState(null); // 🎟️ cupón sugerido tras imprimir la venta
   // Servicios visibles (excluye los eliminados, que quedan marcados en la nube)
@@ -5194,7 +5331,7 @@ const [showSalida,setShowSalida]=useState(false);
     empleadas={empleadas}
     upsertCaja={upsertCaja}
   />;
-  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={serviciosActivos} sesion={sesion} addAbono={addAbono} onLogout={onLogout} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} upsertVenta={upsertVenta} upsertSalida={upsertSalida} upsertCliente={upsertCliente} upsertCaja={upsertCaja} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos} cfgInc={cfgInc} maquinas={maquinas} pins={pins} eventosProduccion={eventosProduccion} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento}/>;
+  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={serviciosActivos} sesion={sesion} addAbono={addAbono} onLogout={onLogout} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} upsertVenta={upsertVenta} upsertSalida={upsertSalida} upsertCliente={upsertCliente} upsertCaja={upsertCaja} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos} cfgInc={cfgInc} maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga} pins={pins} eventosProduccion={eventosProduccion} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento}/>;
   const tabs=[
     {id:"ventas",icon:"🧾",l:"Venta"},{id:"historial",icon:"📋",l:"Historial"},
     {id:"pendientes",icon:"⏳",l:"Pendientes",b:pCount},{id:"bi",icon:"🚀",l:"Dashboard"},
@@ -5211,6 +5348,9 @@ const [showSalida,setShowSalida]=useState(false);
       <span style={S.logo}>🫧 Lava<span style={{color:"#4db6e4"}}>&</span>Listo</span>
       <div style={{display:"flex",alignItems:"center",gap:10}}>
         <span title={nube?"Sincronizado con la nube":"Sin conexión a la nube — guardando en este dispositivo"} style={{fontSize:12,color:"#a0c4da"}}>{nube?"☁️":"📴"} 👑 {sesion.nombre}</span>
+        <button onClick={()=>setShowNotifsAdmin(true)} style={{position:"relative",background:"rgba(255,255,255,.2)",border:"none",borderRadius:6,color:"#fff",fontSize:12,padding:"4px 10px",cursor:"pointer"}}>
+          🔔{(()=>{const n=ventas.filter(v=>!v.anulada&&(v.clasificacion?.restregadoEstado==="pendiente_confirmar"||(v.clasificacion?.serviciosAdicionales||[]).some(s=>s.estado==="pendiente_confirmar")||((v.estado||"recibido")==="listo"&&!v.checkMsgRetiro))).length+(clientes||[]).filter(c=>diasParaCumple(c.nacimiento)===0).length+(maquinas||[]).filter(m=>m.estado==="ocupada"&&m.finProgramado&&new Date(m.finProgramado)<new Date()).length+ventas.filter(v=>!v.anulada&&pagada(v)&&!v.facturadoSRI).length;return n>0&&<span style={{position:"absolute",top:-4,right:-4,background:"#e53935",color:"#fff",borderRadius:10,fontSize:9,fontWeight:800,padding:"1px 5px"}}>{n}</span>;})()}
+        </button>
         <button onClick={()=>setShowSalida(true)} style={{background:"rgba(220,50,50,.3)",border:"none",borderRadius:6,color:"#ffcccc",fontSize:11,padding:"4px 10px",cursor:"pointer",fontWeight:600}}>💸 Salida</button>
         {cierreOk?<button onClick={onLogout} style={{background:"rgba(255,255,255,.15)",border:"none",borderRadius:6,color:"#fff",fontSize:11,padding:"4px 10px",cursor:"pointer"}}>Salir</button>:<button onClick={()=>alert("Debes hacer el cierre de caja antes de salir.")} style={{background:"rgba(255,80,80,.3)",border:"none",borderRadius:6,color:"#ffcccc",fontSize:11,padding:"4px 10px",cursor:"not-allowed"}}>🔒 Salir</button>}
       </div>
@@ -5251,6 +5391,7 @@ const [showSalida,setShowSalida]=useState(false);
     {ticketV&&<TicketModal venta={ticketV} empleadas={empleadas} onClose={()=>{setCuponSug(ticketV);setTicketV(null);}}/>}
     {cuponSug&&<CuponSugerido venta={cuponSug} clientes={clientes} ventas={ventas} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} sesion={sesion} promos={promos} onClose={()=>setCuponSug(null)}/>}
     {showSalida&&<SalidaCaja sesion={sesion} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} onClose={()=>setShowSalida(false)} upsertSalida={upsertSalida}/>}
+    {showNotifsAdmin&&<NotificacionesPanel ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} addAbono={addAbono} clientes={clientes} maquinas={maquinas} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} pins={pins} empleadas={empleadas} sesion={sesion} esAdmin={true} onClose={()=>setShowNotifsAdmin(false)}/>}
   </div>);
 }
 
