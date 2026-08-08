@@ -497,7 +497,10 @@ function NotificacionesPanel({ventas,setVentas,upsertVenta,addAbono,clientes,maq
   const [pinForMaquina,setPinForMaquina]=useState(null); // {maquina, carga}
   const [verTodasSRI,setVerTodasSRI]=useState(false);
   // 🧾 Solo la administradora o Nicole (encargada de facturar en el SRI) ven y manejan esta sección
-  const puedeFacturar=esAdmin||(sesion?.nombre||"").toUpperCase().includes("NICOLE");
+  // 🧾 Solo la administradora o quien tenga el rol "Recepcionista" ven y manejan esta sección (ya no depende de un nombre fijo)
+  const miEmpleadaSesion=(empleadas||[]).find(e=>normNombre(e.nombre)&&normNombre(e.nombre)===normNombre(sesion?.nombre))
+    ||(empleadas||[]).find(e=>{const en=normNombre(e.nombre).split(" ")[0];const sn=normNombre(sesion?.nombre).split(" ")[0];return en&&sn&&en===sn;});
+  const puedeFacturar=esAdmin||miEmpleadaSesion?.rolFuncional==="recepcionista";
   const pendientesFacturarSRI=ventas.filter(v=>!v.anulada&&pagada(v)&&!v.facturadoSRI);
   const marcarFacturado=v=>{
     setVentas(prev=>{
@@ -905,7 +908,9 @@ function SelectorVista({sesion,onElegir,onLogout}){
 // 🏭 PRODUCCIÓN — pantalla completa, independiente de Facturación. Sin tabs de caja/ventas; todo aquí se identifica por PIN.
 function ProduccionScreen({sesion,onVolver,onLogout,ventas,setVentas,upsertVenta,empleadas,pins,eventosProduccion,setEventosProduccion,upsertEvento,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga,clientes}){
   const [showNotifs,setShowNotifs]=useState(false);
-  const puedeFacturarAqui=(sesion?.nombre||"").toUpperCase().includes("NICOLE");
+  const miEmpleadaSesionPS=(empleadas||[]).find(e=>normNombre(e.nombre)&&normNombre(e.nombre)===normNombre(sesion?.nombre))
+    ||(empleadas||[]).find(e=>{const en=normNombre(e.nombre).split(" ")[0];const sn=normNombre(sesion?.nombre).split(" ")[0];return en&&sn&&en===sn;});
+  const puedeFacturarAqui=miEmpleadaSesionPS?.rolFuncional==="recepcionista";
   const facturarSRICount=puedeFacturarAqui?ventas.filter(v=>!v.anulada&&pagada(v)&&!v.facturadoSRI).length:0;
   const totalNotifs=ventas.filter(v=>!v.anulada&&(v.clasificacion?.restregadoEstado==="pendiente_confirmar"||(v.clasificacion?.serviciosAdicionales||[]).some(s=>s.estado==="pendiente_confirmar")||((v.estado||"recibido")==="listo"&&!v.checkMsgRetiro))).length+(clientes||[]).filter(c=>diasParaCumple(c.nacimiento)===0).length+(maquinas||[]).filter(m=>m.estado==="ocupada"&&m.finProgramado&&new Date(m.finProgramado)<new Date()).length+facturarSRICount;
   // 🔔 Suena cuando aumentan las notificaciones (ej. llega un restregado nuevo o ya lo autorizaron en otra pantalla)
@@ -2437,7 +2442,9 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
   const listasSinAvisarCount=ventas.filter(v=>!v.anulada&&(v.estado||"recibido")==="listo"&&!v.checkMsgRetiro).length;
   const cumpleHoyCount=(clientes||[]).filter(c=>diasParaCumple(c.nacimiento)===0).length;
   const maquinasVencidasCount=(maquinas||[]).filter(m=>m.estado==="ocupada"&&m.finProgramado&&new Date(m.finProgramado)<new Date()).length;
-  const puedeFacturarAqui=(sesion?.nombre||"").toUpperCase().includes("NICOLE");
+  const miEmpleadaSesionPE=(empleadas||[]).find(e=>normNombre(e.nombre)&&normNombre(e.nombre)===normNombre(sesion?.nombre))
+    ||(empleadas||[]).find(e=>{const en=normNombre(e.nombre).split(" ")[0];const sn=normNombre(sesion?.nombre).split(" ")[0];return en&&sn&&en===sn;});
+  const puedeFacturarAqui=miEmpleadaSesionPE?.rolFuncional==="recepcionista";
   const facturarSRICount=puedeFacturarAqui?ventas.filter(v=>!v.anulada&&pagada(v)&&!v.facturadoSRI).length:0;
   const totalNotifs=restregadosPendientes.length+listasSinAvisarCount+cumpleHoyCount+maquinasVencidasCount+facturarSRICount;
   // 🔔 Suena cuando aumentan las notificaciones (ej. llega un restregado nuevo o ya lo autorizaron en otra pantalla)
@@ -3519,12 +3526,12 @@ function Inventario({inventario,setInventario,upsertInventario}){
 }
 
 function Equipo({empleadas,setEmpleadas,ventas,esAdmin,upsertEmpleada}){
-  const [nv,setNv]=useState({nombre:"",metaVentas:20,montoBonus:20,bonoGrupal:false});
+  const [nv,setNv]=useState({nombre:"",metaVentas:20,montoBonus:20,bonoGrupal:false,rolFuncional:"general"});
   const [editId,setEditId]=useState(null);const [ed,setEd]=useState({});
   const mes=mesK(new Date());
-  const add=()=>{if(!nv.nombre.trim())return;const ne={id:Date.now(),nombre:nv.nombre,activa:true,metaVentas:parseInt(nv.metaVentas)||20,montoBonus:parseFloat(nv.montoBonus)||0,bonoGrupal:!!nv.bonoGrupal};setEmpleadas(prev=>[...prev,ne]);if(upsertEmpleada)upsertEmpleada({...ne,_updatedAt:new Date().toISOString()});setNv({nombre:"",metaVentas:20,montoBonus:20,bonoGrupal:false});};
+  const add=()=>{if(!nv.nombre.trim())return;const ne={id:Date.now(),nombre:nv.nombre,activa:true,metaVentas:parseInt(nv.metaVentas)||20,montoBonus:parseFloat(nv.montoBonus)||0,bonoGrupal:!!nv.bonoGrupal,rolFuncional:nv.rolFuncional||"general"};setEmpleadas(prev=>[...prev,ne]);if(upsertEmpleada)upsertEmpleada({...ne,_updatedAt:new Date().toISOString()});setNv({nombre:"",metaVentas:20,montoBonus:20,bonoGrupal:false,rolFuncional:"general"});};
   const tog=id=>setEmpleadas(prev=>{const next=prev.map(e=>e.id===id?{...e,activa:!e.activa}:e);const updated=next.find(e=>e.id===id);if(updated&&upsertEmpleada)upsertEmpleada({...updated,_updatedAt:new Date().toISOString()});return next;});
-  const save2=()=>{setEmpleadas(prev=>{const next=prev.map(e=>e.id===editId?{...e,...ed,metaVentas:parseInt(ed.metaVentas)||20,montoBonus:parseFloat(ed.montoBonus)||0,bonoGrupal:!!ed.bonoGrupal}:e);const updated=next.find(e=>e.id===editId);if(updated&&upsertEmpleada)upsertEmpleada({...updated,_updatedAt:new Date().toISOString()});return next;});setEditId(null);};
+  const save2=()=>{setEmpleadas(prev=>{const next=prev.map(e=>e.id===editId?{...e,...ed,metaVentas:parseInt(ed.metaVentas)||20,montoBonus:parseFloat(ed.montoBonus)||0,bonoGrupal:!!ed.bonoGrupal,rolFuncional:ed.rolFuncional||"general"}:e);const updated=next.find(e=>e.id===editId);if(updated&&upsertEmpleada)upsertEmpleada({...updated,_updatedAt:new Date().toISOString()});return next;});setEditId(null);};
   const stats=empleadas.map(e=>{const mv=ventas.filter(v=>v.empleadaId===e.id&&mesK(v.fecha)===mes);return{...e,vm:mv.length,tm:mv.reduce((a,v)=>a+v.total,0)};});
   return(<div style={S.panel}>
     <h2 style={S.ptitle}>👩 Equipo & Bonos</h2>
@@ -3543,13 +3550,20 @@ function Equipo({empleadas,setEmpleadas,ventas,esAdmin,upsertEmpleada}){
                   <input type="checkbox" checked={!!ed.bonoGrupal} onChange={ev=>setEd({...ed,bonoGrupal:ev.target.checked})}/>
                   🎯 Participa en el bono grupal (meta mensual)
                 </label>
+                <div style={{marginTop:8}}>
+                  <label style={S.lbl}>Rol funcional</label>
+                  <select style={S.inp} value={ed.rolFuncional||"general"} onChange={ev=>setEd({...ed,rolFuncional:ev.target.value})}>
+                    <option value="general">General</option>
+                    <option value="recepcionista">🧾 Recepcionista (facturación SRI, etc.)</option>
+                  </select>
+                </div>
               </div>
               <div style={{display:"flex",gap:8}}><button style={{...S.btnP,flex:1}} onClick={save2}>✓ Guardar</button><button style={S.btnC} onClick={()=>setEditId(null)}>Cancelar</button></div>
             </div>
           ):(
             <>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div><div style={{fontWeight:700,fontSize:15}}>{e.nombre}</div><div style={{fontSize:12,color:"#888"}}>{e.vm} ventas este mes</div>{esAdmin&&<div style={{fontSize:11,color:"#4db6e4"}}>Meta: {meta} · Bono: ${e.montoBonus||0}{e.bonoGrupal?" · 🎯 En bono grupal":""}</div>}</div>
+                <div><div style={{fontWeight:700,fontSize:15}}>{e.nombre}{e.rolFuncional==="recepcionista"?" 🧾":""}</div><div style={{fontSize:12,color:"#888"}}>{e.vm} ventas este mes</div>{esAdmin&&<div style={{fontSize:11,color:"#4db6e4"}}>Meta: {meta} · Bono: ${e.montoBonus||0}{e.bonoGrupal?" · 🎯 En bono grupal":""}{e.rolFuncional==="recepcionista"?" · 🧾 Recepcionista":""}</div>}</div>
                 <div style={{display:"flex",gap:6}}>
                   {bono&&<div style={{...S.badge,background:"#fff8e1",color:"#f59e0b"}}>🌟 {esAdmin?`$${e.montoBonus||0}`:"¡Bono!"}</div>}
                   {esAdmin&&<button style={S.btnS} onClick={()=>{setEditId(e.id);setEd({...e});}}>✏️</button>}
@@ -3570,6 +3584,13 @@ function Equipo({empleadas,setEmpleadas,ventas,esAdmin,upsertEmpleada}){
         <input style={{...S.inp,gridColumn:"1/-1"}} placeholder="Nombre completo" value={nv.nombre} onChange={e=>setNv({...nv,nombre:e.target.value})}/>
         <div><label style={S.lbl}>Meta ventas/mes</label><input type="number" style={S.inp} value={nv.metaVentas} onChange={e=>setNv({...nv,metaVentas:e.target.value})}/></div>
         <div><label style={S.lbl}>Monto bono ($)</label><input type="number" style={S.inp} value={nv.montoBonus} onChange={e=>setNv({...nv,montoBonus:e.target.value})}/></div>
+        <div style={{gridColumn:"1/-1"}}>
+          <label style={S.lbl}>Rol funcional</label>
+          <select style={S.inp} value={nv.rolFuncional} onChange={e=>setNv({...nv,rolFuncional:e.target.value})}>
+            <option value="general">General</option>
+            <option value="recepcionista">🧾 Recepcionista (facturación SRI, etc.)</option>
+          </select>
+        </div>
       </div>
       <button style={{...S.btnP,marginTop:10}} onClick={add}>Agregar empleada</button>
     </Card>}
