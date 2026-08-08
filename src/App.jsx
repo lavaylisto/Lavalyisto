@@ -495,12 +495,21 @@ function TicketModal({venta,empleadas,onClose}){
 // 🔔 Panel de notificaciones: restregados por confirmar y restregados ya autorizados con saldo pendiente de cobro
 function NotificacionesPanel({ventas,setVentas,upsertVenta,addAbono,clientes,maquinas,cargas,setCargas,upsertCarga,setMaquinas,upsertMaquina,pins,empleadas,sesion,esAdmin,soloLectura,onClose}){
   const [pinForMaquina,setPinForMaquina]=useState(null); // {maquina, carga}
+  const [verTodasSRI,setVerTodasSRI]=useState(false);
   // 🧾 Solo la administradora o Nicole (encargada de facturar en el SRI) ven y manejan esta sección
   const puedeFacturar=esAdmin||(sesion?.nombre||"").toUpperCase().includes("NICOLE");
   const pendientesFacturarSRI=ventas.filter(v=>!v.anulada&&pagada(v)&&!v.facturadoSRI);
   const marcarFacturado=v=>{
     setVentas(prev=>{
       const next=prev.map(vv=>vv.folio===v.folio?{...vv,facturadoSRI:true,facturadoSRIEn:new Date().toISOString(),facturadoSRIPor:sesion?.nombre||null}:vv);
+      const updated=next.find(vv=>vv.folio===v.folio);
+      if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+  };
+  const desmarcarFacturado=v=>{
+    setVentas(prev=>{
+      const next=prev.map(vv=>vv.folio===v.folio?{...vv,facturadoSRI:false,facturadoSRIEn:null,facturadoSRIPor:null}:vv);
       const updated=next.find(vv=>vv.folio===v.folio);
       if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
       return next;
@@ -639,23 +648,26 @@ function NotificacionesPanel({ventas,setVentas,upsertVenta,addAbono,clientes,maq
           <button onClick={onClose} style={{background:"#f0f4f8",border:"none",borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:13}}>✕ Cerrar</button>
         </div>
 
-        {pendientesConfirmar.length===0&&listasSinAvisar.length===0&&cumpleHoy.length===0&&maquinasVencidas.length===0&&(!puedeFacturar||pendientesFacturarSRI.length===0)&&(
+        {pendientesConfirmar.length===0&&listasSinAvisar.length===0&&cumpleHoy.length===0&&maquinasVencidas.length===0&&!puedeFacturar&&(
           <div style={{textAlign:"center",padding:"40px 20px",color:"#aaa"}}><div style={{fontSize:44,marginBottom:8}}>🔔</div><div>Sin notificaciones pendientes</div></div>
         )}
 
-        {puedeFacturar&&pendientesFacturarSRI.length>0&&(
-          <div style={{marginBottom:20}}>
+        {puedeFacturar&&(
+          <div style={{marginBottom:20,background:"#eaf3fb",borderRadius:10,padding:12,border:"1.5px solid #90caf9"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-              <div style={{fontSize:13,fontWeight:800,color:"#1565c0"}}>🧾 Pendiente facturar SRI ({pendientesFacturarSRI.length})</div>
-              <button onClick={descargarReporteSRI} style={{background:"none",border:"none",color:"#1565c0",fontSize:11,fontWeight:700,cursor:"pointer"}}>⬇️ Descargar reporte</button>
+              <div style={{fontSize:13,fontWeight:800,color:"#1565c0"}}>🧾 Facturación SRI</div>
+              <button onClick={descargarReporteSRI} style={{background:"#1565c0",border:"none",color:"#fff",fontSize:11,fontWeight:700,cursor:"pointer",borderRadius:8,padding:"6px 10px"}}>⬇️ Descargar reporte completo</button>
             </div>
-            {pendientesFacturarSRI.map(v=>(
-              <div key={v.folio} style={{...S.vcard,borderLeft:"4px solid #1565c0"}}>
+            <div style={{fontSize:12,color:"#1565c0",marginBottom:8}}>{pendientesFacturarSRI.length} orden(es) pagada(s) sin marcar como facturada todavía.</div>
+            <button onClick={()=>setVerTodasSRI(!verTodasSRI)} style={{background:"none",border:"none",color:"#1565c0",fontSize:12,fontWeight:700,cursor:"pointer",textDecoration:"underline",padding:0}}>{verTodasSRI?"Ver solo pendientes":`Ver todas las pagadas (${ventas.filter(v=>!v.anulada&&pagada(v)).length})`}</button>
+
+            {(verTodasSRI?ventas.filter(v=>!v.anulada&&pagada(v)):pendientesFacturarSRI).map(v=>(
+              <div key={v.folio} style={{...S.vcard,borderLeft:`4px solid ${v.facturadoSRI?"#2e7d32":"#1565c0"}`,marginTop:10}}>
                 <div style={{fontWeight:700,fontSize:14}}>{v.clienteNombre}</div>
-                <div style={{fontSize:11,color:"#888"}}>{v.folio} · ${v.total.toFixed(2)}</div>
+                <div style={{fontSize:11,color:"#888"}}>{v.folio} · ${v.total.toFixed(2)}{v.facturadoSRIPor?` · ${v.facturadoSRIPor}`:""}</div>
                 <label style={{display:"flex",alignItems:"center",gap:8,marginTop:8,cursor:"pointer"}}>
-                  <input type="checkbox" checked={false} onChange={()=>marcarFacturado(v)}/>
-                  <span style={{fontSize:13,fontWeight:600,color:"#1a3c5e"}}>Ya se facturó en el SRI</span>
+                  <input type="checkbox" checked={!!v.facturadoSRI} onChange={()=>v.facturadoSRI?desmarcarFacturado(v):marcarFacturado(v)}/>
+                  <span style={{fontSize:13,fontWeight:600,color:v.facturadoSRI?"#2e7d32":"#1a3c5e"}}>{v.facturadoSRI?"✅ Ya facturada":"Ya se facturó en el SRI"}</span>
                 </label>
               </div>
             ))}
@@ -5229,6 +5241,21 @@ const { data: plantillasTareas, setData: setPlantillasTareas, upsert: upsertPlan
 const { data: tareasDiarias, setData: setTareasDiarias, upsert: upsertTareaDiaria } = useCollection("tareasDiarias", "ll_tareas_diarias", []);
 // 📝 NOTAS — canal para que las empleadas dejen pendientes/novedades que revisa la admin
 const { data: notas, setData: setNotas, upsert: upsertNota } = useCollection("notas", "ll_notas", []);
+// 🧾 Migración de una sola vez: Nicol marcaba "facturado" escribiéndolo en el campo Notas — lo recuperamos hacia el nuevo checklist de facturación SRI
+const migracionSRIRef=useRef(false);
+useEffect(()=>{
+  if(migracionSRIRef.current)return;
+  if(!Array.isArray(ventas)||ventas.length===0)return;
+  const aMigrar=ventas.filter(v=>!v.anulada&&!v.facturadoSRI&&v.notas&&/factur/i.test(v.notas));
+  if(aMigrar.length>0){
+    setVentas(prev=>{
+      const next=prev.map(v=>(!v.anulada&&!v.facturadoSRI&&v.notas&&/factur/i.test(v.notas))?{...v,facturadoSRI:true,facturadoSRIEn:v.fecha,facturadoSRIPor:"Recuperado de Notas"}:v);
+      aMigrar.forEach(v=>{const updated=next.find(vv=>vv.folio===v.folio);if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});});
+      return next;
+    });
+  }
+  migracionSRIRef.current=true;
+},[ventas]);
 // 📋 Generación lazy: si hoy todavía no tiene tareas generadas, las crea una sola vez desde las plantillas activas del día
 const tareasGeneradasRef=useRef(false);
 useEffect(()=>{
