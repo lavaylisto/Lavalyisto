@@ -2502,7 +2502,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         </div>
       )}
       <div style={{background:"#fff",display:"flex",borderBottom:"2px solid #e8f0f7",position:"sticky",top:0,zIndex:10}}>
-        {[{id:"hoy",l:"📋 Ordenes",c:pendientesRaw.length},{id:"cobrar",l:"💸 Recibido",c:porCob.length},{id:"proceso",l:"🔄 En proceso",c:porProc.length},{id:"entregar",l:"📦 Listo para retirar",c:porEnt.length},...(puedeFacturarAqui?[{id:"resumen",l:"📊 Resumen"}]:[]),{id:"bonos",l:"📈 Bonos"},{id:"nueva",l:"➕ Nuevo"}].map(t=>(
+        {[{id:"hoy",l:"📋 Ordenes",c:pendientesRaw.length},{id:"cobrar",l:"💸 Recibido",c:porCob.length},{id:"proceso",l:"🔄 En proceso",c:porProc.length},{id:"entregar",l:"📦 Listo para retirar",c:porEnt.length},{id:"clientes",l:"👥 Clientes"},...(puedeFacturarAqui?[{id:"resumen",l:"📊 Resumen"}]:[]),{id:"bonos",l:"📈 Bonos"},{id:"nueva",l:"➕ Nuevo"}].map(t=>(
           <button key={t.id} style={{flex:1,padding:"12px 4px",border:"none",background:"transparent",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:tab===t.id?700:500,color:tab===t.id?"#1a3c5e":"#888",borderBottom:tab===t.id?"2px solid #4db6e4":"none",marginBottom:-2,fontSize:11,position:"relative"}}
             onClick={()=>t.id==="nueva"?setShowNueva(true):setTab(t.id)}>
             {t.l}{t.c>0&&<span style={{position:"absolute",top:5,right:3,background:"#e53935",color:"#fff",borderRadius:10,fontSize:9,fontWeight:800,padding:"1px 4px"}}>{t.c}</span>}
@@ -2510,7 +2510,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         ))}
       </div>
       <div style={{padding:12}}>
-        {tab!=="bonos"&&tab!=="resumen"&&(<div style={{display:"flex",gap:8,marginBottom:12}}>
+        {tab!=="bonos"&&tab!=="resumen"&&tab!=="clientes"&&(<div style={{display:"flex",gap:8,marginBottom:12}}>
           <input style={{...S.inp,flex:1}} placeholder="🔍 Buscar cliente o folio..." value={busq} onChange={e=>setBusq(e.target.value)}/>
         </div>)}
         {tab==="hoy"&&(<>
@@ -2538,6 +2538,8 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
           ?<MisIncentivos ventas={ventas} empleadas={empleadas} sesion={sesion} cfgInc={cfgInc||INCENTIVOS_DEFAULT[0]}/>
           :tab==="resumen"
             ?<ResumenDia ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja}/>
+          :tab==="clientes"
+            ?<Clientes clientes={clientes} setClientes={setClientes} upsertCliente={upsertCliente} ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} esAdmin={false}/>
           :filtrados.length===0
             ?<div style={{textAlign:"center",padding:"40px 20px",color:"#aaa"}}><div style={{fontSize:48,marginBottom:8}}>{tab==="entregar"?"🎉":"📋"}</div><div>{tab==="cobrar"?"Sin órdenes en Recibido":tab==="proceso"?"Nada en proceso":tab==="entregar"?"Nada listo para retirar":"Sin ordenes"}</div></div>
             :filtrados.map(v=><OrdenCard key={v.folio} v={v} setVentas={setVentas} addAbono={addAbono} setTicket={setTicket} upsertVenta={upsertVenta} clientes={clientes} setClientes={setClientes} upsertCliente={upsertCliente} sesion={sesion}/>)
@@ -4722,7 +4724,7 @@ function Cupones({cupones,setCupones,upsertCupon,clientes,ventas,sesion,promos})
 // de ventas por cliente. Al editar, se propagan nombre/teléfono/dirección
 // a las órdenes activas (no entregadas ni anuladas) para que los mensajes
 // de WhatsApp y tickets salgan con los datos correctos.
-function Clientes({clientes,setClientes,upsertCliente,ventas,setVentas,upsertVenta}){
+function Clientes({clientes,setClientes,upsertCliente,ventas,setVentas,upsertVenta,esAdmin=true}){
   const [q,setQ]=useState("");
   const [orden,setOrden]=useState("recientes");
   const [editId,setEditId]=useState(null);const [ed,setEd]=useState({});
@@ -4859,7 +4861,7 @@ function Clientes({clientes,setClientes,upsertCliente,ventas,setVentas,upsertVen
                 <div style={{display:"flex",flexDirection:"column",gap:5,alignItems:"flex-end"}}>
                   <button style={S.btnS} onClick={()=>abrirEdicion(c)}>✏️ Editar</button>
                   <button style={S.btnS} onClick={()=>setHistId(histId===c.id?null:c.id)}>{histId===c.id?"▲ Ocultar":"📋 Historial"}</button>
-                  <button style={S.btnR} onClick={()=>eliminar(c)}>🗑️</button>
+                  {esAdmin&&<button style={S.btnR} onClick={()=>eliminar(c)}>🗑️</button>}
                 </div>
               </div>
               {histId===c.id&&(
