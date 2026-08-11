@@ -2079,6 +2079,60 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
   </div>);
 }
 
+// 📊 Resumen de Ventas — para la Recepcionista: total vendido, cobrado, pendiente y desglose por método, por fecha
+function ResumenVentas({ventas}){
+  const [fecha,setFecha]=useState(fechaHoyLocal());
+  const vDia=ventas.filter(v=>!v.anulada&&fechaLocal(v.fecha)===fecha);
+  const totalVentas=vDia.reduce((a,v)=>a+v.total,0);
+  const totalCobrado=vDia.reduce((a,v)=>a+(v.abonos||[]).reduce((s,ab)=>s+ab.monto,0),0);
+  const totalPendiente=parseFloat((totalVentas-totalCobrado).toFixed(2));
+  const porMetodo={};
+  vDia.forEach(v=>(v.abonos||[]).forEach(ab=>{porMetodo[ab.metodo]=(porMetodo[ab.metodo]||0)+ab.monto;}));
+  return(<div style={{padding:"4px 4px 20px"}}>
+    <div style={{marginBottom:14}}>
+      <label style={S.lbl}>Fecha</label>
+      <input type="date" style={S.inp} value={fecha} onChange={e=>setFecha(e.target.value)}/>
+    </div>
+
+    <div style={{background:"linear-gradient(135deg,#1a3c5e,#2563a8)",borderRadius:14,padding:16,marginBottom:14,color:"#fff"}}>
+      <div style={{fontSize:12,color:"#a0c4da",fontWeight:600}}>TOTAL VENDIDO</div>
+      <div style={{fontFamily:"'Playfair Display',serif",fontSize:26,fontWeight:800,marginTop:2}}>${totalVentas.toFixed(2)}</div>
+      <div style={{fontSize:12,color:"#a0c4da",marginTop:6}}>{vDia.length} orden(es)</div>
+    </div>
+
+    <div style={{display:"flex",gap:10,marginBottom:14}}>
+      <div style={{flex:1,background:"#e8f5e9",borderRadius:10,padding:12,textAlign:"center"}}>
+        <div style={{fontSize:20,fontWeight:800,color:"#2e7d32"}}>${totalCobrado.toFixed(2)}</div>
+        <div style={{fontSize:11,color:"#2e7d32"}}>Cobrado</div>
+      </div>
+      <div style={{flex:1,background:totalPendiente>0?"#fff3e0":"#e8f5e9",borderRadius:10,padding:12,textAlign:"center"}}>
+        <div style={{fontSize:20,fontWeight:800,color:totalPendiente>0?"#e65100":"#2e7d32"}}>${totalPendiente.toFixed(2)}</div>
+        <div style={{fontSize:11,color:totalPendiente>0?"#e65100":"#2e7d32"}}>Pendiente</div>
+      </div>
+    </div>
+
+    <Card title="💳 Cobrado por método de pago">
+      {Object.keys(porMetodo).length===0&&<div style={{fontSize:13,color:"#888"}}>Sin cobros registrados este día.</div>}
+      {Object.entries(porMetodo).map(([m,val])=>(
+        <div key={m} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f0f4f8"}}>
+          <span style={{fontSize:13,color:"#1a3c5e"}}>{m}</span>
+          <strong style={{fontSize:13,color:"#2e7d32"}}>${val.toFixed(2)}</strong>
+        </div>
+      ))}
+    </Card>
+
+    <Card title={`📋 Órdenes del día (${vDia.length})`}>
+      {vDia.length===0&&<div style={{fontSize:13,color:"#888"}}>Sin órdenes este día.</div>}
+      {vDia.map(v=>(
+        <div key={v.folio} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f0f4f8"}}>
+          <div><div style={{fontSize:13,fontWeight:600,color:"#1a3c5e"}}>{v.clienteNombre}</div><div style={{fontSize:11,color:"#888"}}>{v.folio}</div></div>
+          <strong style={{fontSize:13,color:"#1a3c5e"}}>${v.total.toFixed(2)}</strong>
+        </div>
+      ))}
+    </Card>
+  </div>);
+}
+
 function MisIncentivos({ventas,empleadas,sesion,cfgInc}){
   const mesAct=mesK(new Date());
   const {meta,ventaMes,vMes}=calcMetaMes(ventas,mesAct);
@@ -2500,7 +2554,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         </div>
       )}
       <div style={{background:"#fff",display:"flex",borderBottom:"2px solid #e8f0f7",position:"sticky",top:0,zIndex:10}}>
-        {[{id:"hoy",l:"📋 Ordenes",c:pendientesRaw.length},{id:"cobrar",l:"💸 Recibido",c:porCob.length},{id:"proceso",l:"🔄 En proceso",c:porProc.length},{id:"entregar",l:"📦 Listo para retirar",c:porEnt.length},{id:"bonos",l:"📈 Bonos"},{id:"nueva",l:"➕ Nuevo"}].map(t=>(
+        {[{id:"hoy",l:"📋 Ordenes",c:pendientesRaw.length},{id:"cobrar",l:"💸 Recibido",c:porCob.length},{id:"proceso",l:"🔄 En proceso",c:porProc.length},{id:"entregar",l:"📦 Listo para retirar",c:porEnt.length},...(puedeFacturarAqui?[{id:"resumen",l:"📊 Resumen"}]:[]),{id:"bonos",l:"📈 Bonos"},{id:"nueva",l:"➕ Nuevo"}].map(t=>(
           <button key={t.id} style={{flex:1,padding:"12px 4px",border:"none",background:"transparent",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:tab===t.id?700:500,color:tab===t.id?"#1a3c5e":"#888",borderBottom:tab===t.id?"2px solid #4db6e4":"none",marginBottom:-2,fontSize:11,position:"relative"}}
             onClick={()=>t.id==="nueva"?setShowNueva(true):setTab(t.id)}>
             {t.l}{t.c>0&&<span style={{position:"absolute",top:5,right:3,background:"#e53935",color:"#fff",borderRadius:10,fontSize:9,fontWeight:800,padding:"1px 4px"}}>{t.c}</span>}
@@ -2508,7 +2562,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         ))}
       </div>
       <div style={{padding:12}}>
-        {tab!=="bonos"&&(<div style={{display:"flex",gap:8,marginBottom:12}}>
+        {tab!=="bonos"&&tab!=="resumen"&&(<div style={{display:"flex",gap:8,marginBottom:12}}>
           <input style={{...S.inp,flex:1}} placeholder="🔍 Buscar cliente o folio..." value={busq} onChange={e=>setBusq(e.target.value)}/>
         </div>)}
         {tab==="hoy"&&(<>
@@ -2534,6 +2588,8 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         </>)}
         {tab==="bonos"
           ?<MisIncentivos ventas={ventas} empleadas={empleadas} sesion={sesion} cfgInc={cfgInc||INCENTIVOS_DEFAULT[0]}/>
+          :tab==="resumen"
+            ?<ResumenVentas ventas={ventas}/>
           :filtrados.length===0
             ?<div style={{textAlign:"center",padding:"40px 20px",color:"#aaa"}}><div style={{fontSize:48,marginBottom:8}}>{tab==="entregar"?"🎉":"📋"}</div><div>{tab==="cobrar"?"Sin órdenes en Recibido":tab==="proceso"?"Nada en proceso":tab==="entregar"?"Nada listo para retirar":"Sin ordenes"}</div></div>
             :filtrados.map(v=><OrdenCard key={v.folio} v={v} setVentas={setVentas} addAbono={addAbono} setTicket={setTicket} upsertVenta={upsertVenta} clientes={clientes} setClientes={setClientes} upsertCliente={upsertCliente} sesion={sesion}/>)
