@@ -521,7 +521,8 @@ function NotificacionesPanel({ventas,setVentas,upsertVenta,addAbono,clientes,maq
   const descargarReporteSRI=()=>{
     const pagadas=ventas.filter(v=>!v.anulada&&pagada(v));
     const clienteDe=v=>v.clienteId?(clientes||[]).find(c=>c.id===v.clienteId):null;
-    const enc=["Folio","Fecha","Cliente","Cédula/RUC","Dirección","Email","Teléfono","Total facturado","Facturado SRI","Fecha facturado","Facturado por"];
+    const detalleServicios=v=>(v.items||[]).map(it=>`${it.label}${it.piezas>1?` x${it.piezas}`:""} $${(it.precio||0).toFixed(2)}`).join(" | ");
+    const enc=["Folio","Fecha","Cliente","Cédula/RUC","Dirección","Email","Teléfono","Servicios contratados (detalle)","Total facturado","Facturado SRI","Fecha facturado","Facturado por"];
     const filas=pagadas.map(v=>{
       const cl=clienteDe(v);
       return[
@@ -530,6 +531,7 @@ function NotificacionesPanel({ventas,setVentas,upsertVenta,addAbono,clientes,maq
         v.clienteDireccion||cl?.direccion||"",
         cl?.email||"",
         v.clienteTel||cl?.tel||"",
+        detalleServicios(v),
         "$"+v.total.toFixed(2),
         v.facturadoSRI?"Sí":"No",
         v.facturadoSRIEn?fmt(v.facturadoSRIEn):"",
