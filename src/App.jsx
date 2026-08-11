@@ -2079,60 +2079,6 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
   </div>);
 }
 
-// 📊 Resumen de Ventas — para la Recepcionista: total vendido, cobrado, pendiente y desglose por método, por fecha
-function ResumenVentas({ventas}){
-  const [fecha,setFecha]=useState(fechaHoyLocal());
-  const vDia=ventas.filter(v=>!v.anulada&&fechaLocal(v.fecha)===fecha);
-  const totalVentas=vDia.reduce((a,v)=>a+v.total,0);
-  const totalCobrado=vDia.reduce((a,v)=>a+(v.abonos||[]).reduce((s,ab)=>s+ab.monto,0),0);
-  const totalPendiente=parseFloat((totalVentas-totalCobrado).toFixed(2));
-  const porMetodo={};
-  vDia.forEach(v=>(v.abonos||[]).forEach(ab=>{porMetodo[ab.metodo]=(porMetodo[ab.metodo]||0)+ab.monto;}));
-  return(<div style={{padding:"4px 4px 20px"}}>
-    <div style={{marginBottom:14}}>
-      <label style={S.lbl}>Fecha</label>
-      <input type="date" style={S.inp} value={fecha} onChange={e=>setFecha(e.target.value)}/>
-    </div>
-
-    <div style={{background:"linear-gradient(135deg,#1a3c5e,#2563a8)",borderRadius:14,padding:16,marginBottom:14,color:"#fff"}}>
-      <div style={{fontSize:12,color:"#a0c4da",fontWeight:600}}>TOTAL VENDIDO</div>
-      <div style={{fontFamily:"'Playfair Display',serif",fontSize:26,fontWeight:800,marginTop:2}}>${totalVentas.toFixed(2)}</div>
-      <div style={{fontSize:12,color:"#a0c4da",marginTop:6}}>{vDia.length} orden(es)</div>
-    </div>
-
-    <div style={{display:"flex",gap:10,marginBottom:14}}>
-      <div style={{flex:1,background:"#e8f5e9",borderRadius:10,padding:12,textAlign:"center"}}>
-        <div style={{fontSize:20,fontWeight:800,color:"#2e7d32"}}>${totalCobrado.toFixed(2)}</div>
-        <div style={{fontSize:11,color:"#2e7d32"}}>Cobrado</div>
-      </div>
-      <div style={{flex:1,background:totalPendiente>0?"#fff3e0":"#e8f5e9",borderRadius:10,padding:12,textAlign:"center"}}>
-        <div style={{fontSize:20,fontWeight:800,color:totalPendiente>0?"#e65100":"#2e7d32"}}>${totalPendiente.toFixed(2)}</div>
-        <div style={{fontSize:11,color:totalPendiente>0?"#e65100":"#2e7d32"}}>Pendiente</div>
-      </div>
-    </div>
-
-    <Card title="💳 Cobrado por método de pago">
-      {Object.keys(porMetodo).length===0&&<div style={{fontSize:13,color:"#888"}}>Sin cobros registrados este día.</div>}
-      {Object.entries(porMetodo).map(([m,val])=>(
-        <div key={m} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f0f4f8"}}>
-          <span style={{fontSize:13,color:"#1a3c5e"}}>{m}</span>
-          <strong style={{fontSize:13,color:"#2e7d32"}}>${val.toFixed(2)}</strong>
-        </div>
-      ))}
-    </Card>
-
-    <Card title={`📋 Órdenes del día (${vDia.length})`}>
-      {vDia.length===0&&<div style={{fontSize:13,color:"#888"}}>Sin órdenes este día.</div>}
-      {vDia.map(v=>(
-        <div key={v.folio} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f0f4f8"}}>
-          <div><div style={{fontSize:13,fontWeight:600,color:"#1a3c5e"}}>{v.clienteNombre}</div><div style={{fontSize:11,color:"#888"}}>{v.folio}</div></div>
-          <strong style={{fontSize:13,color:"#1a3c5e"}}>${v.total.toFixed(2)}</strong>
-        </div>
-      ))}
-    </Card>
-  </div>);
-}
-
 function MisIncentivos({ventas,empleadas,sesion,cfgInc}){
   const mesAct=mesK(new Date());
   const {meta,ventaMes,vMes}=calcMetaMes(ventas,mesAct);
@@ -2589,7 +2535,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         {tab==="bonos"
           ?<MisIncentivos ventas={ventas} empleadas={empleadas} sesion={sesion} cfgInc={cfgInc||INCENTIVOS_DEFAULT[0]}/>
           :tab==="resumen"
-            ?<ResumenVentas ventas={ventas}/>
+            ?<ResumenDia ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja}/>
           :filtrados.length===0
             ?<div style={{textAlign:"center",padding:"40px 20px",color:"#aaa"}}><div style={{fontSize:48,marginBottom:8}}>{tab==="entregar"?"🎉":"📋"}</div><div>{tab==="cobrar"?"Sin órdenes en Recibido":tab==="proceso"?"Nada en proceso":tab==="entregar"?"Nada listo para retirar":"Sin ordenes"}</div></div>
             :filtrados.map(v=><OrdenCard key={v.folio} v={v} setVentas={setVentas} addAbono={addAbono} setTicket={setTicket} upsertVenta={upsertVenta} clientes={clientes} setClientes={setClientes} upsertCliente={upsertCliente} sesion={sesion}/>)
