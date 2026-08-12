@@ -54,6 +54,7 @@ const MAQUINAS_DEFAULT = [
 ];
 // 📋 TAREAS — Fase 1: plantillas semilla (§4 de la especificación). LV=lun-vie, SAB=sábado, DOM=domingo.
 const LV=["lun","mar","mie","jue","vie"];
+const LVS=["lun","mar","mie","jue","vie","sab"]; // 🧾 lunes a sábado — turno de recepción
 const DIAS_KEY=["dom","lun","mar","mie","jue","vie","sab"]; // índice = Date.getDay()
 // 📷 TAREAS — comprime una foto (máx 800px, como pide la especificación) y la sube a Firebase Storage; devuelve la URL de descarga
 const comprimirImagen=(file,maxDim=800)=>new Promise((resolve,reject)=>{
@@ -155,6 +156,15 @@ const PLANTILLAS_TAREAS_DEFAULT=[
   {id:"w03",titulo:"Inventario completo de atrás: detergente, suavizante, quitamanchas, cloro y demás químicos",descripcion:"Registrar cantidades y dejar nota de compras",area:"atras",bloque:"semanal",diasSemana:["vie"],horaLimite:"18:00",orden:3,activa:true,requiereFoto:true},
   {id:"w04",titulo:"Inventario completo de adelante: fundas, perfume, hojas, cinta masking, cinta adhesiva, insumos de oficina",descripcion:"Registrar cantidades y dejar nota de compras",area:"adelante",bloque:"semanal",diasSemana:["vie"],horaLimite:"18:00",orden:4,activa:true,requiereFoto:true},
   {id:"w05",titulo:"Limpieza exterior de máquinas (paneles, puertas, detrás)",descripcion:null,area:"atras",bloque:"semanal",diasSemana:["vie"],horaLimite:"18:00",orden:5,activa:true,requiereFoto:false},
+  // — RECEPCIONISTA (lunes a sábado, turno 13:30–18:00) — visibles SOLO para el rol funcional "recepcionista" —
+  {id:"rec01",titulo:"Revisar las órdenes de trabajo y avisar por WhatsApp a los clientes con servicio listo para retirar",descripcion:null,area:"adelante",bloque:"apertura",diasSemana:LVS,horaLimite:"13:45",orden:1,activa:true,requiereFoto:false,rolRequerido:"recepcionista"},
+  {id:"rec02",titulo:"Facturar lo pendiente (checklist de Facturación SRI)",descripcion:null,area:"adelante",bloque:"media_jornada",diasSemana:LVS,horaLimite:"16:30",orden:2,activa:true,requiereFoto:false,rolRequerido:"recepcionista"},
+  {id:"rec03",titulo:"Limpiar su área de trabajo (mostrador y oficina)",descripcion:null,area:"adelante",bloque:"media_jornada",diasSemana:LVS,horaLimite:"16:30",orden:3,activa:true,requiereFoto:false,rolRequerido:"recepcionista"},
+  {id:"rec04",titulo:"Imprimir el Resumen del día y adjuntar el comprobante de depósito",descripcion:null,area:"adelante",bloque:"cierre",diasSemana:LVS,horaLimite:"18:00",orden:4,activa:true,requiereFoto:true,rolRequerido:"recepcionista"},
+  {id:"rec05",titulo:"Realizar el depósito del efectivo si todavía no se ha hecho",descripcion:null,area:"adelante",bloque:"cierre",diasSemana:LVS,horaLimite:"18:00",orden:5,activa:true,requiereFoto:false,rolRequerido:"recepcionista"},
+  {id:"rec06",titulo:"Dejar el piso limpio y toda la oficina ordenada antes de salir",descripcion:null,area:"adelante",bloque:"cierre",diasSemana:LVS,horaLimite:"18:00",orden:6,activa:true,requiereFoto:false,rolRequerido:"recepcionista"},
+  {id:"rec07",titulo:"Revisar inventario de perfume, fundas e insumos de oficina — anotar o reponer lo que falte",descripcion:"Dos veces por semana: lunes y viernes",area:"adelante",bloque:"semanal",diasSemana:["lun","vie"],horaLimite:"17:00",orden:7,activa:true,requiereFoto:false,rolRequerido:"recepcionista"},
+  {id:"rec08",titulo:"Sacar la basura",descripcion:null,area:"adelante",bloque:"cierre",diasSemana:["lun","mie","vie"],horaLimite:"18:00",orden:8,activa:true,requiereFoto:false,rolRequerido:"recepcionista"},
 ];
 // 🎯 INCENTIVOS: comisión por impulsación de promo + bonos por meta grupal (editable desde el panel admin)
 const INCENTIVOS_DEFAULT = [{id:"config",comisionImpulso:0.40,bonoMetaPct:1,bonoExcedentePct:10}];
@@ -951,13 +961,18 @@ function ProduccionScreen({sesion,onVolver,onLogout,ventas,setVentas,upsertVenta
 }
 
 // 📋 TAREAS — Fase 3: checklist del día, con semáforo, filtro de área y confirmación por PIN (+ foto si se requiere)
-function TareasChecklist({tareasDiarias,setTareasDiarias,upsertTareaDiaria,pins,empleadas}){
+function TareasChecklist({tareasDiarias,setTareasDiarias,upsertTareaDiaria,pins,empleadas,sesion}){
   const [filtroArea,setFiltroArea]=useState("todas");
   const [pinFor,setPinFor]=useState(null); // {tareaId, fotoUrl}
   const [fotoFor,setFotoFor]=useState(null); // tareaId esperando foto
 
+  // 🧾 Determina el rol funcional de quien está viendo el checklist (mismo criterio de normNombre que el resto de la app)
+  const miEmpleadaSesionTC=(empleadas||[]).find(e=>normNombre(e.nombre)&&normNombre(e.nombre)===normNombre(sesion?.nombre))
+    ||(empleadas||[]).find(e=>{const en=normNombre(e.nombre).split(" ")[0];const sn=normNombre(sesion?.nombre).split(" ")[0];return en&&sn&&en===sn;});
+  const miRolTC=miEmpleadaSesionTC?.rolFuncional||"general";
+
   const hoyK=fechaHoyLocal();
-  const todasHoy=tareasDiarias.filter(t=>t.fecha===hoyK);
+  const todasHoy=tareasDiarias.filter(t=>t.fecha===hoyK&&(!t.rolRequerido||t.rolRequerido===miRolTC));
   const visibles=filtroArea==="todas"?todasHoy:todasHoy.filter(t=>t.area===filtroArea);
   const ordenBloque=["apertura","media_jornada","cambio_turno","cierre","semanal"];
   const nombreDe=id=>empleadas.find(e=>String(e.id)===String(id))?.nombre||"—";
@@ -1074,7 +1089,7 @@ function TareasScreen({sesion,onVolver,onLogout,tareasDiarias,setTareasDiarias,u
         </div>
       </div>
       <div style={{padding:12,maxWidth:900,margin:"0 auto",paddingBottom:90}}>
-        <TareasChecklist tareasDiarias={tareasDiarias||[]} setTareasDiarias={setTareasDiarias} upsertTareaDiaria={upsertTareaDiaria} pins={pins||[]} empleadas={empleadas}/>
+        <TareasChecklist tareasDiarias={tareasDiarias||[]} setTareasDiarias={setTareasDiarias} upsertTareaDiaria={upsertTareaDiaria} pins={pins||[]} empleadas={empleadas} sesion={sesion}/>
       </div>
       <button onClick={()=>setShowNota(true)} style={{position:"fixed",bottom:24,right:20,background:"linear-gradient(135deg,#1a3c5e,#2563a8)",color:"#fff",border:"none",borderRadius:30,padding:"14px 20px",fontWeight:800,fontSize:14,boxShadow:"0 6px 20px rgba(0,0,0,.25)",cursor:"pointer",zIndex:50}}>📝 + Dejar nota</button>
       {showNota&&<NotaFormModal pins={pins} empleadas={empleadas} onGuardar={guardarNota} onCancelar={()=>setShowNota(false)}/>}
@@ -2290,9 +2305,14 @@ function NotasAdminPanel({notas,setNotas,upsertNota,empleadas}){
   </div>);
 }
 
+const DIAS_TAREA_OPTS=[["lun","Lun"],["mar","Mar"],["mie","Mié"],["jue","Jue"],["vie","Vie"],["sab","Sáb"],["dom","Dom"]];
+const TAREA_VACIA={titulo:"",descripcion:"",area:"general",bloque:"apertura",dias:[],horaLimite:"09:00",requiereFoto:false,rolRequerido:""};
 function TareasAdminPanel({plantillasTareas,setPlantillasTareas,upsertPlantillaTarea,tareasDiarias,empleadas}){
   const hoyK=fechaHoyLocal();
   const tareasHoy=tareasDiarias.filter(t=>t.fecha===hoyK).sort((a,b)=>a.orden-b.orden);
+  const visibles=plantillasTareas.filter(p=>!p.eliminada);
+  const [form,setForm]=useState(TAREA_VACIA);
+  const [editId,setEditId]=useState(null);
   const toggleActiva=p=>{
     setPlantillasTareas(prev=>{
       const next=prev.map(pp=>pp.id===p.id?{...pp,activa:!pp.activa}:pp);
@@ -2301,11 +2321,84 @@ function TareasAdminPanel({plantillasTareas,setPlantillasTareas,upsertPlantillaT
       return next;
     });
   };
+  const toggleDiaForm=d=>setForm(prev=>({...prev,dias:prev.dias.includes(d)?prev.dias.filter(x=>x!==d):[...prev.dias,d]}));
+  const guardar=()=>{
+    if(!form.titulo.trim()){alert("Escribe el título de la tarea");return;}
+    if(form.dias.length===0){alert("Selecciona al menos un día de la semana");return;}
+    if(editId){
+      const cambios={titulo:form.titulo.trim(),descripcion:form.descripcion.trim()||null,area:form.area,bloque:form.bloque,diasSemana:form.dias,horaLimite:form.horaLimite,requiereFoto:!!form.requiereFoto,rolRequerido:form.rolRequerido||null};
+      setPlantillasTareas(prev=>{
+        const next=prev.map(p=>p.id===editId?{...p,...cambios}:p);
+        const updated=next.find(p=>p.id===editId);
+        if(updated&&upsertPlantillaTarea)upsertPlantillaTarea({...updated,_updatedAt:new Date().toISOString()});
+        return next;
+      });
+    }else{
+      const ordenMax=Math.max(0,...visibles.filter(p=>p.bloque===form.bloque).map(p=>p.orden||0));
+      const np={id:"custom_"+Date.now(),titulo:form.titulo.trim(),descripcion:form.descripcion.trim()||null,area:form.area,bloque:form.bloque,diasSemana:form.dias,horaLimite:form.horaLimite,orden:ordenMax+1,activa:true,requiereFoto:!!form.requiereFoto,rolRequerido:form.rolRequerido||null};
+      setPlantillasTareas(prev=>[...prev,np]);
+      if(upsertPlantillaTarea)upsertPlantillaTarea({...np,_updatedAt:new Date().toISOString()});
+    }
+    setForm(TAREA_VACIA);setEditId(null);
+  };
+  const editar=p=>{
+    setEditId(p.id);
+    setForm({titulo:p.titulo||"",descripcion:p.descripcion||"",area:p.area||"general",bloque:p.bloque||"apertura",dias:p.diasSemana||[],horaLimite:p.horaLimite||"09:00",requiereFoto:!!p.requiereFoto,rolRequerido:p.rolRequerido||""});
+  };
+  const cancelar=()=>{setEditId(null);setForm(TAREA_VACIA);};
+  const eliminar=p=>{
+    if(!window.confirm(`¿Eliminar la tarea "${p.titulo}"? Ya no se volverá a generar, pero las de días anteriores quedan intactas.`))return;
+    setPlantillasTareas(prev=>prev.filter(x=>x.id!==p.id));
+    if(upsertPlantillaTarea)upsertPlantillaTarea({...p,activa:false,eliminada:true,_updatedAt:new Date().toISOString()});
+    if(editId===p.id)cancelar();
+  };
   const bloques=["apertura","media_jornada","cambio_turno","cierre","semanal"];
   const nombreDe=id=>empleadas.find(e=>String(e.id)===String(id))?.nombre||"—";
   return(<div style={S.panel}>
     <h2 style={S.ptitle}>📋 Tareas diarias</h2>
-    <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ Fase 1: catálogo de plantillas + generación automática diaria. La pantalla de checklist para las empleadas (con PIN) llega en la siguiente fase.</div>
+    <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ Crea, edita o elimina las tareas del checklist diario. Se generan solas cada día según los días de la semana que marques aquí.</div>
+
+    <Card title={editId?"✏️ Editar tarea":"➕ Nueva tarea"}>
+      <div style={{marginBottom:8}}><label style={S.lbl}>Título *</label><input style={S.inp} placeholder="ej. Revisar el correo del negocio" value={form.titulo} onChange={e=>setForm({...form,titulo:e.target.value})}/></div>
+      <div style={{marginBottom:8}}><label style={S.lbl}>Descripción (opcional)</label><input style={S.inp} placeholder="Detalle adicional..." value={form.descripcion} onChange={e=>setForm({...form,descripcion:e.target.value})}/></div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+        <div><label style={S.lbl}>Área</label>
+          <select style={S.inp} value={form.area} onChange={e=>setForm({...form,area:e.target.value})}>
+            <option value="general">👥 General</option>
+            <option value="atras">🧺 Atrás</option>
+            <option value="adelante">🛎️ Adelante</option>
+          </select>
+        </div>
+        <div><label style={S.lbl}>Bloque</label>
+          <select style={S.inp} value={form.bloque} onChange={e=>setForm({...form,bloque:e.target.value})}>
+            {bloques.map(b=><option key={b} value={b}>{BLOQUE_LBL[b]||b}</option>)}
+          </select>
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+        <div><label style={S.lbl}>Hora límite</label><input type="time" style={S.inp} value={form.horaLimite} onChange={e=>setForm({...form,horaLimite:e.target.value})}/></div>
+        <div><label style={S.lbl}>Solo para el rol</label>
+          <select style={S.inp} value={form.rolRequerido} onChange={e=>setForm({...form,rolRequerido:e.target.value})}>
+            <option value="">Todo el equipo</option>
+            <option value="recepcionista">🧾 Solo Recepcionista</option>
+          </select>
+        </div>
+      </div>
+      <label style={S.lbl}>¿Qué días se genera?</label>
+      <div style={{display:"flex",gap:5,marginBottom:8,flexWrap:"wrap"}}>
+        {DIAS_TAREA_OPTS.map(([k,l])=>(
+          <button key={k} style={{...S.pill,fontSize:11,padding:"5px 10px",...(form.dias.includes(k)?S.pillA:{})}} onClick={()=>toggleDiaForm(k)}>{l}</button>
+        ))}
+      </div>
+      <label style={{display:"flex",alignItems:"center",gap:8,fontSize:13,marginBottom:10,cursor:"pointer"}}>
+        <input type="checkbox" checked={form.requiereFoto} onChange={e=>setForm({...form,requiereFoto:e.target.checked})}/>
+        📷 Requiere foto para completarse
+      </label>
+      <div style={{display:"flex",gap:8}}>
+        <button style={{...S.btnP,flex:1}} onClick={guardar}>{editId?"✓ Guardar cambios":"➕ Agregar tarea"}</button>
+        {editId&&<button style={S.btnC} onClick={cancelar}>Cancelar</button>}
+      </div>
+    </Card>
 
     <Card title={`✅ Tareas generadas hoy (${tareasHoy.length})`}>
       {tareasHoy.length===0&&<div style={{fontSize:13,color:"#888"}}>Todavía no se han generado tareas para hoy — se crean solas al abrir la app.</div>}
@@ -2325,17 +2418,21 @@ function TareasAdminPanel({plantillasTareas,setPlantillasTareas,upsertPlantillaT
     </Card>
 
     {bloques.map(b=>{
-      const deEsteBloque=plantillasTareas.filter(p=>p.bloque===b).sort((a,b2)=>a.orden-b2.orden);
+      const deEsteBloque=visibles.filter(p=>p.bloque===b).sort((a,b2)=>a.orden-b2.orden);
       if(deEsteBloque.length===0)return null;
       return(
         <Card key={b} title={BLOQUE_LBL[b]||b}>
           {deEsteBloque.map(p=>(
-            <div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #f0f4f8"}}>
-              <div>
+            <div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #f0f4f8",gap:8}}>
+              <div style={{minWidth:0}}>
                 <div style={{fontSize:13,fontWeight:600,color:p.activa?"#1a3c5e":"#bbb"}}>{p.titulo}</div>
-                <div style={{fontSize:11,color:"#888"}}>{AREA_LBL[p.area]||p.area} · {(p.diasSemana||[]).join(", ")} · límite {p.horaLimite}{p.requiereFoto?" · 📷 requiere foto":""}</div>
+                <div style={{fontSize:11,color:"#888"}}>{AREA_LBL[p.area]||p.area} · {(p.diasSemana||[]).join(", ")} · límite {p.horaLimite}{p.requiereFoto?" · 📷 requiere foto":""}{p.rolRequerido?" · 🧾 Solo "+p.rolRequerido:""}</div>
               </div>
-              <button style={{...S.btnS,fontSize:11}} onClick={()=>toggleActiva(p)}>{p.activa?"✅ Activa":"⏸️ Inactiva"}</button>
+              <div style={{display:"flex",gap:5,flexShrink:0}}>
+                <button style={{...S.btnS,fontSize:11}} onClick={()=>editar(p)}>✏️</button>
+                <button style={{...S.btnS,fontSize:11}} onClick={()=>toggleActiva(p)}>{p.activa?"✅":"⏸️"}</button>
+                <button style={S.btnR} onClick={()=>eliminar(p)}>✕</button>
+              </div>
             </div>
           ))}
         </Card>
@@ -5265,6 +5362,15 @@ const { data: eventosProduccion, setData: setEventosProduccion, upsert: upsertEv
 const { data: cargas, setData: setCargas, upsert: upsertCarga } = useCollection("cargas", "ll_cargas", []);
 // 📋 TAREAS — Fase 1: plantillas de tareas + generación diaria
 const { data: plantillasTareas, setData: setPlantillasTareas, upsert: upsertPlantillaTarea } = useCollection("plantillasTareas", "ll_plantillas_tareas", PLANTILLAS_TAREAS_DEFAULT);
+// 🔧 Auto-reparación: si faltan plantillas semilla nuevas en Firestore (ej. se agregaron tareas nuevas después de que ya existía la colección), las completa sin duplicar ni tocar las que ya existen.
+useEffect(()=>{
+  if(!Array.isArray(plantillasTareas))return;
+  const faltantes=PLANTILLAS_TAREAS_DEFAULT.filter(def=>!plantillasTareas.some(p=>p.id===def.id));
+  if(faltantes.length===0)return;
+  setPlantillasTareas(prev=>[...prev,...faltantes]);
+  faltantes.forEach(p=>{if(upsertPlantillaTarea)upsertPlantillaTarea({...p,_updatedAt:new Date().toISOString()});});
+  // eslint-disable-next-line
+},[plantillasTareas.length]);
 const { data: tareasDiarias, setData: setTareasDiarias, upsert: upsertTareaDiaria } = useCollection("tareasDiarias", "ll_tareas_diarias", []);
 // 📝 NOTAS — canal para que las empleadas dejen pendientes/novedades que revisa la admin
 const { data: notas, setData: setNotas, upsert: upsertNota } = useCollection("notas", "ll_notas", []);
@@ -5306,7 +5412,7 @@ useEffect(()=>{
   if(activas.length>0){
     const nuevas=activas.map(p=>({
       id:hoyK+"_"+p.id,fecha:hoyK,plantillaId:p.id,titulo:p.titulo,descripcion:p.descripcion||null,
-      area:p.area,bloque:p.bloque,horaLimite:p.horaLimite,orden:p.orden,requiereFoto:!!p.requiereFoto,
+      area:p.area,bloque:p.bloque,horaLimite:p.horaLimite,orden:p.orden,requiereFoto:!!p.requiereFoto,rolRequerido:p.rolRequerido||null,
       estado:"pendiente",completadaPor:null,completadaEn:null,atrasada:false,fotoUrl:null,observacion:null,
     }));
     setTareasDiarias(prev=>[...prev,...nuevas]);
