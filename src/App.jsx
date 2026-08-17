@@ -36,6 +36,8 @@ const INSUMOS_DEFAULT = [
   {id:2,nombre:"Suavizante (L)",stock:5,min:2,unidad:"L"},
   {id:3,nombre:"Bolsas de empaque",stock:100,min:20,unidad:"pzas"},
 ];
+// 🛍️ PRODUCTOS: artículos que se venden directamente (no pasan por Producción). Cada venta descuenta el stock solo.
+const PRODUCTOS_DEFAULT = [];
 const EMPLEADAS_DEFAULT = [
   {id:1,nombre:"Ana Garcia",activa:true,metaVentas:20,montoBonus:20},
   {id:2,nombre:"Maria Lopez",activa:true,metaVentas:20,montoBonus:20},
@@ -2530,7 +2532,7 @@ function PinsAdmin({empleadas,pins,setPins,upsertPin}){
   </div>);
 }
 
-function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta,upsertSalida,upsertCliente,upsertCaja,cupones,setCupones,upsertCupon,promos,cfgInc,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga,pins,eventosProduccion,setEventosProduccion,upsertEvento}){
+function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta,upsertSalida,upsertCliente,upsertCaja,cupones,setCupones,upsertCupon,promos,cfgInc,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga,pins,eventosProduccion,setEventosProduccion,upsertEvento,productos,setProductos,upsertProducto}){
   const [tab,setTab]=useState("hoy");const [busq,setBusq]=useState("");
   const [showNueva,setShowNueva]=useState(false);
   const [filtroTile,setFiltroTile]=useState(null); // 🔎 filtro rápido al tocar un contador (recibido/proceso/listo/entregado_pend)
@@ -2649,7 +2651,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
               <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e"}}>➕ Nueva Venta</div>
               <button style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:"#888"}} onClick={()=>setShowNueva(false)}>✕</button>
             </div>
-            <NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={v=>{setShowNueva(false);setTicket(v);}} servicios={servicios} sesion={sesion} upsertVenta={upsertVenta} upsertCliente={upsertCliente} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos}/>
+            <NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={v=>{setShowNueva(false);setTicket(v);}} servicios={servicios} sesion={sesion} upsertVenta={upsertVenta} upsertCliente={upsertCliente} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto}/>
           </div>
         </div>
       )}
@@ -2781,6 +2783,41 @@ function ServicioBuscador({servId,piezas,servicios,onServChange,onPiezasChange})
   );
 }
 
+// 🛍️ PRODUCTOS — buscador de productos para agregarlos a una venta (muestra stock disponible; no deja pasar de lo que hay)
+function ProductoBuscador({productoId,piezas,productos,onProdChange,onPiezasChange}){
+  const selP=productos.find(p=>p.id===productoId)||productos[0];
+  const [busq,setBusq]=useState("");
+  const [open,setOpen]=useState(false);
+  const filtrados=busq?productos.filter(p=>p.nombre.toLowerCase().includes(busq.toLowerCase())).slice(0,8):productos.slice(0,8);
+  return(
+    <div style={{display:"flex",gap:6,alignItems:"flex-start",position:"relative"}}>
+      <div style={{flex:1,position:"relative"}}>
+        <input
+          style={{...S.inp}}
+          placeholder="Escribir para buscar producto..."
+          value={open?busq:(selP?`${selP.nombre} — $${(selP.precio||0).toFixed(2)} (stock ${selP.stock})`:"Sin productos en catálogo")}
+          onFocus={()=>{setOpen(true);setBusq("");}}
+          onChange={e=>{setBusq(e.target.value);setOpen(true);}}
+          onBlur={()=>setTimeout(()=>setOpen(false),200)}
+        />
+        {open&&(
+          <div style={{position:"absolute",top:"100%",left:0,right:0,background:"#fff",border:"1.5px solid #4db6e4",borderRadius:8,zIndex:50,boxShadow:"0 4px 16px rgba(0,0,0,.15)",maxHeight:220,overflowY:"auto"}}>
+            {filtrados.length===0?<div style={{padding:"10px 14px",color:"#aaa",fontSize:13}}>Sin resultados</div>
+              :filtrados.map(p=>(
+              <div key={p.id} style={{padding:"10px 14px",cursor:p.stock>0?"pointer":"not-allowed",opacity:p.stock>0?1:0.5,borderBottom:"1px solid #f0f4f8",fontSize:13,background:p.id===productoId?"#e8f5fd":"#fff"}}
+                onMouseDown={()=>{if(p.stock>0){onProdChange(p.id);setBusq("");setOpen(false);}}}>
+                <div style={{fontWeight:600}}>{p.nombre}</div>
+                <div style={{color:p.stock>0?"#4db6e4":"#c62828",fontWeight:700,fontSize:12}}>${(p.precio||0).toFixed(2)} · stock {p.stock}{p.stock<=0?" — agotado":""}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <input type="number" min={1} max={selP?.stock||undefined} style={{...S.inp,width:56,textAlign:"center"}} value={piezas} onChange={e=>onPiezasChange(e.target.value)}/>
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // 🎁 PROMOS DEL DÍA — EDITA AQUÍ TU LISTA
 // dias: null = todos los días · [1]=lunes, [2]=martes, [3]=miércoles,
@@ -2890,7 +2927,7 @@ function PromosDelDia({promos,servicios,onAgregar,onCerrar}){
   );
 }
 
-function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,servicios,sesion,upsertVenta,upsertCliente,cupones=[],setCupones,upsertCupon,promos}){
+function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,servicios,sesion,upsertVenta,upsertCliente,cupones=[],setCupones,upsertCupon,promos,productos=[],setProductos,upsertProducto}){
   const man=new Date();man.setDate(man.getDate()+1);
   const [cQ,setCQ]=useState("");const [cId,setCId]=useState(null);
   const [nC,setNC]=useState({nombre:"",tel:"",cedula:"",email:"",rfc:"",direccion:"",nacimiento:""});
@@ -2904,7 +2941,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
       })
     ||null; // 🔒 si no hay coincidencia segura por nombre, NO adivinar por ID (eso causaba el bug de mostrar a la persona equivocada)
   const [empId,setEmpId]=useState(empDef?.id||empleadas[0]?.id||null);
-  const [items,setItems]=useState([{servId:servicios[0]?.id,piezas:1,custom:false,lC:"",pC:""}]);
+  const [items,setItems]=useState([{servId:servicios[0]?.id,piezas:1,custom:false,esProducto:false,productoId:null,lC:"",pC:""}]);
   const [entrega,setEntrega]=useState((()=>{const off=man.getTimezoneOffset();const l=new Date(man.getTime()-off*60000);return l.toISOString().split("T")[0];})());
   const [notas,setNotas]=useState("");const [err,setErr]=useState("");
   const [tPago,setTPago]=useState("completo");const [metodo,setMetodo]=useState("Efectivo");const [abono,setAbono]=useState("");
@@ -2917,19 +2954,38 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
   const [descCumple,setDescCumple]=useState(false); // 🎂 10% cumpleaños
   const cFilt=clientes.filter(c=>c.nombre.toLowerCase().includes(cQ.toLowerCase())||(c.tel&&c.tel.includes(cQ))).slice(0,5);
   const selC=clientes.find(c=>c.id===cId);
-  const calcT=()=>items.reduce((a,it)=>{if(it.custom)return a+(parseFloat(it.pC)||0)*(it.piezas||1);const s=servicios.find(s=>s.id===it.servId);return a+(s?s.precio*(it.piezas||1):0);},0);
-  const addIt=()=>setItems([...items,{servId:servicios[0]?.id,piezas:1,custom:false,lC:"",pC:""}]);
+  // 🛍️ Productos activos disponibles para vender (catálogo, sin los eliminados)
+  const productosActivos=(productos||[]).filter(p=>!p.eliminada);
+  const calcT=()=>items.reduce((a,it)=>{
+    if(it.custom)return a+(parseFloat(it.pC)||0)*(it.piezas||1);
+    if(it.esProducto){const p=productosActivos.find(x=>x.id===it.productoId);return a+(p?(p.precio||0)*(it.piezas||1):0);}
+    const s=servicios.find(s=>s.id===it.servId);return a+(s?s.precio*(it.piezas||1):0);
+  },0);
+  const addIt=()=>setItems([...items,{servId:servicios[0]?.id,piezas:1,custom:false,esProducto:false,productoId:null,lC:"",pC:""}]);
   const remIt=i=>setItems(items.filter((_,idx)=>idx!==i));
   const updIt=(i,f,v)=>{
     const c=[...items];
     if(f==="piezas"){
-      const s=servicios.find(x=>x.id===c[i].servId);
-      if(s?.limite&&v>s.limite){
-        alert(`⚠️ "${s.label}" tiene un máximo de ${s.limite} por venta.`);
-        v=s.limite;
+      if(c[i].esProducto){
+        const p=productosActivos.find(x=>x.id===c[i].productoId);
+        if(p&&v>p.stock){
+          alert(`⚠️ Solo quedan ${p.stock} unidad(es) de "${p.nombre}" en stock.`);
+          v=p.stock;
+        }
+      }else{
+        const s=servicios.find(x=>x.id===c[i].servId);
+        if(s?.limite&&v>s.limite){
+          alert(`⚠️ "${s.label}" tiene un máximo de ${s.limite} por venta.`);
+          v=s.limite;
+        }
       }
     }
     c[i]={...c[i],[f]:v};
+    setItems(c);
+  };
+  const setTipoItem=(i,tipo)=>{
+    const c=[...items];
+    c[i]={...c[i],custom:tipo==="custom",esProducto:tipo==="producto"};
     setItems(c);
   };
   const validarCupon=()=>{
@@ -3012,12 +3068,34 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
     let abs=[];
     if(tPago==="completo")abs=[{monto:total,metodo,fecha:new Date().toISOString(),cobradoPorId:sesion?.id,cobradoPorNombre:sesion?.nombre}];
     else if(tPago==="abono")abs=[{monto:parseFloat(abono),metodo,fecha:new Date().toISOString(),cobradoPorId:sesion?.id,cobradoPorNombre:sesion?.nombre}];
+    // 🛍️ Si TODOS los renglones de la venta son productos, no pasa por Producción: se factura y sale directo (queda "entregado" de una vez)
+    const todosProductos=items.length>0&&items.every(it=>it.esProducto);
     const v={folio:folio(),fecha:new Date().toISOString(),entrega,clienteId:cid,clienteNombre:cNom,clienteTel:cTel,clienteDireccion:cDir,empleadaId:empId,
       impulsos, // 🎯 quién impulsó qué promos (empleadaId ya viaja en la venta)
-      items:[...items.map(it=>{if(it.custom)return{...it,label:it.lC||"Servicio personalizado",precio:parseFloat(it.pC)||0};const s=servicios.find(s=>s.id===it.servId);return{...it,label:s?.label,precio:s?.precio};}),...(descC>0?[{custom:true,piezas:1,label:"🎂 DESCUENTO CUMPLEAÑOS (-10%)",precio:-descC}]:[])],
-      pago:metodo,total,abonos:abs,pagada:tPago==="completo",notas,checkMsgRetiro:false,checkMsgEntrega:false,facturadoSRI:false,estado:"recibido",
+      items:[...items.map(it=>{
+        if(it.custom)return{...it,label:it.lC||"Servicio personalizado",precio:parseFloat(it.pC)||0};
+        if(it.esProducto){const p=productosActivos.find(x=>x.id===it.productoId);return{...it,label:p?.nombre||"Producto",precio:p?.precio||0};}
+        const s=servicios.find(s=>s.id===it.servId);return{...it,label:s?.label,precio:s?.precio};
+      }),...(descC>0?[{custom:true,piezas:1,label:"🎂 DESCUENTO CUMPLEAÑOS (-10%)",precio:-descC}]:[])],
+      pago:metodo,total,abonos:abs,pagada:tPago==="completo",notas,checkMsgRetiro:false,checkMsgEntrega:false,facturadoSRI:false,estado:todosProductos?"entregado":"recibido",
       cuponId:cupApl?.id||null};
     setVentas([v,...ventas]);if(upsertVenta)upsertVenta(v);
+    // 🛍️ Descuenta del stock cada producto vendido en esta venta
+    const prodsVendidos=items.filter(it=>it.esProducto&&it.productoId);
+    if(prodsVendidos.length>0&&setProductos){
+      setProductos(prev=>{
+        const next=prev.map(p=>{
+          const vend=prodsVendidos.find(it=>it.productoId===p.id);
+          if(!vend)return p;
+          return{...p,stock:Math.max(0,(p.stock||0)-(vend.piezas||1))};
+        });
+        prodsVendidos.forEach(it=>{
+          const updated=next.find(p=>p.id===it.productoId);
+          if(updated&&upsertProducto)upsertProducto({...updated,_updatedAt:new Date().toISOString()});
+        });
+        return next;
+      });
+    }
     if(cupApl){ // 🎟️ quemar el cupón: un solo uso, sincronizado en la nube
       const usado={...cupApl,estado:"usado",usadoEn:v.folio,usadoFecha:new Date().toISOString()};
       if(setCupones)setCupones(prev=>prev.map(c=>c.id===cupApl.id?usado:c));
@@ -3043,9 +3121,10 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
   const descMonto=clienteCumple&&descCumple?+(totalBruto*DESC_CUMPLE).toFixed(2):0;
   const total=+(totalBruto-descMonto).toFixed(2);
   const detItems=items.map(it=>{
-    const s=it.custom?null:servicios.find(s=>s.id===it.servId);
-    const precio=it.custom?(parseFloat(it.pC)||0):(s?.precio||0);
-    return{label:it.custom?(it.lC||"Personalizado"):(s?.label||""),sub:+(precio*(it.piezas||1)).toFixed(2)};
+    const s=(it.custom||it.esProducto)?null:servicios.find(s=>s.id===it.servId);
+    const p=it.esProducto?productosActivos.find(x=>x.id===it.productoId):null;
+    const precio=it.custom?(parseFloat(it.pC)||0):it.esProducto?(p?.precio||0):(s?.precio||0);
+    return{label:it.custom?(it.lC||"Personalizado"):it.esProducto?(p?.nombre||"Producto"):(s?.label||""),sub:+(precio*(it.piezas||1)).toFixed(2)};
   });
   const valorTotal=+detItems.filter(d=>d.sub>0).reduce((a,d)=>a+d.sub,0).toFixed(2);
   const descPromos=+(-detItems.filter(d=>d.sub<0).reduce((a,d)=>a+d.sub,0)).toFixed(2);
@@ -3090,9 +3169,10 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
       <Card title="🧺 Servicios">
         {items.map((it,i)=>(
           <div key={i} style={{marginBottom:10,background:"#f8fbfd",borderRadius:8,padding:10,border:"1px solid #e8f0f7"}}>
-            <div style={{display:"flex",gap:6,marginBottom:6,alignItems:"center"}}>
-              <button style={{...S.pill,fontSize:11,padding:"4px 10px",...(it.custom?{}:S.pillA)}} onClick={()=>updIt(i,"custom",false)}>Del menu</button>
-              <button style={{...S.pill,fontSize:11,padding:"4px 10px",...(it.custom?S.pillA:{})}} onClick={()=>updIt(i,"custom",true)}>Personalizado</button>
+            <div style={{display:"flex",gap:6,marginBottom:6,alignItems:"center",flexWrap:"wrap"}}>
+              <button style={{...S.pill,fontSize:11,padding:"4px 10px",...(!it.custom&&!it.esProducto?S.pillA:{})}} onClick={()=>setTipoItem(i,"servicio")}>Del menu</button>
+              <button style={{...S.pill,fontSize:11,padding:"4px 10px",...(it.esProducto?S.pillA:{})}} onClick={()=>setTipoItem(i,"producto")}>🛍️ Producto</button>
+              <button style={{...S.pill,fontSize:11,padding:"4px 10px",...(it.custom?S.pillA:{})}} onClick={()=>setTipoItem(i,"custom")}>Personalizado</button>
               {items.length>1&&<button style={{...S.btnR,marginLeft:"auto"}} onClick={()=>remIt(i)}>✕</button>}
             </div>
             {it.custom?(
@@ -3101,6 +3181,10 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
                 <input type="number" style={{...S.inp,width:80}} placeholder="$Precio" value={it.pC} onChange={e=>updIt(i,"pC",e.target.value)}/>
                 <input type="number" min={1} style={{...S.inp,width:56,textAlign:"center"}} value={it.piezas} onChange={e=>updIt(i,"piezas",parseInt(e.target.value)||1)}/>
               </div>
+            ):it.esProducto?(
+              productosActivos.length===0
+                ?<div style={{fontSize:12,color:"#c62828"}}>Aún no hay productos en el catálogo. Ve a 🛍️ Productos en el panel admin para agregar el primero.</div>
+                :<ProductoBuscador productoId={it.productoId} piezas={it.piezas} productos={productosActivos} onProdChange={v=>updIt(i,"productoId",v)} onPiezasChange={v=>updIt(i,"piezas",parseInt(v)||1)}/>
             ):(
               <ServicioBuscador servId={it.servId} piezas={it.piezas} servicios={servicios} onServChange={v=>updIt(i,"servId",v)} onPiezasChange={v=>updIt(i,"piezas",parseInt(v)||1)}/>
             )}
@@ -3590,6 +3674,70 @@ function Reportes({ventas,empleadas,salidasCaja}){
   );
 }
 
+// 🛍️ PRODUCTOS — catálogo de artículos que se venden directamente (sin pasar por Producción). Stock editable a mano o descontado solo al vender.
+function ProductosAdmin({productos,setProductos,upsertProducto}){
+  const [nv,setNv]=useState({nombre:"",precio:"",stock:"",min:"1"});
+  const activos=productos.filter(p=>!p.eliminada);
+  const add=()=>{
+    if(!nv.nombre.trim()||!nv.precio){alert("Escribe el nombre y el precio del producto");return;}
+    const np={id:"prod_"+Date.now(),nombre:nv.nombre.trim(),precio:parseFloat(nv.precio)||0,stock:parseFloat(nv.stock)||0,min:parseFloat(nv.min)||1,activa:true};
+    setProductos(prev=>[...prev,np]);
+    if(upsertProducto)upsertProducto({...np,_updatedAt:new Date().toISOString()});
+    setNv({nombre:"",precio:"",stock:"",min:"1"});
+  };
+  const upd=(id,f,v)=>setProductos(prev=>{
+    const next=prev.map(p=>p.id===id?{...p,[f]:v}:p);
+    const updated=next.find(p=>p.id===id);
+    if(updated&&upsertProducto)upsertProducto({...updated,_updatedAt:new Date().toISOString()});
+    return next;
+  });
+  const del=id=>{
+    if(!window.confirm("¿Eliminar este producto? Ya no se podrá agregar a nuevas ventas."))return;
+    setProductos(prev=>{
+      const next=prev.map(p=>p.id===id?{...p,eliminada:true}:p);
+      const borrado=next.find(p=>p.id===id);
+      if(borrado&&upsertProducto)upsertProducto({...borrado,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+  };
+  const bajo=activos.filter(p=>p.stock<=p.min);
+  return(<div style={S.panel}>
+    <h2 style={S.ptitle}>🛍️ Productos</h2>
+    <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ Estos productos se pueden agregar a una venta como "🛍️ Producto". El stock se descuenta solo al momento de vender, y no pasan por el módulo de Producción — se facturan y salen directo.</div>
+    {bajo.length>0&&<div style={S.alrt}>⚠️ Stock bajo: {bajo.map(p=>p.nombre).join(", ")}</div>}
+    <Card title="📋 Catálogo">
+      {activos.length===0&&<div style={S.empty}>Aún no has agregado productos.</div>}
+      {activos.map(p=>(<div key={p.id} style={S.vcard}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div><div style={{fontWeight:700}}>{p.nombre}</div><div style={{fontSize:12,color:"#4db6e4",fontWeight:700}}>${(p.precio||0).toFixed(2)}</div></div>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <div style={{...S.badge,background:p.stock<=p.min?"#ffebee":"#e8f5e9",color:p.stock<=p.min?"#c62828":"#2e7d32",fontSize:14,fontWeight:700}}>{p.stock} u.</div>
+            <button style={S.btnR} onClick={()=>del(p.id)}>✕</button>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:6,marginTop:8,alignItems:"center",flexWrap:"wrap"}}>
+          <button style={S.btnS} onClick={()=>upd(p.id,"stock",Math.max(0,p.stock-1))}>−</button>
+          <input type="number" style={{...S.inp,width:70,textAlign:"center",padding:"4px 6px"}} value={p.stock} onChange={e=>upd(p.id,"stock",parseFloat(e.target.value)||0)}/>
+          <button style={S.btnS} onClick={()=>upd(p.id,"stock",p.stock+1)}>+</button>
+          <label style={{fontSize:11,color:"#888"}}>Precio:</label>
+          <input type="number" style={{...S.inp,width:80,padding:"4px 6px"}} value={p.precio} onChange={e=>upd(p.id,"precio",parseFloat(e.target.value)||0)}/>
+          <label style={{fontSize:11,color:"#888"}}>Mín:</label>
+          <input type="number" style={{...S.inp,width:60,padding:"4px 6px"}} value={p.min} onChange={e=>upd(p.id,"min",parseFloat(e.target.value)||0)}/>
+        </div>
+      </div>))}
+    </Card>
+    <Card title="➕ Agregar producto">
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <input style={{...S.inp,gridColumn:"1/-1"}} placeholder="Nombre del producto" value={nv.nombre} onChange={e=>setNv({...nv,nombre:e.target.value})}/>
+        <input type="number" style={S.inp} placeholder="Precio de venta" value={nv.precio} onChange={e=>setNv({...nv,precio:e.target.value})}/>
+        <input type="number" style={S.inp} placeholder="Stock inicial" value={nv.stock} onChange={e=>setNv({...nv,stock:e.target.value})}/>
+        <input type="number" style={S.inp} placeholder="Mínimo (alerta)" value={nv.min} onChange={e=>setNv({...nv,min:e.target.value})}/>
+      </div>
+      <button style={{...S.btnP,marginTop:10}} onClick={add}>Agregar producto</button>
+    </Card>
+  </div>);
+}
+
 function Inventario({inventario,setInventario,upsertInventario}){
   const [nv,setNv]=useState({nombre:"",stock:0,min:1,unidad:"pzas"});
   const activos=inventario.filter(i=>!i.eliminada);
@@ -3892,6 +4040,15 @@ function Gastos({gastos,setGastos,sesion,upsertGasto}){
   const del=id=>{if(!window.confirm("Eliminar?"))return;setGastos(prev=>{const next=prev.map(g=>g.id===id?{...g,eliminada:true}:g);const borrado=next.find(g=>g.id===id);if(borrado&&upsertGasto)upsertGasto({...borrado,_updatedAt:new Date().toISOString()});return next;});};
   const fil=gastos.filter(g=>!g.eliminada&&(!fMes||fechaLocal(g.fecha).startsWith(fMes))&&(fCat==="Todas"||g.categoria===fCat));
   const tot=fil.reduce((a,g)=>a+g.monto,0);
+  const descargarGastosCSV=()=>{
+    if(fil.length===0){alert("No hay gastos para descargar con los filtros actuales.");return;}
+    const enc=["Fecha","Descripción","Categoría","Proveedor","N° Factura","Monto","Método de pago","Registrado por","Notas"];
+    const filas=fil.map(g=>[fmtD(g.fecha),g.descripcion||"",g.categoria||"",g.proveedor||"",g.numeroFactura||"","$"+g.monto.toFixed(2),g.metodoPago||"",g.registradoPor||"",g.notas||""]);
+    filas.push(["","","","","","TOTAL: $"+tot.toFixed(2),"","",""]);
+    const csv=[enc,...filas].map(f=>f.map(c=>'"'+String(c).replace(/"/g,'\\"')+'"').join(",")).join("\n");
+    const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
+    const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="gastos-"+(fCat!=="Todas"?fCat.replace(/[^a-z0-9]/gi,"_")+"-":"")+(fMes||"todos")+".csv";a.click();
+  };
   return(<div style={S.panel}>
     <h2 style={S.ptitle}>🛒 Gastos & Facturas</h2>
     <div style={S.kgrid}>
@@ -3903,6 +4060,7 @@ function Gastos({gastos,setGastos,sesion,upsertGasto}){
         <div><label style={S.lbl}>Mes</label><input type="month" style={S.inp} value={fMes} onChange={e=>setFMes(e.target.value)}/></div>
         <div><label style={S.lbl}>Categoria</label><select style={S.inp} value={fCat} onChange={e=>setFCat(e.target.value)}><option>Todas</option>{CATS.map(c=><option key={c}>{c}</option>)}</select></div>
       </div>
+      <button style={{...S.btnP,marginTop:10}} onClick={descargarGastosCSV}>📥 Descargar CSV ({fil.length} gasto{fil.length!==1?"s":""})</button>
     </Card>
     <Card title="➕ Registrar gasto">
       {err&&<div style={S.err}>{err}</div>}
@@ -5335,6 +5493,7 @@ function AppContent({sesion,onLogout}){
 const { data: clientes, setData: setClientes, upsert: upsertCliente } = useCollection("clientes", KEYS.clientes, []);
 const { data: empleadas, setData: setEmpleadas, upsert: upsertEmpleada } = useCollection("empleadas", KEYS.empleadas, EMPLEADAS_DEFAULT);
 const { data: inventario, setData: setInventario, upsert: upsertInventario } = useCollection("inventario", KEYS.inventario, INSUMOS_DEFAULT);
+const { data: productos, setData: setProductos, upsert: upsertProducto } = useCollection("productos", "ll_productos", PRODUCTOS_DEFAULT);
 const { data: servicios, setData: setServicios, upsert: upsertServicio } = useCollection("servicios", KEYS.servicios, SERVICIOS_DEFAULT);
 const { data: gastos, setData: setGastos, upsert: upsertGasto } = useCollection("gastos", "ll_gastos", []);
 const { data: depositos, setData: setDepositos, upsert: upsertDeposito } = useCollection("depositos", "ll_depositos", []);
@@ -5491,14 +5650,14 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
     empleadas={empleadas}
     upsertCaja={upsertCaja}
   />;
-  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={serviciosActivos} sesion={sesion} addAbono={addAbono} onLogout={onLogout} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} upsertVenta={upsertVenta} upsertSalida={upsertSalida} upsertCliente={upsertCliente} upsertCaja={upsertCaja} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos} cfgInc={cfgInc} maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga} pins={pins} eventosProduccion={eventosProduccion} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento}/>;
+  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={serviciosActivos} sesion={sesion} addAbono={addAbono} onLogout={onLogout} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} upsertVenta={upsertVenta} upsertSalida={upsertSalida} upsertCliente={upsertCliente} upsertCaja={upsertCaja} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos} cfgInc={cfgInc} maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga} pins={pins} eventosProduccion={eventosProduccion} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto}/>;
   const tabs=[
     {id:"ventas",icon:"🧾",l:"Venta"},{id:"historial",icon:"📋",l:"Historial"},
     {id:"pendientes",icon:"⏳",l:"Pendientes",b:pCount},{id:"bi",icon:"🚀",l:"Dashboard"},
     {id:"clientes",icon:"👥",l:"Clientes"},{id:"promosAdmin",icon:"🎁",l:"Promos"},{id:"cupones",icon:"🎟️",l:"Cupones"},{id:"resumen",icon:"📈",l:"Resumen día"},
     {id:"reportes",icon:"📊",l:"Reportes"},{id:"depositos",icon:"🏦",l:"Depósitos"},
     {id:"conciliacion",icon:"🏛️",l:"Conciliación"},
-    {id:"gastos",icon:"🛒",l:"Gastos"},{id:"inventario",icon:"📦",l:"Inventario"},
+    {id:"gastos",icon:"🛒",l:"Gastos"},{id:"inventario",icon:"📦",l:"Inventario"},{id:"productosAdmin",icon:"🛍️",l:"Productos"},
     {id:"equipo",icon:"👩",l:"Equipo"},{id:"incentivosAdmin",icon:"🎯",l:"Incentivos"},{id:"maquinasAdmin",icon:"🏭",l:"Máquinas"},{id:"pinsAdmin",icon:"🔒",l:"PINs"},{id:"produccionAdmin",icon:"🧺",l:"Producción"},{id:"tareasAdmin",icon:"📋",l:"Tareas"},{id:"notasAdmin",icon:"📝",l:"Notas"},{id:"caja",icon:"💰",l:"Caja"},
     {id:"config",icon:"⚙️",l:"Config"},{id:"usuarios",icon:"🔑",l:"Usuarios"},
   ];
@@ -5522,7 +5681,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
       </button>))}
     </div>
     <div style={S.content}>
-      {tab==="ventas"&&<NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={setTicketV} servicios={serviciosActivos} sesion={sesion} upsertVenta={upsertVenta} upsertCliente={upsertCliente} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos}/>}
+      {tab==="ventas"&&<NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={setTicketV} servicios={serviciosActivos} sesion={sesion} upsertVenta={upsertVenta} upsertCliente={upsertCliente} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto}/>}
       {tab==="historial"&&<Historial ventas={ventas} setVentas={setVentas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} esAdmin={esAdmin} upsertVenta={upsertVenta} sesion={sesion}/>}
       {tab==="pendientes"&&<Pendientes ventas={ventas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} setVentas={setVentas} upsertVenta={upsertVenta}/>}
       {tab==="bi"&&<DashboardBI ventas={ventas} empleadas={empleadas} gastos={gastos}/>}
@@ -5535,6 +5694,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
       {tab==="conciliacion"&&<Conciliacion ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} depositos={depositos} setDepositos={setDepositos} upsertDeposito={upsertDeposito}/>}
       {tab==="gastos"&&<Gastos gastos={gastos} setGastos={setGastos} sesion={sesion} upsertGasto={upsertGasto}/>}
       {tab==="inventario"&&<Inventario inventario={inventario} setInventario={setInventario} upsertInventario={upsertInventario}/>}
+      {tab==="productosAdmin"&&<ProductosAdmin productos={productos} setProductos={setProductos} upsertProducto={upsertProducto}/>}
       {tab==="equipo"&&<Equipo empleadas={empleadas} setEmpleadas={setEmpleadas} ventas={ventas} esAdmin={esAdmin} upsertEmpleada={upsertEmpleada}/>}
       {tab==="incentivosAdmin"&&<IncentivosAdmin cfgInc={cfgInc} setIncentivosArr={setIncentivosArr} upsertIncentivo={upsertIncentivo} ventas={ventas} empleadas={empleadas}/>}
       {tab==="maquinasAdmin"&&<MaquinasAdmin maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga}/>}
