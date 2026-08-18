@@ -1794,6 +1794,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
   const [notifOn,setNotifOn]=useState(typeof Notification!=="undefined"&&Notification.permission==="granted");
   const [panelLavadoraZap,setPanelLavadoraZap]=useState(false); // panel al tocar la máquina 1LZ: pendientes/lavados/centrifugando
   const [panelSecadoraZap,setPanelSecadoraZap]=useState(false); // panel al tocar la máquina 1SZ: esperando secar/secando
+  const [tabProd,setTabProd]=useState("todos"); // "todos" | "ropa" | "zapatos" — separa la pantalla de producción en secciones
 
   const activos=ventas.filter(v=>!v.anulada&&["recibido","proceso"].includes(v.estado||"recibido")).sort((a,b)=>new Date(a.fecha)-new Date(b.fecha));
   const eventosDe=folio=>eventosProduccion.filter(ev=>ev.ventaFolio===folio);
@@ -1803,6 +1804,15 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
   const gruposEquivalentes=g=>g==="zapatos"?[null,"zapatos"]:[g||null];
   const cargaDe=(folio,tipo,grupo)=>cargas.filter(c=>(c.ventaFolio===folio||(c.ventaFolios||[]).includes(folio))&&c.tipo===tipo&&gruposEquivalentes(grupo).includes(c.grupo||null)).sort((a,b)=>new Date(b.inicio)-new Date(a.inicio))[0];
   const esZapatoLbl=lbl=>/ZAPATO|PARES?\b/i.test(lbl||"");
+  // 🗂️ Para las pestañas Ropa/Zapatos: a qué sección(es) pertenece cada orden
+  const perteneceZapatos=v=>{
+    if(v.prodGrupos)return v.prodGrupos.includes("zapatos");
+    return (v.items||[]).some(it=>esZapatoLbl(it.label));
+  };
+  const perteneceRopa=v=>{
+    if(v.prodGrupos)return v.prodGrupos.some(g=>g!=="zapatos");
+    return (v.items||[]).some(it=>!esZapatoLbl(it.label));
+  };
   // 👟 Cuenta los pares de zapatos de una orden a partir de sus items (piezas de renglones marcados como zapato)
   const paresDe=folio=>{
     const v=ventas.find(vv=>vv.folio===folio);
@@ -2052,6 +2062,28 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
     setSelLavadoZap({});
     setPickerFor({tipoMaquina:"lavadora",grupo:"zapatos",lote:{folios,tipo:"lavado"}});
   };
+  // 🧺 Ampliar un lavado de zapatos que YA está en marcha (1LZ ocupada no bloquea — se le suman más órdenes al mismo lote en curso)
+  const cargaLavadoActiva1LZ=cargas.find(c=>c.maquinaId==="1LZ"&&c.tipo==="lavado"&&!c.finReal);
+  const agregarALoteLavadoActivo=(carga,folios,empleadaId)=>{
+    const nuevos=[...new Set([...(carga.ventaFolios||[]),...folios])];
+    const paresActualizados=nuevos.reduce((a,f)=>a+paresDe(f),0);
+    setCargas(prev=>{
+      const next=prev.map(c=>c.id===carga.id?{...c,ventaFolios:nuevos,pares:paresActualizados}:c);
+      const updated=next.find(c=>c.id===carga.id);
+      if(updated&&upsertCarga)upsertCarga({...updated,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+    folios.forEach(folio=>{
+      registrar(folio,"lavado_inicio",empleadaId,`👟 Se agregó al lote ya en marcha en ${carga.maquinaId}`,"zapatos");
+      cambiarEstadoVenta(folio,"proceso");
+    });
+  };
+  const iniciarAgregarALoteLavado=()=>{
+    const folios=Object.keys(selLavadoZap).filter(f=>selLavadoZap[f]);
+    if(folios.length===0||!cargaLavadoActiva1LZ)return;
+    setSelLavadoZap({});
+    setPinFor({folio:null,accion:"agregar_lote_lavado",label:"¿Quién agrega estos zapatos al lavado en curso?",extra:{carga:cargaLavadoActiva1LZ,folios}});
+  };
   // 🌀 El centrifugado de zapatos usa lavadora GENERAL (L1-L3), no la lavadora especial de zapatos — por eso centrifugado:true en el picker
   const iniciarLoteCentrifugado=()=>{
     const folios=Object.keys(selCentrifugadoZap).filter(f=>selCentrifugadoZap[f]);
@@ -2083,6 +2115,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
     const{folio,accion,extra}=pinFor;
     if(accion==="clasificacion")guardarClasificacion(folio,extra.datos,emp?.id);
     else if(accion==="iniciar_lote")iniciarCargaLote(extra.lote.folios,extra.lote.tipo,extra.maquinaId,extra.minutos,emp?.id,extra.lote.pares);
+    else if(accion==="agregar_lote_lavado")agregarALoteLavadoActivo(extra.carga,extra.folios,emp?.id);
     else if(accion==="iniciar_lavado")iniciarCarga(folio,"lavado",extra.maquinaId,extra.minutos,emp?.id,extra.comentario,extra.repetir,extra.grupo,extra.ciclo);
     else if(accion==="retirar_lavado")retirarCarga(extra.carga,emp?.id);
     else if(accion==="iniciar_secado")iniciarCarga(folio,"secado",extra.maquinaId,extra.minutos,emp?.id,extra.comentario,extra.repetir,extra.grupo,extra.ciclo);
@@ -2090,7 +2123,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
     else if(accion==="iniciar_centrifugado")iniciarCarga(folio,"centrifugado",extra.maquinaId,extra.minutos,emp?.id,extra.comentario,false,extra.grupo);
     else if(accion==="retirar_centrifugado")retirarCarga(extra.carga,emp?.id);
     else if(accion==="doblado_inicio")registrar(folio,"doblado_inicio",emp?.id,null,extra?.grupo);
-    else if(accion==="doblado_fin"){registrar(folio,"doblado_fin",emp?.id,null,extra?.grupo);const v=ventas.find(vv=>vv.folio===folio);notificar("🪄 Doblado terminado",`${v?.clienteNombre||folio} — falta cambiar a Listo para retirar`);}
+    else if(accion==="doblado_fin"){registrar(folio,"doblado_fin",emp?.id,null,extra?.grupo);const v=ventas.find(vv=>vv.folio===folio);const esZapNotif=extra?.grupo==="zapatos";notificar(esZapNotif?"📦 Empaquetado terminado":"🪄 Doblado terminado",`${v?.clienteNombre||folio} — falta cambiar a Listo para retirar`);}
     else if(accion==="confirmar_listo")cambiarEstadoVenta(folio,"listo");
     setPinFor(null);
   };
@@ -2137,9 +2170,15 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
       </div>
     )}
 
+    <div style={{display:"flex",gap:8,marginBottom:10}}>
+      {[["todos","📋 Todos"],["ropa","👕 Ropa"],["zapatos","👟 Zapatos"]].map(([val,l])=>(
+        <button key={val} onClick={()=>setTabProd(val)} style={{flex:1,padding:"8px 6px",borderRadius:10,border:tabProd===val?"2px solid #1a3c5e":"1.5px solid #e0e8f0",background:tabProd===val?"#eaf3fb":"#fff",color:"#1a3c5e",fontWeight:700,fontSize:12,cursor:"pointer"}}>{l}</button>
+      ))}
+    </div>
+
     <div style={{fontSize:12,fontWeight:700,color:"#888",marginBottom:6}}>📋 ÓRDENES EN PRODUCCIÓN</div>
-    {activos.length===0&&<div style={{textAlign:"center",padding:"40px 20px",color:"#aaa"}}><div style={{fontSize:48,marginBottom:8}}>🏭</div><div>No hay órdenes en producción ahora mismo</div></div>}
-    {activos.map(v=>{
+    {activos.filter(v=>tabProd==="todos"||(tabProd==="zapatos"?perteneceZapatos(v):perteneceRopa(v))).length===0&&<div style={{textAlign:"center",padding:"40px 20px",color:"#aaa"}}><div style={{fontSize:48,marginBottom:8}}>🏭</div><div>No hay órdenes en producción ahora mismo</div></div>}
+    {activos.filter(v=>tabProd==="todos"||(tabProd==="zapatos"?perteneceZapatos(v):perteneceRopa(v))).map(v=>{
       const maquinaDe=id=>maquinas.find(m=>m.id===id);
       const buscarEventoG=(folio,etapa,grupo)=>eventosDe(folio).filter(ev=>ev.etapa===etapa&&gruposEquivalentes(grupo).includes(ev.grupo||null)).sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp))[0];
       const esZapato=lbl=>/ZAPATO|PARES?\b/i.test(lbl||"");
@@ -2170,14 +2209,16 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
 
         const evDobInicio=buscarEventoG(v.folio,"doblado_inicio",grupo);
         const evDobFin=buscarEventoG(v.folio,"doblado_fin",grupo);
+        const esZap=grupo==="zapatos";
+        const lblDoblado=esZap?"empaquetado":"doblado";
         let etapaG="Recibido",colorG="#f59e0b";
         if(lavActivas.length>0){etapaG=`Lavando${lavActivas.length>1?` (${lavActivas.length} máquinas)`:""}`;colorG="#1565c0";}
         else if(cCen&&!cCen.finReal){etapaG="Centrifugando";colorG="#5c6bc0";}
         else if(lavTerminadoCiclo&&!cCen&&secCiclo.length===0){etapaG="Esperando secadora";colorG="#f59e0b";}
         else if(secActivas.length>0){etapaG=`Secando${secActivas.length>1?` (${secActivas.length} máquinas)`:""}`;colorG="#00838f";}
-        else if(secTerminadoCiclo&&!evDobInicio){etapaG="Esperando doblado";colorG="#f59e0b";}
-        else if(evDobInicio&&!evDobFin){etapaG="Doblando";colorG="#7b1fa2";}
-        else if(evDobFin){etapaG="✅ Doblado";colorG="#2e7d32";}
+        else if(secTerminadoCiclo&&!evDobInicio){etapaG=esZap?"Esperando empaquetado":"Esperando doblado";colorG="#f59e0b";}
+        else if(evDobInicio&&!evDobFin){etapaG=esZap?"Empaquetando":"Doblando";colorG="#7b1fa2";}
+        else if(evDobFin){etapaG=esZap?"✅ Empaquetado":"✅ Doblado";colorG="#2e7d32";}
 
         const comentariosLav=lavCiclo.filter(c=>c.comentario);
         const comentariosSec=secCiclo.filter(c=>c.comentario);
@@ -2234,17 +2275,17 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
             )}
 
             {secTerminadoCiclo&&!evDobInicio&&(
-              <button style={{...S.btnP,marginTop:8,background:"linear-gradient(135deg,#7b1fa2,#9c27b0)"}} onClick={()=>setPinFor({folio:v.folio,accion:"doblado_inicio",label:"¿Quién inicia el doblado?",extra:{grupo}})}>🪄 Iniciar doblado</button>
+              <button style={{...S.btnP,marginTop:8,background:"linear-gradient(135deg,#7b1fa2,#9c27b0)"}} onClick={()=>setPinFor({folio:v.folio,accion:"doblado_inicio",label:esZap?"¿Quién inicia el empaquetado?":"¿Quién inicia el doblado?",extra:{grupo}})}>{esZap?"📦 Iniciar empaquetado":"🪄 Iniciar doblado"}</button>
             )}
             {evDobInicio&&!evDobFin&&(
               <>
-                <div style={{fontSize:11,color:"#888",marginTop:8}}>🪄 Doblando desde las {new Date(evDobInicio.timestamp).toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"})} por {nombreDe(evDobInicio.empleadaId)}</div>
+                <div style={{fontSize:11,color:"#888",marginTop:8}}>{esZap?"📦 Empaquetando":"🪄 Doblando"} desde las {new Date(evDobInicio.timestamp).toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"})} por {nombreDe(evDobInicio.empleadaId)}</div>
                 <div style={{fontSize:22,fontWeight:800,color:"#7b1fa2",textAlign:"center",margin:"8px 0",fontFamily:"monospace"}}><Cronometro desde={evDobInicio.timestamp}/></div>
-                <button style={{...S.btnP,background:"linear-gradient(135deg,#2e7d32,#4caf50)"}} onClick={()=>setPinFor({folio:v.folio,accion:"doblado_fin",label:"¿Quién termina el doblado?",extra:{grupo}})}>✅ Terminar doblado</button>
+                <button style={{...S.btnP,background:"linear-gradient(135deg,#2e7d32,#4caf50)"}} onClick={()=>setPinFor({folio:v.folio,accion:"doblado_fin",label:esZap?"¿Quién termina el empaquetado?":"¿Quién termina el doblado?",extra:{grupo}})}>{esZap?"✅ Terminar empaquetado":"✅ Terminar doblado"}</button>
               </>
             )}
             {evDobFin&&(
-              <div style={{fontSize:12,color:"#2e7d32",fontWeight:700,marginTop:8}}>✅ Doblado por {nombreDe(evDobFin.empleadaId)} en {Math.round((new Date(evDobFin.timestamp)-new Date(evDobInicio.timestamp))/60000)} min</div>
+              <div style={{fontSize:12,color:"#2e7d32",fontWeight:700,marginTop:8}}>{esZap?"✅ Empaquetado":"✅ Doblado"} por {nombreDe(evDobFin.empleadaId)} en {Math.round((new Date(evDobFin.timestamp)-new Date(evDobInicio.timestamp))/60000)} min</div>
             )}
             {(comentariosLav.length>0||comentariosSec.length>0||cCen?.comentario)&&(
               <div style={{fontSize:11,color:"#e65100",background:"#fff3e0",borderRadius:8,padding:"6px 8px",marginTop:8}}>
@@ -2264,13 +2305,20 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
       };
 
       const todosListos=grupos.every(g=>buscarEventoG(v.folio,"doblado_fin",g));
-      const etapaResumen=todosListos?"🔔 Falta marcar Listo":v.prodGrupos?"Dividida en grupos":"En producción";
+      let etapaResumen;
+      if(todosListos)etapaResumen="🔔 Falta marcar Listo";
+      else if(v.prodGrupos){
+        const faltantes=grupos.filter(g=>!buscarEventoG(v.folio,"doblado_fin",g));
+        etapaResumen=faltantes.length===grupos.length
+          ?"Dividida en grupos"
+          :"⏳ Falta "+faltantes.map(g=>g==="zapatos"?"zapatos":"ropa").join(" y ");
+      }else etapaResumen="En producción";
 
       return(
         <div key={v.folio} style={{...S.vcard,borderLeft:`4px solid ${todosListos?"#2e7d32":"#4db6e4"}`}}>
           <div style={{fontWeight:700,fontSize:15}}>{v.clienteNombre}</div>
           <div style={{fontSize:11,color:"#888"}}>{v.folio}</div>
-          <div style={{fontSize:12,color:todosListos?"#2e7d32":"#4db6e4",fontWeight:700,marginTop:2}}>{etapaResumen}</div>
+          <div style={{fontSize:12,color:todosListos?"#2e7d32":etapaResumen.startsWith("⏳")?"#e65100":"#4db6e4",fontWeight:700,marginTop:2}}>{etapaResumen}</div>
           <div style={{fontSize:12,color:"#666",marginTop:6}}>{(v.items||[]).map(it=>it.label).join(" · ")}</div>
 
           {!v.clasificacion?(
@@ -2328,7 +2376,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
                 <button style={{...S.btnS,marginTop:8,width:"100%",background:"#e8f5fd",color:"#1565c0"}} onClick={()=>dividirGrupos(v.folio,["ropa","zapatos"])}>✂️ Dividir en Ropa y Zapatos</button>
               )}
 
-              {grupos.map(g=>renderFlujo(g,v.prodGrupos?(g==="ropa"?"👕 ROPA":"👟 ZAPATOS"):null))}
+              {grupos.filter(g=>tabProd==="todos"||(tabProd==="zapatos"?g==="zapatos":g!=="zapatos")).map(g=>renderFlujo(g,v.prodGrupos?(g==="ropa"?"👕 ROPA":"👟 ZAPATOS"):null))}
 
               {todosListos&&(
                 <button style={{...S.btnP,marginTop:10,background:"linear-gradient(135deg,#2e7d32,#66bb6a)"}} onClick={()=>setPinFor({folio:v.folio,accion:"confirmar_listo",label:"¿Quién confirma que ya está Listo para retirar?"})}>🔔 Confirmar Listo para retirar</button>
@@ -2366,6 +2414,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
             ))}
 
             <div style={{fontSize:12,fontWeight:800,color:"#5d4037",marginTop:10,marginBottom:6}}>⬜ Pendientes por lavar ({totalesZapatos.porLavar} pares)</div>
+            {cargaLavadoActiva1LZ&&<div style={{fontSize:11,color:"#1565c0",background:"#e3f2fd",borderRadius:8,padding:"6px 8px",marginBottom:8}}>💡 La 1LZ ya está lavando, pero puedes seguir marcando más y sumarlos al mismo lote — no hace falta esperar a que termine.</div>}
             {colaLavadoZap.length===0&&<div style={{fontSize:12,color:"#aaa",marginBottom:10}}>Nada pendiente.</div>}
             {colaLavadoZap.map(f=>(
               <label key={f.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px",cursor:"pointer"}}>
@@ -2374,7 +2423,12 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
                 <span style={{fontSize:11,color:"#8d6e63",fontWeight:700}}>{paresDe(f.folio)} pares</span>
               </label>
             ))}
-            {colaLavadoZap.length>0&&(
+            {colaLavadoZap.length>0&&cargaLavadoActiva1LZ&&(
+              <div style={{marginTop:8,marginBottom:14}}>
+                <button style={{...S.btnP,width:"100%",background:"linear-gradient(135deg,#1565c0,#42a5f5)",opacity:Object.values(selLavadoZap).some(Boolean)?1:0.5}} disabled={!Object.values(selLavadoZap).some(Boolean)} onClick={()=>{iniciarAgregarALoteLavado();setPanelLavadoraZap(false);}}>➕ Agregar seleccionados al lavado en curso</button>
+              </div>
+            )}
+            {colaLavadoZap.length>0&&!cargaLavadoActiva1LZ&&(
               <div style={{display:"flex",gap:8,alignItems:"center",marginTop:8,marginBottom:14}}>
                 <input type="number" style={{...S.inp,width:80}} value={minLoteLav} onChange={e=>setMinLoteLav(e.target.value)} placeholder="min"/>
                 <button style={{...S.btnP,flex:1,background:"linear-gradient(135deg,#5c6bc0,#7986cb)",opacity:Object.values(selLavadoZap).some(Boolean)?1:0.5}} disabled={!Object.values(selLavadoZap).some(Boolean)} onClick={()=>{iniciarLoteLavado();setPanelLavadoraZap(false);}}>🧺 Lavar seleccionados en lote</button>
