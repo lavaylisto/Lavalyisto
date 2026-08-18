@@ -1825,7 +1825,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
     const tieneZap=(v.items||[]).some(it=>esZapatoLbl(it.label));
     const tieneOtro=(v.items||[]).some(it=>!esZapatoLbl(it.label));
     if(v.prodGrupos&&v.prodGrupos.includes("zapatos"))flujosZapatos.push({folio:v.folio,grupo:"zapatos",cliente:v.clienteNombre,v});
-    else if(!v.prodGrupos&&tieneZap&&!tieneOtro)flujosZapatos.push({folio:v.folio,grupo:null,cliente:v.clienteNombre,v});
+    else if(!v.prodGrupos&&tieneZap&&!tieneOtro)flujosZapatos.push({folio:v.folio,grupo:"zapatos",cliente:v.clienteNombre,v});
   });
   const colaLavadoZap=flujosZapatos.filter(f=>f.v.clasificacion&&!cargaDe(f.folio,"lavado",f.grupo));
   // 🌀 Después del lavado, pasan a esperar centrifugado (en lavadora general L1-L3)
@@ -2242,8 +2242,11 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
             {etiqueta&&<div style={{fontSize:12,fontWeight:800,color:"#1a3c5e",marginBottom:4}}>{etiqueta}</div>}
             <div style={{fontSize:12,color:colorG,fontWeight:700}}>{etapaG}</div>
 
-            {lavCiclo.length===0&&(
+            {lavCiclo.length===0&&!esZap&&(
               <button style={{...S.btnP,marginTop:8}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"lavadora",grupo})}>🧺 Iniciar lavado</button>
+            )}
+            {lavCiclo.length===0&&esZap&&(
+              <div style={{marginTop:8,background:"#fff3e0",borderRadius:8,padding:"8px 10px",fontSize:12,color:"#e65100",fontWeight:600}}>👟 Ve a la pestaña Zapatos → toca la Lavadora de zapatos para lavarla (se lava en lote junto con las demás).</div>
             )}
 
             {lavActivas.map(c=>(
