@@ -1145,9 +1145,8 @@ function ProduccionScreen({sesion,onVolver,onLogout,ventas,setVentas,upsertVenta
   );
 }
 
-// 📋 TAREAS — Fase 3: checklist del día, con semáforo, filtro de área y confirmación por PIN (+ foto si se requiere)
+// 📋 TAREAS — Fase 3: checklist del día, organizado por momento del turno (apertura/media jornada/cierre) y por persona asignada, con confirmación por PIN (+ foto/nota si se requiere)
 function TareasChecklist({tareasDiarias,setTareasDiarias,upsertTareaDiaria,pins,empleadas,sesion}){
-  const [filtroArea,setFiltroArea]=useState("todas");
   const [pinFor,setPinFor]=useState(null); // {tareaId, fotoUrl, nota}
   const [fotoFor,setFotoFor]=useState(null); // tareaId esperando foto
   const [notaFor,setNotaFor]=useState(null); // tareaId esperando nota
@@ -1166,7 +1165,7 @@ function TareasChecklist({tareasDiarias,setTareasDiarias,upsertTareaDiaria,pins,
     if(t.empleadaIds&&t.empleadaIds.length>0)return miIdTC!=null&&t.empleadaIds.some(id=>String(id)===String(miIdTC));
     return !t.rolRequerido||t.rolRequerido===miRolTC;
   });
-  const visibles=filtroArea==="todas"?todasHoy:todasHoy.filter(t=>t.area===filtroArea);
+  const visibles=todasHoy;
   const ordenBloque=["apertura","media_jornada","cambio_turno","cierre","semanal"];
   const nombreDe=id=>empleadas.find(e=>String(e.id)===String(id))?.nombre||"—";
 
@@ -1236,12 +1235,6 @@ function TareasChecklist({tareasDiarias,setTareasDiarias,upsertTareaDiaria,pins,
       </div>
     </div>
 
-    <div style={{display:"flex",gap:8,marginBottom:14,overflowX:"auto"}}>
-      {[["todas","Todas"],["atras","🧺 Atrás"],["adelante","🛎️ Adelante"],["general","👥 General"]].map(([val,l])=>(
-        <button key={val} onClick={()=>setFiltroArea(val)} style={{padding:"6px 14px",borderRadius:20,border:filtroArea===val?"2px solid #1a3c5e":"1.5px solid #e0e8f0",background:filtroArea===val?"#eaf3fb":"#fff",color:"#1a3c5e",fontWeight:700,fontSize:12,whiteSpace:"nowrap",cursor:"pointer"}}>{l}</button>
-      ))}
-    </div>
-
     {todasHoy.length===0&&<div style={{textAlign:"center",padding:"40px 20px",color:"#aaa"}}><div style={{fontSize:48,marginBottom:8}}>📋</div><div>Aún no hay tareas generadas para hoy</div></div>}
 
     {ordenBloque.map(b=>{
@@ -1258,7 +1251,7 @@ function TareasChecklist({tareasDiarias,setTareasDiarias,upsertTareaDiaria,pins,
                 <div style={{fontSize:11,fontWeight:700,color:s.color,whiteSpace:"nowrap",marginLeft:8}}>{s.label}</div>
               </div>
               {t.descripcion&&<div style={{fontSize:12,color:"#888",marginTop:2}}>{t.descripcion}</div>}
-              <div style={{fontSize:11,color:"#888",marginTop:4}}>{AREA_LBL[t.area]||t.area} · límite {t.horaLimite}{t.completadaPor?` · ${nombreDe(t.completadaPor)}`:""}</div>
+              <div style={{fontSize:11,color:"#888",marginTop:4}}>límite {t.horaLimite}{t.completadaPor?` · ${nombreDe(t.completadaPor)}`:""}</div>
               {t.observacion&&<div style={{fontSize:12,color:"#1a3c5e",background:"#f0f4f8",borderRadius:8,padding:"6px 8px",marginTop:6}}>📝 {t.observacion}</div>}
             </button>
           );
@@ -1444,18 +1437,19 @@ function CuentaRegresiva({finProgramado}){
   return <span style={{color:vencido?"#c62828":"#1a3c5e",fontWeight:800}}>{vencido?"⏰ +":""}{mm}:{ss}</span>;
 }
 // 🏭 PRODUCCIÓN — tarjeta visual de una máquina para el tablero (libre/ocupada/mantenimiento + cuenta regresiva)
-function TarjetaMaquina({m,cargas,ventas}){
+function TarjetaMaquina({m,cargas,ventas,onClick}){
   const est=ESTADO_MAQ[m.estado]||ESTADO_MAQ.libre;
   const carga=m.cargaActualId?cargas.find(c=>c.id===m.cargaActualId):null;
   const venta=carga?ventas.find(v=>v.folio===carga.ventaFolio):null;
   return(
-    <div style={{background:est.bg,border:`2px solid ${m.categoria==="zapatos"?"#8d6e63":est.color}`,borderRadius:10,padding:"8px 6px",textAlign:"center",position:"relative"}}>
+    <div onClick={onClick} style={{background:est.bg,border:`2px solid ${m.categoria==="zapatos"?"#8d6e63":est.color}`,borderRadius:10,padding:"8px 6px",textAlign:"center",position:"relative",cursor:onClick?"pointer":"default"}}>
       {m.categoria==="zapatos"&&<div style={{position:"absolute",top:-6,right:-6,fontSize:14,background:"#fff",borderRadius:"50%",border:"1.5px solid #8d6e63"}}>👟</div>}
       <div style={{fontSize:18}}>{m.tipo==="lavadora"?"🧺":"🔥"}</div>
       <div style={{fontSize:11,fontWeight:700,color:"#1a3c5e",lineHeight:1.1}}>{m.nombre}</div>
       <div style={{fontSize:9,color:est.color,fontWeight:700}}>{est.label}</div>
       {m.estado==="ocupada"&&m.finProgramado&&<div style={{fontSize:11,marginTop:2,fontFamily:"monospace"}}><CuentaRegresiva finProgramado={m.finProgramado}/></div>}
       {m.estado==="ocupada"&&venta&&<div style={{fontSize:8,color:"#666",marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{venta.clienteNombre}</div>}
+      {onClick&&<div style={{fontSize:8,color:"#8d6e63",marginTop:2,fontWeight:700}}>👆 Ver detalle</div>}
     </div>
   );
 }
@@ -1798,6 +1792,8 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
   const [minLoteSec,setMinLoteSec]=useState("45");
   const [pinFor,setPinFor]=useState(null); // {folio, accion, label, extra}
   const [notifOn,setNotifOn]=useState(typeof Notification!=="undefined"&&Notification.permission==="granted");
+  const [panelLavadoraZap,setPanelLavadoraZap]=useState(false); // panel al tocar la máquina 1LZ: pendientes/lavados/centrifugando
+  const [panelSecadoraZap,setPanelSecadoraZap]=useState(false); // panel al tocar la máquina 1SZ: esperando secar/secando
 
   const activos=ventas.filter(v=>!v.anulada&&["recibido","proceso"].includes(v.estado||"recibido")).sort((a,b)=>new Date(a.fecha)-new Date(b.fecha));
   const eventosDe=folio=>eventosProduccion.filter(ev=>ev.ventaFolio===folio);
@@ -2112,7 +2108,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
       <div key={z} style={{marginBottom:16}}>
         <div style={{fontSize:12,fontWeight:700,color:"#888",marginBottom:6}}>📍 {z.toUpperCase()}</div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(90px,1fr))",gap:8}}>
-          {maquinas.filter(m=>(m.zona||"Sin asignar")===z).map(m=><TarjetaMaquina key={m.id} m={m} cargas={cargas} ventas={ventas}/>)}
+          {maquinas.filter(m=>(m.zona||"Sin asignar")===z).map(m=><TarjetaMaquina key={m.id} m={m} cargas={cargas} ventas={ventas} onClick={m.id==="1LZ"?()=>setPanelLavadoraZap(true):m.id==="1SZ"?()=>setPanelSecadoraZap(true):undefined}/>)}
         </div>
       </div>
     ))}
@@ -2120,9 +2116,10 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
     {(colaLavadoZap.length>0||colaCentrifugadoZap.length>0||colaSecadoZap.length>0||totalesZapatos.enLavado>0||totalesZapatos.enCentrifugado>0||totalesZapatos.enSecado>0)&&(
       <div style={{background:"#fdf6f0",border:"1.5px solid #8d6e63",borderRadius:12,padding:12,marginBottom:16}}>
         <div style={{fontSize:13,fontWeight:800,color:"#5d4037",marginBottom:8}}>👟 Producción de zapatos</div>
+        <div style={{fontSize:11,color:"#8d6e63",marginBottom:10}}>Toca la lavadora de zapatos (1LZ) o su secadora (1SZ) en el tablero de arriba para ver el detalle y gestionar cada etapa.</div>
 
         {/* 📊 Totales de pares por etapa */}
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:12}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>
           {[
             ["Por lavar",totalesZapatos.porLavar,"#8d6e63"],
             ["En lavado",totalesZapatos.enLavado,"#5c6bc0"],
@@ -2137,59 +2134,6 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
             </div>
           ))}
         </div>
-
-        {colaLavadoZap.length>0&&(
-          <div style={{marginBottom:14}}>
-            <div style={{fontSize:12,fontWeight:700,color:"#5d4037",marginBottom:4}}>Esperando lavar (1LZ)</div>
-            {colaLavadoZap.map(f=>(
-              <label key={f.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px",cursor:"pointer"}}>
-                <input type="checkbox" checked={!!selLavadoZap[f.folio]} onChange={e=>setSelLavadoZap({...selLavadoZap,[f.folio]:e.target.checked})}/>
-                <span style={{fontSize:13,color:"#3e2723",flex:1}}>{f.cliente} · {f.folio}</span>
-                <span style={{fontSize:11,color:"#8d6e63",fontWeight:700}}>{paresDe(f.folio)} pares</span>
-              </label>
-            ))}
-            <div style={{display:"flex",gap:8,alignItems:"center",marginTop:8}}>
-              <input type="number" style={{...S.inp,width:80}} value={minLoteLav} onChange={e=>setMinLoteLav(e.target.value)} placeholder="min"/>
-              <button style={{...S.btnP,flex:1,background:"linear-gradient(135deg,#5c6bc0,#7986cb)",opacity:Object.values(selLavadoZap).some(Boolean)?1:0.5}} disabled={!Object.values(selLavadoZap).some(Boolean)} onClick={iniciarLoteLavado}>🧺 Lavar seleccionados en lote</button>
-            </div>
-          </div>
-        )}
-
-        {colaCentrifugadoZap.length>0&&(
-          <div style={{marginBottom:14}}>
-            <div style={{fontSize:12,fontWeight:700,color:"#5d4037",marginBottom:4}}>🌀 Esperando centrifugado (lavadora general)</div>
-            {colaCentrifugadoZap.map(f=>(
-              <label key={f.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px",cursor:"pointer"}}>
-                <input type="checkbox" checked={!!selCentrifugadoZap[f.folio]} onChange={e=>setSelCentrifugadoZap({...selCentrifugadoZap,[f.folio]:e.target.checked})}/>
-                <span style={{fontSize:13,color:"#3e2723",flex:1}}>{f.cliente} · {f.folio}</span>
-                <span style={{fontSize:11,color:"#8d6e63",fontWeight:700}}>{paresDe(f.folio)} pares</span>
-              </label>
-            ))}
-            <div style={{display:"flex",gap:8,alignItems:"center",marginTop:8}}>
-              <input type="number" style={{...S.inp,width:80}} value={minLoteCent} onChange={e=>setMinLoteCent(e.target.value)} placeholder="min"/>
-              <button style={{...S.btnP,flex:1,background:"linear-gradient(135deg,#7986cb,#5c6bc0)",opacity:Object.values(selCentrifugadoZap).some(Boolean)?1:0.5}} disabled={!Object.values(selCentrifugadoZap).some(Boolean)} onClick={iniciarLoteCentrifugado}>🌀 Centrifugar seleccionados en lote</button>
-            </div>
-          </div>
-        )}
-
-        {colaSecadoZap.length>0&&(
-          <div>
-            <div style={{fontSize:12,fontWeight:700,color:"#5d4037",marginBottom:4}}>Esperando secar — se acumulan hasta llenar la secadora (máx 20 pares)</div>
-            {colaSecadoZap.map(f=>(
-              <div key={f.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px"}}>
-                <input type="checkbox" checked={!!selSecadoZap[f.folio]} onChange={e=>{const c={...selSecadoZap};if(e.target.checked)c[f.folio]=String(paresDe(f.folio)||1);else delete c[f.folio];setSelSecadoZap(c);}}/>
-                <span style={{fontSize:13,color:"#3e2723",flex:1}}>{f.cliente} · {f.folio}</span>
-                {selSecadoZap[f.folio]!==undefined&&<input type="number" min="1" style={{...S.inp,width:60,padding:"4px 8px"}} value={selSecadoZap[f.folio]} onChange={e=>setSelSecadoZap({...selSecadoZap,[f.folio]:e.target.value})}/>}
-              </div>
-            ))}
-            <div style={{fontSize:12,fontWeight:700,color:paresSeleccionados>20?"#c62828":"#5d4037",marginTop:4}}>Seleccionado: {paresSeleccionados} / 20 pares</div>
-            <div style={{fontSize:11,color:"#8d6e63",marginTop:2}}>Total esperando en cola: {totalesZapatos.esperandoSecado} pares — ve marcando hasta juntar una buena tanda y toca el botón cuando quieras iniciar el secado.</div>
-            <div style={{display:"flex",gap:8,alignItems:"center",marginTop:8}}>
-              <input type="number" style={{...S.inp,width:80}} value={minLoteSec} onChange={e=>setMinLoteSec(e.target.value)} placeholder="min"/>
-              <button style={{...S.btnP,flex:1,background:"linear-gradient(135deg,#00838f,#26c6da)",opacity:(Object.keys(selSecadoZap).length>0&&paresSeleccionados<=20)?1:0.5}} disabled={Object.keys(selSecadoZap).length===0||paresSeleccionados>20} onClick={iniciarLoteSecado}>🔥 Iniciar secado con lo seleccionado</button>
-            </div>
-          </div>
-        )}
       </div>
     )}
 
@@ -2396,8 +2340,117 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
     })}
 
     {clasifFor&&<ClasificacionModal onConfirmar={onClasifConfirm} onCancelar={()=>setClasifFor(null)}/>}
-    {pickerFor&&<MachinePicker maquinas={maquinas} tipoMaquina={pickerFor.tipoMaquina} tiempoSugerido={pickerFor.lote?(pickerFor.lote.tipo==="lavado"?parseInt(minLoteLav)||45:parseInt(minLoteSec)||45):45} repetir={!!pickerFor.repetir} grupo={pickerFor.grupo} centrifugado={!!pickerFor.centrifugado} onConfirmar={onPickerConfirm} onCancelar={()=>setPickerFor(null)}/>}
+    {pickerFor&&<MachinePicker maquinas={maquinas} tipoMaquina={pickerFor.tipoMaquina} tiempoSugerido={pickerFor.lote?(pickerFor.lote.tipo==="lavado"?parseInt(minLoteLav)||45:pickerFor.lote.tipo==="centrifugado"?parseInt(minLoteCent)||15:parseInt(minLoteSec)||45):45} repetir={!!pickerFor.repetir} grupo={pickerFor.grupo} centrifugado={!!pickerFor.centrifugado} onConfirmar={onPickerConfirm} onCancelar={()=>setPickerFor(null)}/>}
     {pinFor&&<PinModal pins={pins} empleadas={empleadas} titulo={pinFor.label} onConfirm={onPinOk} onCancelar={()=>setPinFor(null)}/>}
+
+    {panelLavadoraZap&&(()=>{
+      const maquinaDe=id=>maquinas.find(m=>m.id===id);
+      const lavandoAhora=cargasZapActivas("lavado");
+      const centrifugandoAhora=cargasZapActivas("centrifugado");
+      return(
+        <div style={S.ov}>
+          <div style={{background:"#fff",borderRadius:18,width:"100%",maxWidth:420,maxHeight:"88vh",overflowY:"auto",padding:18}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <div style={{fontFamily:"'Playfair Display',serif",fontSize:17,fontWeight:700,color:"#1a3c5e"}}>👟🧺 Lavadora de zapatos (1LZ)</div>
+              <button onClick={()=>setPanelLavadoraZap(false)} style={{background:"#f0f4f8",border:"none",borderRadius:8,padding:"6px 10px",cursor:"pointer",fontSize:13}}>✕</button>
+            </div>
+            <div style={{fontSize:11,color:"#8d6e63",marginBottom:12}}>No tiene límite de pares — puedes lavar todos los que tengas acumulados en un mismo lote.</div>
+
+            <div style={{fontSize:12,fontWeight:800,color:"#5d4037",marginBottom:6}}>🔵 Lavando ahora</div>
+            {lavandoAhora.length===0&&<div style={{fontSize:12,color:"#aaa",marginBottom:10}}>Ninguna carga en curso.</div>}
+            {lavandoAhora.map(c=>(
+              <div key={c.id} style={{...S.vcard,padding:"8px 10px",marginBottom:6}}>
+                <div style={{fontSize:12,color:"#5d4037"}}>{maquinaDe(c.maquinaId)?.nombre||c.maquinaId} · {paresEnCarga(c)} pares</div>
+                <div style={{fontSize:16,fontFamily:"monospace",fontWeight:800,color:"#5c6bc0"}}><CuentaRegresiva finProgramado={c.finProgramado}/></div>
+              </div>
+            ))}
+
+            <div style={{fontSize:12,fontWeight:800,color:"#5d4037",marginTop:10,marginBottom:6}}>⬜ Pendientes por lavar ({totalesZapatos.porLavar} pares)</div>
+            {colaLavadoZap.length===0&&<div style={{fontSize:12,color:"#aaa",marginBottom:10}}>Nada pendiente.</div>}
+            {colaLavadoZap.map(f=>(
+              <label key={f.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px",cursor:"pointer"}}>
+                <input type="checkbox" checked={!!selLavadoZap[f.folio]} onChange={e=>setSelLavadoZap({...selLavadoZap,[f.folio]:e.target.checked})}/>
+                <span style={{fontSize:13,color:"#3e2723",flex:1}}>{f.cliente} · {f.folio}</span>
+                <span style={{fontSize:11,color:"#8d6e63",fontWeight:700}}>{paresDe(f.folio)} pares</span>
+              </label>
+            ))}
+            {colaLavadoZap.length>0&&(
+              <div style={{display:"flex",gap:8,alignItems:"center",marginTop:8,marginBottom:14}}>
+                <input type="number" style={{...S.inp,width:80}} value={minLoteLav} onChange={e=>setMinLoteLav(e.target.value)} placeholder="min"/>
+                <button style={{...S.btnP,flex:1,background:"linear-gradient(135deg,#5c6bc0,#7986cb)",opacity:Object.values(selLavadoZap).some(Boolean)?1:0.5}} disabled={!Object.values(selLavadoZap).some(Boolean)} onClick={()=>{iniciarLoteLavado();setPanelLavadoraZap(false);}}>🧺 Lavar seleccionados en lote</button>
+              </div>
+            )}
+
+            <div style={{fontSize:12,fontWeight:800,color:"#5d4037",marginBottom:6}}>🌀 Centrifugando ahora</div>
+            {centrifugandoAhora.length===0&&<div style={{fontSize:12,color:"#aaa",marginBottom:10}}>Ninguna carga en curso.</div>}
+            {centrifugandoAhora.map(c=>(
+              <div key={c.id} style={{...S.vcard,padding:"8px 10px",marginBottom:6}}>
+                <div style={{fontSize:12,color:"#5d4037"}}>{maquinaDe(c.maquinaId)?.nombre||c.maquinaId} · {paresEnCarga(c)} pares</div>
+                <div style={{fontSize:16,fontFamily:"monospace",fontWeight:800,color:"#7986cb"}}><CuentaRegresiva finProgramado={c.finProgramado}/></div>
+              </div>
+            ))}
+
+            <div style={{fontSize:12,fontWeight:800,color:"#5d4037",marginTop:10,marginBottom:6}}>✅ Lavados — esperando centrifugado ({totalesZapatos.esperandoCentrifugado} pares)</div>
+            {colaCentrifugadoZap.length===0&&<div style={{fontSize:12,color:"#aaa"}}>Nada esperando.</div>}
+            {colaCentrifugadoZap.map(f=>(
+              <label key={f.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px",cursor:"pointer"}}>
+                <input type="checkbox" checked={!!selCentrifugadoZap[f.folio]} onChange={e=>setSelCentrifugadoZap({...selCentrifugadoZap,[f.folio]:e.target.checked})}/>
+                <span style={{fontSize:13,color:"#3e2723",flex:1}}>{f.cliente} · {f.folio}</span>
+                <span style={{fontSize:11,color:"#8d6e63",fontWeight:700}}>{paresDe(f.folio)} pares</span>
+              </label>
+            ))}
+            {colaCentrifugadoZap.length>0&&(
+              <div style={{display:"flex",gap:8,alignItems:"center",marginTop:8}}>
+                <input type="number" style={{...S.inp,width:80}} value={minLoteCent} onChange={e=>setMinLoteCent(e.target.value)} placeholder="min"/>
+                <button style={{...S.btnP,flex:1,background:"linear-gradient(135deg,#7986cb,#5c6bc0)",opacity:Object.values(selCentrifugadoZap).some(Boolean)?1:0.5}} disabled={!Object.values(selCentrifugadoZap).some(Boolean)} onClick={()=>{iniciarLoteCentrifugado();setPanelLavadoraZap(false);}}>🌀 Centrifugar seleccionados (elige la máquina)</button>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    })()}
+
+    {panelSecadoraZap&&(()=>{
+      const maquinaDe=id=>maquinas.find(m=>m.id===id);
+      const secandoAhora=cargasZapActivas("secado");
+      return(
+        <div style={S.ov}>
+          <div style={{background:"#fff",borderRadius:18,width:"100%",maxWidth:420,maxHeight:"88vh",overflowY:"auto",padding:18}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <div style={{fontFamily:"'Playfair Display',serif",fontSize:17,fontWeight:700,color:"#1a3c5e"}}>👟🔥 Secadora de zapatos (1SZ)</div>
+              <button onClick={()=>setPanelSecadoraZap(false)} style={{background:"#f0f4f8",border:"none",borderRadius:8,padding:"6px 10px",cursor:"pointer",fontSize:13}}>✕</button>
+            </div>
+            <div style={{fontSize:11,color:"#8d6e63",marginBottom:12}}>Máximo 20 pares por tanda.</div>
+
+            <div style={{fontSize:12,fontWeight:800,color:"#5d4037",marginBottom:6}}>🔵 Secando ahora</div>
+            {secandoAhora.length===0&&<div style={{fontSize:12,color:"#aaa",marginBottom:10}}>Ninguna carga en curso.</div>}
+            {secandoAhora.map(c=>(
+              <div key={c.id} style={{...S.vcard,padding:"8px 10px",marginBottom:6}}>
+                <div style={{fontSize:12,color:"#5d4037"}}>{maquinaDe(c.maquinaId)?.nombre||c.maquinaId} · {paresEnCarga(c)} pares</div>
+                <div style={{fontSize:16,fontFamily:"monospace",fontWeight:800,color:"#00838f"}}><CuentaRegresiva finProgramado={c.finProgramado}/></div>
+              </div>
+            ))}
+
+            <div style={{fontSize:12,fontWeight:800,color:"#5d4037",marginTop:10,marginBottom:6}}>✅ Ya centrifugados — esperando secar ({totalesZapatos.esperandoSecado} pares)</div>
+            {colaSecadoZap.length===0&&<div style={{fontSize:12,color:"#aaa"}}>Nada esperando.</div>}
+            {colaSecadoZap.map(f=>(
+              <div key={f.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px"}}>
+                <input type="checkbox" checked={!!selSecadoZap[f.folio]} onChange={e=>{const c={...selSecadoZap};if(e.target.checked)c[f.folio]=String(paresDe(f.folio)||1);else delete c[f.folio];setSelSecadoZap(c);}}/>
+                <span style={{fontSize:13,color:"#3e2723",flex:1}}>{f.cliente} · {f.folio}</span>
+                {selSecadoZap[f.folio]!==undefined&&<input type="number" min="1" style={{...S.inp,width:60,padding:"4px 8px"}} value={selSecadoZap[f.folio]} onChange={e=>setSelSecadoZap({...selSecadoZap,[f.folio]:e.target.value})}/>}
+              </div>
+            ))}
+            {colaSecadoZap.length>0&&(<>
+              <div style={{fontSize:12,fontWeight:700,color:paresSeleccionados>20?"#c62828":"#5d4037",marginTop:4}}>Seleccionado: {paresSeleccionados} / 20 pares</div>
+              <div style={{display:"flex",gap:8,alignItems:"center",marginTop:8}}>
+                <input type="number" style={{...S.inp,width:80}} value={minLoteSec} onChange={e=>setMinLoteSec(e.target.value)} placeholder="min"/>
+                <button style={{...S.btnP,flex:1,background:"linear-gradient(135deg,#00838f,#26c6da)",opacity:(Object.keys(selSecadoZap).length>0&&paresSeleccionados<=20)?1:0.5}} disabled={Object.keys(selSecadoZap).length===0||paresSeleccionados>20} onClick={()=>{iniciarLoteSecado();setPanelSecadoraZap(false);}}>🔥 Iniciar secado con lo seleccionado</button>
+              </div>
+            </>)}
+          </div>
+        </div>
+      );
+    })()}
   </div>);
 }
 
@@ -6265,7 +6318,8 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
   if(!esAdmin&&vista==="tareas")return <TareasScreen sesion={sesion} onVolver={()=>setVista(null)} onLogout={onLogout} tareasDiarias={tareasDiarias} setTareasDiarias={setTareasDiarias} upsertTareaDiaria={upsertTareaDiaria} pins={pins} empleadas={empleadas} notas={notas} setNotas={setNotas} upsertNota={upsertNota}/>;
 
   // Si cerró caja y quiere seguir trabajando, DEBE abrir caja nuevamente
-  if(!cajaOk||esperandoApertura)return <AperturaObligatoria
+  // 🔒 El admin NUNCA pasa por esto: esa cuenta no se usa para facturar/cobrar, así que no tiene sentido pedirle apertura/cierre de caja.
+  if(!esAdmin&&(!cajaOk||esperandoApertura))return <AperturaObligatoria
     sesion={sesion}
     onLogout={onLogout}
     onAbierta={()=>{
@@ -6284,12 +6338,12 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
     {id:"reportes",icon:"📊",l:"Reportes"},{id:"depositos",icon:"🏦",l:"Depósitos"},
     {id:"conciliacion",icon:"🏛️",l:"Conciliación"},
     {id:"gastos",icon:"🛒",l:"Gastos"},{id:"inventario",icon:"📦",l:"Inventario"},{id:"productosAdmin",icon:"🛍️",l:"Productos"},{id:"sorteoAdmin",icon:"🎟️",l:"Sorteo"},
-    {id:"equipo",icon:"👩",l:"Equipo"},{id:"incentivosAdmin",icon:"🎯",l:"Incentivos"},{id:"maquinasAdmin",icon:"🏭",l:"Máquinas"},{id:"pinsAdmin",icon:"🔒",l:"PINs"},{id:"produccionAdmin",icon:"🧺",l:"Producción"},{id:"tareasAdmin",icon:"📋",l:"Tareas"},{id:"notasAdmin",icon:"📝",l:"Notas"},{id:"caja",icon:"💰",l:"Caja"},
+    {id:"equipo",icon:"👩",l:"Equipo"},{id:"incentivosAdmin",icon:"🎯",l:"Incentivos"},{id:"maquinasAdmin",icon:"🏭",l:"Máquinas"},{id:"pinsAdmin",icon:"🔒",l:"PINs"},{id:"produccionAdmin",icon:"🧺",l:"Producción"},{id:"tareasAdmin",icon:"📋",l:"Tareas"},{id:"notasAdmin",icon:"📝",l:"Notas"},
     {id:"config",icon:"⚙️",l:"Config"},{id:"usuarios",icon:"🔑",l:"Usuarios"},
   ];
   // 🗂️ Agrupa las pestañas en categorías para que el panel admin se vea más ordenado (menos scroll horizontal, todo lo relacionado junto)
   const CATEGORIAS=[
-    {id:"ventas_caja",icon:"🧾",l:"Ventas y Caja",tabIds:["ventas","historial","pendientes","caja","depositos","conciliacion","cupones","promosAdmin","reportes","resumen"]},
+    {id:"ventas_caja",icon:"🧾",l:"Ventas",tabIds:["ventas","historial","pendientes","depositos","conciliacion","cupones","promosAdmin","reportes","resumen"]},
     {id:"personal",icon:"👥",l:"Personal",tabIds:["equipo","pinsAdmin","usuarios","tareasAdmin","notasAdmin","incentivosAdmin"]},
     {id:"inventario_cat",icon:"📦",l:"Inventario",tabIds:["inventario","productosAdmin","gastos","maquinasAdmin"]},
     {id:"negocio",icon:"📊",l:"Negocio",tabIds:["bi","clientes","sorteoAdmin","produccionAdmin","config"]},
@@ -6313,7 +6367,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
           🔔{(()=>{const n=ventas.filter(v=>!v.anulada&&(v.clasificacion?.restregadoEstado==="pendiente_confirmar"||(v.clasificacion?.serviciosAdicionales||[]).some(s=>s.estado==="pendiente_confirmar")||((v.estado||"recibido")==="listo"&&!v.checkMsgRetiro))).length+(clientes||[]).filter(c=>diasParaCumple(c.nacimiento)===0).length+(maquinas||[]).filter(m=>m.estado==="ocupada"&&m.finProgramado&&new Date(m.finProgramado)<new Date()).length+ventas.filter(v=>!v.anulada&&pagada(v)&&!v.facturadoSRI).length+ventas.filter(v=>!v.anulada&&(v.estado||"recibido")!=="entregado"&&fechaLocal(v.entrega)===fechaHoyLocal()).length+ventas.filter(v=>!v.anulada&&(v.estado||"recibido")!=="entregado"&&v.notas&&v.notas.trim()).length;return n>0&&<span style={{position:"absolute",top:-4,right:-4,background:"#e53935",color:"#fff",borderRadius:10,fontSize:9,fontWeight:800,padding:"1px 5px"}}>{n}</span>;})()}
         </button>
         <button onClick={()=>setShowSalida(true)} style={{background:"rgba(220,50,50,.3)",border:"none",borderRadius:6,color:"#ffcccc",fontSize:11,padding:"4px 10px",cursor:"pointer",fontWeight:600}}>💸 Salida</button>
-        {cierreOk?<button onClick={onLogout} style={{background:"rgba(255,255,255,.15)",border:"none",borderRadius:6,color:"#fff",fontSize:11,padding:"4px 10px",cursor:"pointer"}}>Salir</button>:<button onClick={()=>alert("Debes hacer el cierre de caja antes de salir.")} style={{background:"rgba(255,80,80,.3)",border:"none",borderRadius:6,color:"#ffcccc",fontSize:11,padding:"4px 10px",cursor:"not-allowed"}}>🔒 Salir</button>}
+        <button onClick={onLogout} style={{background:"rgba(255,255,255,.15)",border:"none",borderRadius:6,color:"#fff",fontSize:11,padding:"4px 10px",cursor:"pointer"}}>Salir</button>
       </div>
     </div></div>
     <div style={{background:"#fff",display:"flex",borderBottom:"2px solid #1a3c5e",maxWidth:700,margin:"0 auto",position:"sticky",top:0,zIndex:11,overflowX:"auto"}}>
