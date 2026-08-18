@@ -20,7 +20,7 @@ const SERVICIOS_DEFAULT = [
   {id:"017",label:"LIBRA ADICIONAL",precio:0.30,limite:3},{id:"018",label:"LAVADO EN SECO TERNO",precio:10.50},
   {id:"019",label:"LAVADO EN SECO SACO",precio:5.50},{id:"020",label:"PRELAVADO BASICO",precio:1.00},
   {id:"021",label:"LAVADO ALMOHADA ESTANDAR",precio:3.50},{id:"022",label:"SOLO SECADO",precio:5.00},
-  {id:"023",label:"LAVADO ROPA + COBIJAS 16LB",precio:6.50},{id:"024",label:"SERVICIO EXPRESS",precio:1.50},
+  {id:"02	3",label:"LAVADO ROPA + COBIJAS 16LB",precio:6.50},{id:"024",label:"SERVICIO EXPRESS",precio:1.50},
   {id:"025",label:"PLANCHADO CAMISA",precio:1.25},{id:"026",label:"LAVADO Y PLANCHADO CAMISA",precio:2.30},
   {id:"027",label:"10 PARES DE ZAPATOS",precio:24.99},{id:"028",label:"LAVADO ROPA INDUSTRIAL",precio:10.00},
   {id:"029",label:"LAVADO SABANAS Y 1 COBIJA",precio:5.00},{id:"030",label:"LAVADO 1 MOCHILA",precio:3.50},
@@ -1013,10 +1013,42 @@ function LoginScreen({onLogin}){
       }
     }catch(e){console.log("No se pudo sincronizar usuarios:",e);}
   })();},[]);
-  const go=()=>{
+  const [verificando,setVerificando]=useState(false);
+  const go=async()=>{
     const users=load("ll_usuarios",USUARIOS_DEFAULT);
     const found=users.find(x=>x.usuario.toLowerCase()===u.toLowerCase().trim()&&x.clave===c);
     if(!found){setErr("Usuario o clave incorrectos");return;}
+    // 🔒 El admin nunca maneja caja, así que no aplica esta verificación para esa cuenta
+    if(found.rol==="Administrador"){onLogin(found);return;}
+    // 🔒 Antes de dejar entrar, revisa si hay una caja de OTRA persona abierta hoy sin cerrar
+    // (protege contra el caso de que el navegador pierda la sesión guardada — ej. Safari liberando espacio —
+    // y alguien pueda entrar con otro usuario dejando la caja anterior sin cuadrar)
+    setVerificando(true);
+    try{
+      const {db}=await import("./firebase");
+      const {collection,getDocs}=await import("firebase/firestore");
+      const hoy=fechaHoyLocal();
+      const snap=await getDocs(collection(db,"cajas"));
+      const cajasHoy=snap.docs.map(d=>d.data()).filter(c=>c.dia===hoy);
+      const porEmpleado={};
+      cajasHoy.forEach(c=>{
+        const id=String(c.empleadaId);
+        if(!porEmpleado[id])porEmpleado[id]={aperturas:[],cierres:[],nombre:""};
+        if(c.tipo==="apertura"){porEmpleado[id].aperturas.push(c);if(c.empleadaNombre)porEmpleado[id].nombre=c.empleadaNombre;}
+        else if(c.tipo==="cierre"){porEmpleado[id].cierres.push(c);if(c.emp)porEmpleado[id].nombre=c.emp;}
+      });
+      let abiertaDe=null;
+      Object.entries(porEmpleado).forEach(([id,d])=>{
+        if(String(id)===String(found.id))return; // su propia caja no bloquea su propio ingreso
+        if(d.aperturas.length===0)return;
+        const ultApertura=d.aperturas.sort((a,b)=>new Date(b.fecha)-new Date(a.fecha))[0];
+        const ultCierre=d.cierres.sort((a,b)=>new Date(b.fecha)-new Date(a.fecha))[0];
+        const sigueAbierta=!ultCierre||new Date(ultCierre.fecha)<new Date(ultApertura.fecha);
+        if(sigueAbierta)abiertaDe=d.nombre||"otra persona";
+      });
+      setVerificando(false);
+      if(abiertaDe){setErr(`⚠️ ${abiertaDe} tiene la caja abierta sin cerrar hoy. Debe entrar ${abiertaDe.split(" ")[0]} y hacer el cierre de caja antes de que otra persona pueda ingresar.`);return;}
+    }catch(e){console.log("No se pudo verificar cajas abiertas:",e);setVerificando(false);}
     onLogin(found);
   };
   return(
@@ -1036,7 +1068,7 @@ function LoginScreen({onLogin}){
           <button onClick={()=>setShow(!show)} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",fontSize:16}}>{show?"🙈":"👁️"}</button>
         </div>
         {err&&<div style={S.err}>{err}</div>}
-        <button style={{...S.btnP,padding:"14px",fontSize:16,borderRadius:12}} onClick={go}>Ingresar →</button>
+        <button style={{...S.btnP,padding:"14px",fontSize:16,borderRadius:12,opacity:verificando?0.7:1}} onClick={go} disabled={verificando}>{verificando?"Verificando...":"Ingresar →"}</button>
       </div>
     </div>
   );
