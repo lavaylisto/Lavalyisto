@@ -1794,7 +1794,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
   const [notifOn,setNotifOn]=useState(typeof Notification!=="undefined"&&Notification.permission==="granted");
   const [panelLavadoraZap,setPanelLavadoraZap]=useState(false); // panel al tocar la máquina 1LZ: pendientes/lavados/centrifugando
   const [panelSecadoraZap,setPanelSecadoraZap]=useState(false); // panel al tocar la máquina 1SZ: esperando secar/secando
-  const [tabProd,setTabProd]=useState("todos"); // "todos" | "ropa" | "zapatos" — separa la pantalla de producción en secciones
+  const [tabProd,setTabProd]=useState("maquinas"); // "maquinas" | "ropa" | "zapatos" — separa la pantalla de producción en secciones
 
   const activos=ventas.filter(v=>!v.anulada&&["recibido","proceso"].includes(v.estado||"recibido")).sort((a,b)=>new Date(a.fecha)-new Date(b.fecha));
   const eventosDe=folio=>eventosProduccion.filter(ev=>ev.ventaFolio===folio);
@@ -1834,7 +1834,9 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
   const colaSecadoZap=flujosZapatos.filter(f=>{const cc=cargaDe(f.folio,"centrifugado",f.grupo);return cc?.finReal&&!cargaDe(f.folio,"secado",f.grupo);});
   const paresSeleccionados=Object.values(selSecadoZap).reduce((a,p)=>a+(parseInt(p)||0),0);
   // 📊 Totales de pares en cada etapa, para tener claro cuántos van por lavar, en lavado, esperando/en centrifugado, y esperando/en secado
-  const cargasZapActivas=tipo=>cargas.filter(c=>c.grupo==="zapatos"&&c.tipo===tipo&&!c.finReal);
+  // 🔧 Una carga solo cuenta como "activa" si la máquina TODAVÍA la referencia y está ocupada — evita cargas huérfanas (ej. máquina liberada a mano) que se quedan mostrando pares fantasma para siempre
+  const cargaEsActivaEnMaquina=c=>maquinas.some(m=>m.cargaActualId===c.id&&m.estado==="ocupada");
+  const cargasZapActivas=tipo=>cargas.filter(c=>c.grupo==="zapatos"&&c.tipo===tipo&&!c.finReal&&cargaEsActivaEnMaquina(c));
   const paresEnCarga=c=>c.pares!=null?c.pares:(c.ventaFolios&&c.ventaFolios.length?c.ventaFolios:[c.ventaFolio]).reduce((a,f)=>a+paresDe(f),0);
   const totalesZapatos={
     porLavar:colaLavadoZap.reduce((a,f)=>a+paresDe(f.folio),0),
@@ -2063,7 +2065,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
     setPickerFor({tipoMaquina:"lavadora",grupo:"zapatos",lote:{folios,tipo:"lavado"}});
   };
   // 🧺 Ampliar un lavado de zapatos que YA está en marcha (1LZ ocupada no bloquea — se le suman más órdenes al mismo lote en curso)
-  const cargaLavadoActiva1LZ=cargas.find(c=>c.maquinaId==="1LZ"&&c.tipo==="lavado"&&!c.finReal);
+  const cargaLavadoActiva1LZ=cargas.find(c=>c.maquinaId==="1LZ"&&c.tipo==="lavado"&&!c.finReal&&cargaEsActivaEnMaquina(c));
   const agregarALoteLavadoActivo=(carga,folios,empleadaId)=>{
     const nuevos=[...new Set([...(carga.ventaFolios||[]),...folios])];
     const paresActualizados=nuevos.reduce((a,f)=>a+paresDe(f),0);
@@ -2137,48 +2139,60 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
     {sinPins&&<div style={{...S.alrt,background:"#fff3e0",color:"#e65100"}}>⚠️ Todavía no hay PINs asignados. Pídele al admin que los configure en 🔒 PINs.</div>}
     {!notifOn&&<button onClick={activarNotificaciones} style={{...S.btnS,width:"100%",marginBottom:12,background:"#fff3e0",color:"#e65100"}}>🔔 Activar notificaciones en esta pantalla</button>}
 
-    {[...new Set(maquinas.map(m=>m.zona||"Sin asignar"))].map(z=>(
-      <div key={z} style={{marginBottom:16}}>
-        <div style={{fontSize:12,fontWeight:700,color:"#888",marginBottom:6}}>📍 {z.toUpperCase()}</div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(90px,1fr))",gap:8}}>
-          {maquinas.filter(m=>(m.zona||"Sin asignar")===z).map(m=><TarjetaMaquina key={m.id} m={m} cargas={cargas} ventas={ventas} onClick={m.id==="1LZ"?()=>setPanelLavadoraZap(true):m.id==="1SZ"?()=>setPanelSecadoraZap(true):undefined}/>)}
-        </div>
-      </div>
-    ))}
-
-    {(colaLavadoZap.length>0||colaCentrifugadoZap.length>0||colaSecadoZap.length>0||totalesZapatos.enLavado>0||totalesZapatos.enCentrifugado>0||totalesZapatos.enSecado>0)&&(
-      <div style={{background:"#fdf6f0",border:"1.5px solid #8d6e63",borderRadius:12,padding:12,marginBottom:16}}>
-        <div style={{fontSize:13,fontWeight:800,color:"#5d4037",marginBottom:8}}>👟 Producción de zapatos</div>
-        <div style={{fontSize:11,color:"#8d6e63",marginBottom:10}}>Toca la lavadora de zapatos (1LZ) o su secadora (1SZ) en el tablero de arriba para ver el detalle y gestionar cada etapa.</div>
-
-        {/* 📊 Totales de pares por etapa */}
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>
-          {[
-            ["Por lavar",totalesZapatos.porLavar,"#8d6e63"],
-            ["En lavado",totalesZapatos.enLavado,"#5c6bc0"],
-            ["Esp. centrifugado",totalesZapatos.esperandoCentrifugado,"#8d6e63"],
-            ["En centrifugado",totalesZapatos.enCentrifugado,"#7986cb"],
-            ["Esp. secado",totalesZapatos.esperandoSecado,"#8d6e63"],
-            ["En secado",totalesZapatos.enSecado,"#00838f"],
-          ].map(([lbl,val,color])=>(
-            <div key={lbl} style={{background:"#fff",borderRadius:8,padding:"6px 4px",textAlign:"center",border:`1px solid ${color}`}}>
-              <div style={{fontWeight:800,fontSize:16,color}}>{val}</div>
-              <div style={{fontSize:9,color:"#5d4037"}}>{lbl}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    )}
-
-    <div style={{display:"flex",gap:8,marginBottom:10}}>
-      {[["todos","📋 Todos"],["ropa","👕 Ropa"],["zapatos","👟 Zapatos"]].map(([val,l])=>(
-        <button key={val} onClick={()=>setTabProd(val)} style={{flex:1,padding:"8px 6px",borderRadius:10,border:tabProd===val?"2px solid #1a3c5e":"1.5px solid #e0e8f0",background:tabProd===val?"#eaf3fb":"#fff",color:"#1a3c5e",fontWeight:700,fontSize:12,cursor:"pointer"}}>{l}</button>
+    <div style={{display:"flex",gap:8,marginBottom:14}}>
+      {[["maquinas","🏭 Máquinas"],["ropa","👕 Ropa"],["zapatos","👟 Zapatos"]].map(([val,l])=>(
+        <button key={val} onClick={()=>setTabProd(val)} style={{flex:1,padding:"9px 6px",borderRadius:10,border:tabProd===val?"2px solid #1a3c5e":"1.5px solid #e0e8f0",background:tabProd===val?"#eaf3fb":"#fff",color:"#1a3c5e",fontWeight:700,fontSize:12,cursor:"pointer"}}>{l}</button>
       ))}
     </div>
 
+    {tabProd==="maquinas"&&(
+      <>
+        <div style={{fontSize:12,color:"#888",marginBottom:10}}>Estado general de todas las máquinas — 🟢 libre / 🔵 ocupada / 🛠️ mantenimiento.</div>
+        {[...new Set(maquinas.map(m=>m.zona||"Sin asignar"))].map(z=>(
+          <div key={z} style={{marginBottom:16}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#888",marginBottom:6}}>📍 {z.toUpperCase()}</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(90px,1fr))",gap:8}}>
+              {maquinas.filter(m=>(m.zona||"Sin asignar")===z).map(m=><TarjetaMaquina key={m.id} m={m} cargas={cargas} ventas={ventas} onClick={m.id==="1LZ"?()=>setPanelLavadoraZap(true):m.id==="1SZ"?()=>setPanelSecadoraZap(true):undefined}/>)}
+            </div>
+          </div>
+        ))}
+      </>
+    )}
+
+    {tabProd==="zapatos"&&(
+      <>
+        <div style={{fontSize:12,color:"#888",marginBottom:8}}>Toca la lavadora o la secadora de zapatos para ver el detalle y gestionar cada etapa.</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(90px,1fr))",gap:8,marginBottom:16}}>
+          {maquinas.filter(m=>m.id==="1LZ"||m.id==="1SZ").map(m=><TarjetaMaquina key={m.id} m={m} cargas={cargas} ventas={ventas} onClick={m.id==="1LZ"?()=>setPanelLavadoraZap(true):()=>setPanelSecadoraZap(true)}/>)}
+        </div>
+
+        {(colaLavadoZap.length>0||colaCentrifugadoZap.length>0||colaSecadoZap.length>0||totalesZapatos.enLavado>0||totalesZapatos.enCentrifugado>0||totalesZapatos.enSecado>0)&&(
+          <div style={{background:"#fdf6f0",border:"1.5px solid #8d6e63",borderRadius:12,padding:12,marginBottom:16}}>
+            <div style={{fontSize:13,fontWeight:800,color:"#5d4037",marginBottom:8}}>👟 Producción de zapatos</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>
+              {[
+                ["Por lavar",totalesZapatos.porLavar,"#8d6e63"],
+                ["En lavado",totalesZapatos.enLavado,"#5c6bc0"],
+                ["Esp. centrifugado",totalesZapatos.esperandoCentrifugado,"#8d6e63"],
+                ["En centrifugado",totalesZapatos.enCentrifugado,"#7986cb"],
+                ["Esp. secado",totalesZapatos.esperandoSecado,"#8d6e63"],
+                ["En secado",totalesZapatos.enSecado,"#00838f"],
+              ].map(([lbl,val,color])=>(
+                <div key={lbl} style={{background:"#fff",borderRadius:8,padding:"6px 4px",textAlign:"center",border:`1px solid ${color}`}}>
+                  <div style={{fontWeight:800,fontSize:16,color}}>{val}</div>
+                  <div style={{fontSize:9,color:"#5d4037"}}>{lbl}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </>
+    )}
+
+    {tabProd!=="maquinas"&&(<>
     <div style={{fontSize:12,fontWeight:700,color:"#888",marginBottom:6}}>📋 ÓRDENES EN PRODUCCIÓN</div>
-    {activos.filter(v=>tabProd==="todos"||(tabProd==="zapatos"?perteneceZapatos(v):perteneceRopa(v))).length===0&&<div style={{textAlign:"center",padding:"40px 20px",color:"#aaa"}}><div style={{fontSize:48,marginBottom:8}}>🏭</div><div>No hay órdenes en producción ahora mismo</div></div>}
-    {activos.filter(v=>tabProd==="todos"||(tabProd==="zapatos"?perteneceZapatos(v):perteneceRopa(v))).map(v=>{
+    {activos.filter(v=>tabProd==="zapatos"?perteneceZapatos(v):perteneceRopa(v)).length===0&&<div style={{textAlign:"center",padding:"40px 20px",color:"#aaa"}}><div style={{fontSize:48,marginBottom:8}}>🏭</div><div>No hay órdenes en producción ahora mismo</div></div>}
+    {activos.filter(v=>tabProd==="zapatos"?perteneceZapatos(v):perteneceRopa(v)).map(v=>{
       const maquinaDe=id=>maquinas.find(m=>m.id===id);
       const buscarEventoG=(folio,etapa,grupo)=>eventosDe(folio).filter(ev=>ev.etapa===etapa&&gruposEquivalentes(grupo).includes(ev.grupo||null)).sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp))[0];
       const esZapato=lbl=>/ZAPATO|PARES?\b/i.test(lbl||"");
@@ -2386,6 +2400,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
         </div>
       );
     })}
+    </>)}
 
     {clasifFor&&<ClasificacionModal onConfirmar={onClasifConfirm} onCancelar={()=>setClasifFor(null)}/>}
     {pickerFor&&<MachinePicker maquinas={maquinas} tipoMaquina={pickerFor.tipoMaquina} tiempoSugerido={pickerFor.lote?(pickerFor.lote.tipo==="lavado"?parseInt(minLoteLav)||45:pickerFor.lote.tipo==="centrifugado"?parseInt(minLoteCent)||15:parseInt(minLoteSec)||45):45} repetir={!!pickerFor.repetir} grupo={pickerFor.grupo} centrifugado={!!pickerFor.centrifugado} onConfirmar={onPickerConfirm} onCancelar={()=>setPickerFor(null)}/>}
