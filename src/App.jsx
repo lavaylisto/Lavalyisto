@@ -20,7 +20,7 @@ const SERVICIOS_DEFAULT = [
   {id:"017",label:"LIBRA ADICIONAL",precio:0.30,limite:3},{id:"018",label:"LAVADO EN SECO TERNO",precio:10.50},
   {id:"019",label:"LAVADO EN SECO SACO",precio:5.50},{id:"020",label:"PRELAVADO BASICO",precio:1.00},
   {id:"021",label:"LAVADO ALMOHADA ESTANDAR",precio:3.50},{id:"022",label:"SOLO SECADO",precio:5.00},
-  {id:"02	3",label:"LAVADO ROPA + COBIJAS 16LB",precio:6.50},{id:"024",label:"SERVICIO EXPRESS",precio:1.50},
+  {id:"023",label:"LAVADO ROPA + COBIJAS 16LB",precio:6.50},{id:"024",label:"SERVICIO EXPRESS",precio:1.50},
   {id:"025",label:"PLANCHADO CAMISA",precio:1.25},{id:"026",label:"LAVADO Y PLANCHADO CAMISA",precio:2.30},
   {id:"027",label:"10 PARES DE ZAPATOS",precio:24.99},{id:"028",label:"LAVADO ROPA INDUSTRIAL",precio:10.00},
   {id:"029",label:"LAVADO SABANAS Y 1 COBIJA",precio:5.00},{id:"030",label:"LAVADO 1 MOCHILA",precio:3.50},
@@ -484,8 +484,8 @@ const expCSVProduccion=(desde,hasta,{cargas,eventosProduccion,ventas,empleadas},
   });
 
   filasRaw.sort((a,b)=>new Date(a[0])-new Date(b[0]));
-  const enc=["Fecha/hora del evento","Fecha/hora que ingresó la orden","Folio(s)","Cliente(s)","Etapa","Máquina","Min. programados","Duración real (min)","Empleada inicio","Empleada fin/retiro","Observaciones"];
-  const filas=filasRaw.map(f=>[fmt(f[0]),ingresoDe(f[10]||f[1]),f[1],f[2],f[3],f[4],f[5],f[6],f[7],f[8],f[9]]);
+  const enc=["Fecha","Folio(s)","Cliente(s)","Etapa","Máquina","Min. programados","Duración real (min)","Empleada inicio","Empleada fin/retiro","Observaciones","Fecha/hora que ingresó la orden"];
+  const filas=filasRaw.map(f=>[fmt(f[0]),f[1],f[2],f[3],f[4],f[5],f[6],f[7],f[8],f[9],ingresoDe(f[10]||f[1])]);
   const csv=[enc,...filas].map(f=>f.map(c=>'"'+String(c).replace(/"/g,'\\"')+'"').join(",")).join("\n");
   const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
   const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=(titulo||"produccion")+"-"+desde+"_a_"+hasta+".csv";a.click();
