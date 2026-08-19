@@ -450,6 +450,12 @@ const expCSV=(ventas,titulo,empleadas)=>{
     const m=[...new Set((v.abonos||[]).map(ab=>ab.metodo))].join("/");
     return[v.folio,fmt(v.fecha),v.clienteNombre||"",v.items.map(it=>it.label).join("|"),"$"+v.total.toFixed(2),"$"+p.toFixed(2),"$"+(v.total-p).toFixed(2),m,v.estado||"recibido",v.notas||""];
   });
+  // 💰 Fila de totales al final — para cuadrar cuentas: cuánto se vendió, cuánto se cobró y cuánto queda pendiente
+  const totVendido=ventas.reduce((a,v)=>a+v.total,0);
+  const totCobrado=ventas.reduce((a,v)=>a+(v.abonos||[]).reduce((x,ab)=>x+ab.monto,0),0);
+  const totPendiente=totVendido-totCobrado;
+  filas.push(["","","","","","","","","",""]);
+  filas.push(["TOTALES",`${ventas.length} venta(s)`,"","","$"+totVendido.toFixed(2),"$"+totCobrado.toFixed(2),"$"+totPendiente.toFixed(2),"","",""]);
   const csv=[enc,...filas].map(f=>f.map(c=>'"'+String(c).replace(/"/g,'\\"')+'"').join(",")).join("\n");
   const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
   const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=titulo+"-"+fechaHoyLocal()+".csv";a.click();
@@ -1135,7 +1141,7 @@ function SelectorVista({sesion,onElegir,onLogout}){
 }
 
 // 🏭 PRODUCCIÓN — pantalla completa, independiente de Facturación. Sin tabs de caja/ventas; todo aquí se identifica por PIN.
-function ProduccionScreen({sesion,onVolver,onLogout,ventas,setVentas,upsertVenta,empleadas,pins,eventosProduccion,setEventosProduccion,upsertEvento,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga,clientes}){
+function ProduccionScreen({sesion,onVolver,onIrFacturacion,onIrTareas,onLogout,ventas,setVentas,upsertVenta,empleadas,pins,eventosProduccion,setEventosProduccion,upsertEvento,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga,clientes}){
   const [showNotifs,setShowNotifs]=useState(false);
   const miEmpleadaSesionPS=(empleadas||[]).find(e=>normNombre(e.nombre)&&normNombre(e.nombre)===normNombre(sesion?.nombre))
     ||(empleadas||[]).find(e=>{const en=normNombre(e.nombre).split(" ")[0];const sn=normNombre(sesion?.nombre).split(" ")[0];return en&&sn&&en===sn;});
@@ -1160,7 +1166,8 @@ function ProduccionScreen({sesion,onVolver,onLogout,ventas,setVentas,upsertVenta
           <button onClick={()=>setShowNotifs(true)} style={{position:"relative",background:"rgba(255,255,255,.2)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 12px",cursor:"pointer",fontWeight:600}}>
             🔔{totalNotifs>0&&<span style={{position:"absolute",top:-4,right:-4,background:"#e53935",color:"#fff",borderRadius:10,fontSize:9,fontWeight:800,padding:"1px 5px"}}>{totalNotifs}</span>}
           </button>
-          <button onClick={onVolver} style={{background:"rgba(255,255,255,.2)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 12px",fontWeight:600,cursor:"pointer"}}>🧾 Ir a Facturación</button>
+          <button onClick={onIrFacturacion} style={{background:"rgba(255,255,255,.2)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 12px",fontWeight:600,cursor:"pointer"}}>🧾 Facturación</button>
+          <button onClick={onIrTareas} style={{background:"rgba(255,255,255,.2)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 12px",fontWeight:600,cursor:"pointer"}}>📋 Tareas</button>
           <button onClick={onLogout} style={{background:"rgba(255,255,255,.2)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 12px",fontWeight:600,cursor:"pointer"}}>Salir</button>
         </div>
       </div>
@@ -1298,7 +1305,7 @@ function TareasChecklist({tareasDiarias,setTareasDiarias,upsertTareaDiaria,pins,
 }
 
 // 📋 TAREAS — pantalla independiente (misma lógica de separación que Producción)
-function TareasScreen({sesion,onVolver,onLogout,tareasDiarias,setTareasDiarias,upsertTareaDiaria,pins,empleadas,notas,setNotas,upsertNota}){
+function TareasScreen({sesion,onVolver,onIrFacturacion,onIrProduccion,onLogout,tareasDiarias,setTareasDiarias,upsertTareaDiaria,pins,empleadas,notas,setNotas,upsertNota}){
   const [showNota,setShowNota]=useState(false);
   const guardarNota=datos=>{
     const nota={id:"nota_"+Date.now(),fecha:new Date().toISOString(),...datos,estado:"abierta",revisadaEn:null,respuestaAdmin:null};
@@ -1316,7 +1323,8 @@ function TareasScreen({sesion,onVolver,onLogout,tareasDiarias,setTareasDiarias,u
           <div style={{fontSize:11,color:"#d0f4f8"}}>Cada tarea se confirma con PIN</div>
         </div>
         <div style={{display:"flex",gap:8}}>
-          <button onClick={onVolver} style={{background:"rgba(255,255,255,.2)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 12px",fontWeight:600,cursor:"pointer"}}>🧾 Ir a Facturación</button>
+          <button onClick={onIrFacturacion} style={{background:"rgba(255,255,255,.2)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 12px",fontWeight:600,cursor:"pointer"}}>🧾 Facturación</button>
+          <button onClick={onIrProduccion} style={{background:"rgba(255,255,255,.2)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 12px",fontWeight:600,cursor:"pointer"}}>🏭 Producción</button>
           <button onClick={onLogout} style={{background:"rgba(255,255,255,.2)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 12px",fontWeight:600,cursor:"pointer"}}>Salir</button>
         </div>
       </div>
@@ -1865,6 +1873,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
   // 🔥 Solo entran a la cola de secado una vez que el centrifugado terminó
   const colaSecadoZap=flujosZapatos.filter(f=>{const cc=cargaDe(f.folio,"centrifugado",f.grupo);return cc?.finReal&&!cargaDe(f.folio,"secado",f.grupo);});
   const paresSeleccionados=Object.values(selSecadoZap).reduce((a,p)=>a+(parseInt(p)||0),0);
+  const paresSeleccionadosCentrifugado=Object.values(selCentrifugadoZap).reduce((a,p)=>a+(parseInt(p)||0),0);
   // 📊 Totales de pares en cada etapa, para tener claro cuántos van por lavar, en lavado, esperando/en centrifugado, y esperando/en secado
   // 🔧 Una carga solo cuenta como "activa" si la máquina TODAVÍA la referencia y está ocupada — evita cargas huérfanas (ej. máquina liberada a mano) que se quedan mostrando pares fantasma para siempre
   const cargaEsActivaEnMaquina=c=>maquinas.some(m=>m.cargaActualId===c.id&&m.estado==="ocupada");
@@ -2122,8 +2131,9 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
   const iniciarLoteCentrifugado=()=>{
     const folios=Object.keys(selCentrifugadoZap).filter(f=>selCentrifugadoZap[f]);
     if(folios.length===0)return;
+    if(paresSeleccionadosCentrifugado>8){alert("⚠️ La lavadora para centrifugar solo admite hasta 8 pares por tanda. Quita algunos antes de continuar — el resto los centrifugas en otra carga aparte.");return;}
     setSelCentrifugadoZap({});
-    setPickerFor({tipoMaquina:"lavadora",grupo:"zapatos",centrifugado:true,lote:{folios,tipo:"centrifugado"}});
+    setPickerFor({tipoMaquina:"lavadora",grupo:"zapatos",centrifugado:true,lote:{folios,tipo:"centrifugado",pares:paresSeleccionadosCentrifugado}});
   };
   const iniciarLoteSecado=()=>{
     const folios=Object.keys(selSecadoZap).filter(f=>selSecadoZap[f]);
@@ -2460,6 +2470,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
               <div key={c.id} style={{...S.vcard,padding:"8px 10px",marginBottom:6}}>
                 <div style={{fontSize:12,color:"#5d4037"}}>{maquinaDe(c.maquinaId)?.nombre||c.maquinaId} · {paresEnCarga(c)} pares</div>
                 <div style={{fontSize:16,fontFamily:"monospace",fontWeight:800,color:"#5c6bc0"}}><CuentaRegresiva finProgramado={c.finProgramado}/></div>
+                <button style={{...S.btnS,width:"100%",marginTop:6,background:"#e3f2fd",color:"#1565c0"}} onClick={()=>setPinFor({folio:null,accion:"retirar_lavado",label:"¿Quién retira este lavado?",extra:{carga:c}})}>📤 Retirar — ya está listo para centrifugar</button>
               </div>
             ))}
 
@@ -2491,24 +2502,26 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
               <div key={c.id} style={{...S.vcard,padding:"8px 10px",marginBottom:6}}>
                 <div style={{fontSize:12,color:"#5d4037"}}>{maquinaDe(c.maquinaId)?.nombre||c.maquinaId} · {paresEnCarga(c)} pares</div>
                 <div style={{fontSize:16,fontFamily:"monospace",fontWeight:800,color:"#7986cb"}}><CuentaRegresiva finProgramado={c.finProgramado}/></div>
+                <button style={{...S.btnS,width:"100%",marginTop:6,background:"#ede7f6",color:"#5c6bc0"}} onClick={()=>setPinFor({folio:null,accion:"retirar_centrifugado",label:"¿Quién retira este centrifugado?",extra:{carga:c}})}>📤 Retirar — pasa a esperar secado</button>
               </div>
             ))}
 
             <div style={{fontSize:12,fontWeight:800,color:"#5d4037",marginTop:10,marginBottom:6}}>✅ Lavados — esperando centrifugado ({totalesZapatos.esperandoCentrifugado} pares)</div>
             {colaCentrifugadoZap.length===0&&<div style={{fontSize:12,color:"#aaa"}}>Nada esperando.</div>}
             {colaCentrifugadoZap.map(f=>(
-              <label key={f.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px",cursor:"pointer"}}>
-                <input type="checkbox" checked={!!selCentrifugadoZap[f.folio]} onChange={e=>setSelCentrifugadoZap({...selCentrifugadoZap,[f.folio]:e.target.checked})}/>
+              <div key={f.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px"}}>
+                <input type="checkbox" checked={selCentrifugadoZap[f.folio]!==undefined} onChange={e=>{const c={...selCentrifugadoZap};if(e.target.checked)c[f.folio]=String(paresDe(f.folio)||1);else delete c[f.folio];setSelCentrifugadoZap(c);}}/>
                 <span style={{fontSize:13,color:"#3e2723",flex:1}}>{f.cliente} · {f.folio}</span>
-                <span style={{fontSize:11,color:"#8d6e63",fontWeight:700}}>{paresDe(f.folio)} pares</span>
-              </label>
+                {selCentrifugadoZap[f.folio]!==undefined&&<input type="number" min="1" style={{...S.inp,width:60,padding:"4px 8px"}} value={selCentrifugadoZap[f.folio]} onChange={e=>setSelCentrifugadoZap({...selCentrifugadoZap,[f.folio]:e.target.value})}/>}
+              </div>
             ))}
-            {colaCentrifugadoZap.length>0&&(
+            {colaCentrifugadoZap.length>0&&(<>
+              <div style={{fontSize:12,fontWeight:700,color:paresSeleccionadosCentrifugado>8?"#c62828":"#5d4037",marginTop:4}}>Seleccionado: {paresSeleccionadosCentrifugado} / 8 pares (máximo por tanda de centrifugado)</div>
               <div style={{display:"flex",gap:8,alignItems:"center",marginTop:8}}>
                 <input type="number" style={{...S.inp,width:80}} value={minLoteCent} onChange={e=>setMinLoteCent(e.target.value)} placeholder="min"/>
-                <button style={{...S.btnP,flex:1,background:"linear-gradient(135deg,#7986cb,#5c6bc0)",opacity:Object.values(selCentrifugadoZap).some(Boolean)?1:0.5}} disabled={!Object.values(selCentrifugadoZap).some(Boolean)} onClick={()=>{iniciarLoteCentrifugado();setPanelLavadoraZap(false);}}>🌀 Centrifugar seleccionados (elige la máquina)</button>
+                <button style={{...S.btnP,flex:1,background:"linear-gradient(135deg,#7986cb,#5c6bc0)",opacity:(Object.keys(selCentrifugadoZap).length>0&&paresSeleccionadosCentrifugado<=8)?1:0.5}} disabled={Object.keys(selCentrifugadoZap).length===0||paresSeleccionadosCentrifugado>8} onClick={()=>{iniciarLoteCentrifugado();setPanelLavadoraZap(false);}}>🌀 Centrifugar seleccionados (elige la máquina)</button>
               </div>
-            )}
+            </>)}
           </div>
         </div>
       );
@@ -2532,6 +2545,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
               <div key={c.id} style={{...S.vcard,padding:"8px 10px",marginBottom:6}}>
                 <div style={{fontSize:12,color:"#5d4037"}}>{maquinaDe(c.maquinaId)?.nombre||c.maquinaId} · {paresEnCarga(c)} pares</div>
                 <div style={{fontSize:16,fontFamily:"monospace",fontWeight:800,color:"#00838f"}}><CuentaRegresiva finProgramado={c.finProgramado}/></div>
+                <button style={{...S.btnS,width:"100%",marginTop:6,background:"#e0f7fa",color:"#00838f"}} onClick={()=>setPinFor({folio:null,accion:"retirar_secado",label:"¿Quién retira este secado?",extra:{carga:c}})}>📤 Retirar — listo para empaquetar</button>
               </div>
             ))}
 
@@ -3267,7 +3281,7 @@ function PinsAdmin({empleadas,pins,setPins,upsertPin}){
   </div>);
 }
 
-function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta,upsertSalida,upsertCliente,upsertCaja,cupones,setCupones,upsertCupon,promos,cfgInc,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga,pins,eventosProduccion,setEventosProduccion,upsertEvento,productos,setProductos,upsertProducto,sorteos,setSorteos,upsertSorteo,setBoletosSorteo,upsertBoletoSorteo,boletosParaImprimir,setBoletosParaImprimir}){
+function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,onIrProduccion,onIrTareas,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta,upsertSalida,upsertCliente,upsertCaja,cupones,setCupones,upsertCupon,promos,cfgInc,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga,pins,eventosProduccion,setEventosProduccion,upsertEvento,productos,setProductos,upsertProducto,sorteos,setSorteos,upsertSorteo,setBoletosSorteo,upsertBoletoSorteo,boletosParaImprimir,setBoletosParaImprimir}){
   const [tab,setTab]=useState("hoy");const [busq,setBusq]=useState("");
   const [showNueva,setShowNueva]=useState(false);
   const [filtroTile,setFiltroTile]=useState(null); // 🔎 filtro rápido al tocar un contador (recibido/proceso/listo/entregado_pend)
@@ -3319,15 +3333,17 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
             <div style={{fontFamily:"'Playfair Display',serif",fontSize:20,color:"#fff",fontWeight:700}}>🫧 Lava<span style={{color:"#4db6e4"}}>&</span>Listo</div>
             <div style={{fontSize:12,color:"#a0c4da"}}>Hola, {sesion.nombre} 👋</div>
           </div>
-          <div style={{display:"flex",gap:8}}>
-            <button onClick={()=>setShowNotifs(true)} style={{position:"relative",background:"rgba(255,255,255,.2)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 12px",cursor:"pointer",fontWeight:600}}>
+          <div style={{display:"flex",gap:6,overflowX:"auto",maxWidth:"70vw"}}>
+            <button onClick={()=>setShowNotifs(true)} style={{position:"relative",background:"rgba(255,255,255,.2)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 10px",cursor:"pointer",fontWeight:600,flexShrink:0}}>
               🔔{totalNotifs>0&&<span style={{position:"absolute",top:-4,right:-4,background:"#e53935",color:"#fff",borderRadius:10,fontSize:9,fontWeight:800,padding:"1px 5px"}}>{totalNotifs}</span>}
             </button>
-            <button onClick={()=>setShowCaja(true)} style={{background:"rgba(255,255,255,.2)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 12px",cursor:"pointer",fontWeight:600}}>💰 Caja</button>
-            <button onClick={()=>setShowSalidaEmp(true)} style={{background:"rgba(220,50,50,.35)",border:"none",borderRadius:8,color:"#ffcccc",fontSize:12,padding:"6px 12px",cursor:"pointer",fontWeight:600}}>💸 Salida</button>
+            <button onClick={onIrProduccion} style={{background:"rgba(255,255,255,.2)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 10px",cursor:"pointer",fontWeight:600,flexShrink:0}}>🏭 Producción</button>
+            <button onClick={onIrTareas} style={{background:"rgba(255,255,255,.2)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 10px",cursor:"pointer",fontWeight:600,flexShrink:0}}>📋 Tareas</button>
+            <button onClick={()=>setShowCaja(true)} style={{background:"rgba(255,255,255,.2)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 10px",cursor:"pointer",fontWeight:600,flexShrink:0}}>💰 Caja</button>
+            <button onClick={()=>setShowSalidaEmp(true)} style={{background:"rgba(220,50,50,.35)",border:"none",borderRadius:8,color:"#ffcccc",fontSize:12,padding:"6px 10px",cursor:"pointer",fontWeight:600,flexShrink:0}}>💸 Salida</button>
             {cierreListo
-              ?<button onClick={onLogout} style={{background:"rgba(255,255,255,.15)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 12px",cursor:"pointer"}}>Salir</button>
-              :<button onClick={()=>alert("Debes hacer el cierre de caja antes de salir.")} style={{background:"rgba(255,80,80,.3)",border:"none",borderRadius:8,color:"#ffcccc",fontSize:12,padding:"6px 12px",cursor:"not-allowed"}}>🔒 Salir</button>
+              ?<button onClick={onLogout} style={{background:"rgba(255,255,255,.15)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 10px",cursor:"pointer",flexShrink:0}}>Salir</button>
+              :<button onClick={()=>alert("Debes hacer el cierre de caja antes de salir.")} style={{background:"rgba(255,80,80,.3)",border:"none",borderRadius:8,color:"#ffcccc",fontSize:12,padding:"6px 10px",cursor:"not-allowed",flexShrink:0}}>🔒 Salir</button>
             }
           </div>
         </div>
@@ -4417,6 +4433,7 @@ function Reportes({ventas,empleadas,salidasCaja}){
         </div>);})}
       </div>)}
       {sub==="excel"&&(<Card title="📥 Excel">
+        <div style={{fontSize:12,color:"#888",marginBottom:10}}>Cada descarga trae el detalle venta por venta y, al final del archivo, una fila de <strong>TOTALES</strong> con lo vendido, lo cobrado y lo pendiente por cobrar — para cuadrar cuentas de fin de mes y saber cuánto retirar a la cuenta de utilidades. Usa el selector de "Mes" de arriba para elegir el mes exacto (1 al 30/31).</div>
         {[{l:"Hoy",a:vHoy,t:"hoy"},{l:"Semana",a:vSem,t:"semana"},{l:"Mes",a:vMes,t:"mes"},{l:"Todo",a:ventas.filter(v=>!v.anulada),t:"completo"}].map(r=>(
           <button key={r.t} style={{...S.btnP,marginBottom:8}} onClick={()=>expCSV(r.a,`reporte-${r.t}`,empleadas)}>{r.l} ({r.a.length} ventas · ${sum(r.a).toFixed(2)})</button>
         ))}
@@ -5087,6 +5104,7 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
   const [coins,setCoins]=useState(()=>Object.fromEntries(MONEDAS.map(m=>[m,""])));
   const [tPic,setTPic]=useState("");const [tJep,setTJep]=useState("");const [tTar,setTTar]=useState("");
   const [paso,setPaso]=useState(0); // paso 0 = revisión obligatoria de estados
+  const [correccionUsada,setCorreccionUsada]=useState(false); // 🔒 solo se permite volver a corregir una vez
   const [revisado,setRevisado]=useState(false);
   const [waRevision,setWaRevision]=useState(null); // venta a la que hay que avisar desde la revisión
   // ---- Revisión de órdenes antes del cierre ----
@@ -5205,7 +5223,7 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
           <div style={{display:"flex",justifyContent:"space-between"}}><span>💳 Tarjeta</span><strong>${(cg.totTa||0).toFixed(2)}</strong></div>
         </div>
         <button style={{width:"100%",padding:"12px",background:"#1a3c5e",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:8}} onClick={()=>imprimir(cg)}>🖨️ Reimprimir ticket</button>
-        <button style={{width:"100%",padding:"12px",background:"linear-gradient(135deg,#2e7d32,#388e3c)",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:8}} onClick={()=>{setCg(null);setPaso(0);setRevisado(false);setModo("cierre");if(onResetCierre)onResetCierre();}}>🔄 Realizar otro cierre</button>
+        <button style={{width:"100%",padding:"12px",background:"linear-gradient(135deg,#2e7d32,#388e3c)",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:8}} onClick={()=>{setCg(null);setPaso(0);setRevisado(false);setCorreccionUsada(false);setModo("cierre");if(onResetCierre)onResetCierre();}}>🔄 Realizar otro cierre</button>
         <button style={{width:"100%",padding:"12px",background:"linear-gradient(135deg,#c62828,#e53935)",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer"}} onClick={()=>{if(onLogout)onLogout();}}>🚪 Salir</button>
       </div>
     </div>
@@ -5227,21 +5245,17 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
     {modo==="cierre"&&(<div>
       {ap&&<div style={{background:"#e8f5fd",borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:13}}>
         🔓 <strong>{ap.empleadaNombre}</strong> · Fondo: <strong>${ap.fondo.toFixed(2)}</strong>
-        <div style={{fontSize:11,color:"#1565c0",marginTop:4}}>
-          💡 Cobros de hoy: 💵 ${espEfBruto.toFixed(2)} · 🏦 ${espTr.toFixed(2)} · 💳 ${espTa.toFixed(2)}
-        </div>
-        {totMisSalidas>0&&<div style={{fontSize:12,color:"#c62828",fontWeight:700,marginTop:4,background:"#ffebee",borderRadius:6,padding:"4px 8px"}}>
-          💸 Salidas de caja: -${totMisSalidas.toFixed(2)}
-          {misSalidas.map(s=><span key={s.id} style={{display:"block",fontWeight:400,fontSize:11}}>• {s.motivo}: ${s.monto.toFixed(2)}</span>)}
-          → Efectivo neto esperado: <strong>${espEf.toFixed(2)}</strong>
-        </div>}
-        {espTot===0&&totMisSalidas===0&&<div style={{fontSize:11,color:"#2e7d32",fontWeight:700,marginTop:4}}>Sin cobros — si solo tienes el fondo cuadrará en ✅</div>}
+        <div style={{fontSize:11,color:"#1565c0",marginTop:4}}>💡 Cuenta el efectivo físico en caja tal como está — el sistema te dirá al final si cuadra.</div>
       </div>}
       <div style={{display:"flex",gap:6,marginBottom:14,overflowX:"auto"}}>
-        {[{n:0,l:"📋 Revisión"},{n:1,l:"💵 Billetes"},{n:2,l:"🪙 Monedas"},{n:3,l:"🏦 Digital"},{n:4,l:"✅ Confirmar"}].map(p=>(
-          <div key={p.n} style={{...S.badge,background:paso>=p.n?"#1a3c5e":"#e8f0f7",color:paso>=p.n?"#fff":"#888",padding:"6px 10px",fontSize:11,whiteSpace:"nowrap",cursor:paso>p.n?"pointer":"default"}} onClick={()=>{if(paso>p.n)setPaso(p.n);}}>{p.n}. {p.l}</div>
-        ))}
+        {[{n:0,l:"📋 Revisión"},{n:1,l:"💵 Billetes"},{n:2,l:"🪙 Monedas"},{n:3,l:"🏦 Digital"},{n:4,l:"✅ Confirmar"}].map(p=>{
+          const puedeSaltar=paso>p.n&&(paso<4||!correccionUsada); // 🔒 una vez llegado a Confirmar, solo se puede regresar una vez
+          return(
+            <div key={p.n} style={{...S.badge,background:paso>=p.n?"#1a3c5e":"#e8f0f7",color:paso>=p.n?"#fff":"#888",padding:"6px 10px",fontSize:11,whiteSpace:"nowrap",cursor:puedeSaltar?"pointer":"default"}} onClick={()=>{if(puedeSaltar){if(paso===4)setCorreccionUsada(true);setPaso(p.n);}}}>{p.n}. {p.l}</div>
+          );
+        })}
       </div>
+      {correccionUsada&&paso<4&&<div style={{...S.alrt,background:"#fff3e0",color:"#e65100",fontSize:12}}>⚠️ Ya usaste tu única corrección — ajusta bien esta vez, después no podrás volver a editar.</div>}
       {paso===0&&<Card title="📋 Paso 0 — Revisión obligatoria de órdenes">
         <div style={{fontSize:12,color:"#888",marginBottom:10}}>Antes de contar el dinero, verifica que el estado de cada orden refleje la realidad del día.</div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:12}}>
@@ -5320,7 +5334,13 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
           </div>
         </Card>
         <div style={{background:"#fff3e0",borderRadius:8,padding:"10px 14px",marginBottom:10,fontSize:13,color:"#e65100"}}>⚠️ Al confirmar <strong>no podras modificarlo</strong> y la sesion se cerrara.</div>
-        <div style={{display:"flex",gap:8}}><button style={{...S.btnC,flex:1}} onClick={()=>setPaso(3)}>← Corregir</button><button style={{...S.btnP,flex:2,background:"linear-gradient(135deg,#2e7d32,#388e3c)"}} onClick={confirmar}>✅ Confirmar e imprimir</button></div>
+        <div style={{display:"flex",gap:8}}>
+          {!correccionUsada
+            ?<button style={{...S.btnC,flex:1}} onClick={()=>{setCorreccionUsada(true);setPaso(3);}}>← Corregir (única vez)</button>
+            :<button style={{...S.btnC,flex:1,opacity:0.5,cursor:"not-allowed"}} onClick={()=>alert("Ya usaste tu única corrección — no se puede volver a editar. Si algo está mal, avísale a la administradora después de confirmar.")}>🔒 Ya no puedes corregir</button>
+          }
+          <button style={{...S.btnP,flex:2,background:"linear-gradient(135deg,#2e7d32,#388e3c)"}} onClick={confirmar}>✅ Confirmar e imprimir</button>
+        </div>
       </div>)}
     </div>)}
   </div>);
@@ -6418,8 +6438,8 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
   // 🏭 PRODUCCIÓN: para quienes no son admin, primero eligen si entran a Facturación o a Producción.
   // Producción NO requiere caja abierta (es un área/dispositivo aparte del taller).
   if(!esAdmin&&!vista)return <SelectorVista sesion={sesion} onElegir={setVista} onLogout={onLogout}/>;
-  if(!esAdmin&&vista==="produccion")return <ProduccionScreen sesion={sesion} onVolver={()=>setVista(null)} onLogout={onLogout} ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} empleadas={empleadas} pins={pins} eventosProduccion={eventosProduccion} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga} clientes={clientes}/>;
-  if(!esAdmin&&vista==="tareas")return <TareasScreen sesion={sesion} onVolver={()=>setVista(null)} onLogout={onLogout} tareasDiarias={tareasDiarias} setTareasDiarias={setTareasDiarias} upsertTareaDiaria={upsertTareaDiaria} pins={pins} empleadas={empleadas} notas={notas} setNotas={setNotas} upsertNota={upsertNota}/>;
+  if(!esAdmin&&vista==="produccion")return <ProduccionScreen sesion={sesion} onVolver={()=>setVista(null)} onIrFacturacion={()=>setVista("facturacion")} onIrTareas={()=>setVista("tareas")} onLogout={onLogout} ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} empleadas={empleadas} pins={pins} eventosProduccion={eventosProduccion} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga} clientes={clientes}/>;
+  if(!esAdmin&&vista==="tareas")return <TareasScreen sesion={sesion} onVolver={()=>setVista(null)} onIrFacturacion={()=>setVista("facturacion")} onIrProduccion={()=>setVista("produccion")} onLogout={onLogout} tareasDiarias={tareasDiarias} setTareasDiarias={setTareasDiarias} upsertTareaDiaria={upsertTareaDiaria} pins={pins} empleadas={empleadas} notas={notas} setNotas={setNotas} upsertNota={upsertNota}/>;
 
   // Si cerró caja y quiere seguir trabajando, DEBE abrir caja nuevamente
   // 🔒 El admin NUNCA pasa por esto: esa cuenta no se usa para facturar/cobrar, así que no tiene sentido pedirle apertura/cierre de caja.
@@ -6434,7 +6454,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
     empleadas={empleadas}
     upsertCaja={upsertCaja}
   />;
-  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={serviciosActivos} sesion={sesion} addAbono={addAbono} onLogout={onLogout} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} upsertVenta={upsertVenta} upsertSalida={upsertSalida} upsertCliente={upsertCliente} upsertCaja={upsertCaja} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos} cfgInc={cfgInc} maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga} pins={pins} eventosProduccion={eventosProduccion} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} sorteos={sorteos} setSorteos={setSorteos} upsertSorteo={upsertSorteo} setBoletosSorteo={setBoletosSorteo} upsertBoletoSorteo={upsertBoletoSorteo} boletosParaImprimir={boletosParaImprimir} setBoletosParaImprimir={setBoletosParaImprimir}/>;
+  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={serviciosActivos} sesion={sesion} addAbono={addAbono} onLogout={onLogout} onIrProduccion={()=>setVista("produccion")} onIrTareas={()=>setVista("tareas")} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} upsertVenta={upsertVenta} upsertSalida={upsertSalida} upsertCliente={upsertCliente} upsertCaja={upsertCaja} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos} cfgInc={cfgInc} maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga} pins={pins} eventosProduccion={eventosProduccion} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} sorteos={sorteos} setSorteos={setSorteos} upsertSorteo={upsertSorteo} setBoletosSorteo={setBoletosSorteo} upsertBoletoSorteo={upsertBoletoSorteo} boletosParaImprimir={boletosParaImprimir} setBoletosParaImprimir={setBoletosParaImprimir}/>;
   const tabs=[
     {id:"ventas",icon:"🧾",l:"Venta"},{id:"historial",icon:"📋",l:"Historial"},
     {id:"pendientes",icon:"⏳",l:"Pendientes",b:pCount},{id:"bi",icon:"🚀",l:"Dashboard"},
