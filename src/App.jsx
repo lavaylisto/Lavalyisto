@@ -1835,6 +1835,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
   const [panelLavadoraZap,setPanelLavadoraZap]=useState(false); // panel al tocar la máquina 1LZ: pendientes/lavados/centrifugando
   const [panelSecadoraZap,setPanelSecadoraZap]=useState(false); // panel al tocar la máquina 1SZ: esperando secar/secando
   const [tabProd,setTabProd]=useState("maquinas"); // "maquinas" | "ropa" | "zapatos" — separa la pantalla de producción en secciones
+  const [detalleEstadoZap,setDetalleEstadoZap]=useState(null); // qué categoría del resumen de zapatos está expandida (ej. "enLavado")
 
   const activos=ventas.filter(v=>!v.anulada&&["recibido","proceso"].includes(v.estado||"recibido")).sort((a,b)=>new Date(a.fecha)-new Date(b.fecha));
   const eventosDe=folio=>eventosProduccion.filter(ev=>ev.ventaFolio===folio);
@@ -1886,6 +1887,24 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
     enCentrifugado:cargasZapActivas("centrifugado").reduce((a,c)=>a+paresEnCarga(c),0),
     esperandoSecado:colaSecadoZap.reduce((a,f)=>a+paresDe(f.folio),0),
     enSecado:cargasZapActivas("secado").reduce((a,c)=>a+paresEnCarga(c),0),
+  };
+  // 👤 Detalle por cliente para cada categoría — se muestra al tocar el número (nombre del cliente + cuántos pares suyos)
+  const clienteDeFolio=folio=>ventas.find(v=>v.folio===folio)?.clienteNombre||"—";
+  const detalleDeCargas=tipo=>{
+    const filas=[];
+    cargasZapActivas(tipo).forEach(c=>{
+      const folios=c.ventaFolios&&c.ventaFolios.length?c.ventaFolios:[c.ventaFolio];
+      folios.forEach(folio=>filas.push({cliente:clienteDeFolio(folio),folio,pares:paresDe(folio)}));
+    });
+    return filas;
+  };
+  const detallesZapatos={
+    porLavar:colaLavadoZap.map(f=>({cliente:f.cliente,folio:f.folio,pares:paresDe(f.folio)})),
+    enLavado:detalleDeCargas("lavado"),
+    esperandoCentrifugado:colaCentrifugadoZap.map(f=>({cliente:f.cliente,folio:f.folio,pares:paresDe(f.folio)})),
+    enCentrifugado:detalleDeCargas("centrifugado"),
+    esperandoSecado:colaSecadoZap.map(f=>({cliente:f.cliente,folio:f.folio,pares:paresDe(f.folio)})),
+    enSecado:detalleDeCargas("secado"),
   };
 
   const notificar=(titulo,cuerpo)=>{try{if(typeof Notification!=="undefined"&&Notification.permission==="granted")new Notification(titulo,{body:cuerpo});}catch{}};
@@ -2210,22 +2229,34 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
 
         {(colaLavadoZap.length>0||colaCentrifugadoZap.length>0||colaSecadoZap.length>0||totalesZapatos.enLavado>0||totalesZapatos.enCentrifugado>0||totalesZapatos.enSecado>0)&&(
           <div style={{background:"#fdf6f0",border:"1.5px solid #8d6e63",borderRadius:12,padding:12,marginBottom:16}}>
-            <div style={{fontSize:13,fontWeight:800,color:"#5d4037",marginBottom:8}}>👟 Producción de zapatos</div>
+            <div style={{fontSize:13,fontWeight:800,color:"#5d4037",marginBottom:2}}>👟 Producción de zapatos</div>
+            <div style={{fontSize:10,color:"#8d6e63",marginBottom:8}}>Toca un número para ver a qué cliente pertenece cada par.</div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>
               {[
-                ["Por lavar",totalesZapatos.porLavar,"#8d6e63"],
-                ["En lavado",totalesZapatos.enLavado,"#5c6bc0"],
-                ["Esp. centrifugado",totalesZapatos.esperandoCentrifugado,"#8d6e63"],
-                ["En centrifugado",totalesZapatos.enCentrifugado,"#7986cb"],
-                ["Esp. secado",totalesZapatos.esperandoSecado,"#8d6e63"],
-                ["En secado",totalesZapatos.enSecado,"#00838f"],
-              ].map(([lbl,val,color])=>(
-                <div key={lbl} style={{background:"#fff",borderRadius:8,padding:"6px 4px",textAlign:"center",border:`1px solid ${color}`}}>
+                ["porLavar","Por lavar",totalesZapatos.porLavar,"#8d6e63"],
+                ["enLavado","En lavado",totalesZapatos.enLavado,"#5c6bc0"],
+                ["esperandoCentrifugado","Esp. centrifugado",totalesZapatos.esperandoCentrifugado,"#8d6e63"],
+                ["enCentrifugado","En centrifugado",totalesZapatos.enCentrifugado,"#7986cb"],
+                ["esperandoSecado","Esp. secado",totalesZapatos.esperandoSecado,"#8d6e63"],
+                ["enSecado","En secado",totalesZapatos.enSecado,"#00838f"],
+              ].map(([key,lbl,val,color])=>(
+                <button key={key} onClick={()=>setDetalleEstadoZap(detalleEstadoZap===key?null:key)} style={{background:detalleEstadoZap===key?"#fff8f0":"#fff",borderRadius:8,padding:"6px 4px",textAlign:"center",border:`1.5px solid ${color}`,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                   <div style={{fontWeight:800,fontSize:16,color}}>{val}</div>
                   <div style={{fontSize:9,color:"#5d4037"}}>{lbl}</div>
-                </div>
+                </button>
               ))}
             </div>
+            {detalleEstadoZap&&(
+              <div style={{marginTop:10,background:"#fff",borderRadius:8,padding:"8px 10px",border:"1px solid #e8d9cf"}}>
+                {detallesZapatos[detalleEstadoZap].length===0&&<div style={{fontSize:12,color:"#aaa"}}>Nadie en esta categoría ahora mismo.</div>}
+                {detallesZapatos[detalleEstadoZap].map((d,i)=>(
+                  <div key={d.folio+"_"+i} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"4px 0",borderBottom:i<detallesZapatos[detalleEstadoZap].length-1?"1px solid #f0f4f8":"none"}}>
+                    <span style={{color:"#3e2723"}}>{d.cliente} <span style={{color:"#aaa",fontSize:11}}>({d.folio})</span></span>
+                    <strong style={{color:"#8d6e63"}}>{d.pares} par{d.pares!==1?"es":""}</strong>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </>
@@ -6899,10 +6930,11 @@ function Conciliacion({ventas,setVentas,upsertVenta,depositos,setDepositos,upser
   // Transferencias y tarjeta: cada abono del mes por método
   const movs={pichincha:[],jep:[],tarjeta:[]};
   ventas.filter(v=>!v.anulada).forEach(v=>{
+    const mesVenta=mesK(v.fecha);
     (v.abonos||[]).forEach((ab,idx)=>{
       const d=fechaLocal(ab.fecha);
       if(!d||!d.startsWith(mesVer))return;
-      const item={folio:v.folio,idx,fecha:d,fechaISO:ab.fecha,cliente:v.clienteNombre||"",monto:ab.monto,conciliado:!!ab.conciliado,quien:ab.cobradoPorNombre||""};
+      const item={folio:v.folio,idx,fecha:d,fechaISO:ab.fecha,cliente:v.clienteNombre||"",monto:ab.monto,conciliado:!!ab.conciliado,quien:ab.cobradoPorNombre||"",mesVenta,esMesAnterior:mesVenta!==mesVer};
       if(ab.metodo==="Transferencia Pichincha")movs.pichincha.push(item);
       else if(ab.metodo==="Transferencia JEP")movs.jep.push(item);
       else if(ab.metodo==="Tarjeta")movs.tarjeta.push(item);
@@ -6910,6 +6942,19 @@ function Conciliacion({ventas,setVentas,upsertVenta,depositos,setDepositos,upser
   });
   // Depósitos de efectivo registrados en el mes
   const depsMes=depositos.filter(d=>!d.eliminada&&d.fecha&&d.fecha.startsWith(mesVer));
+  // ⏳ Ventas HECHAS en este mes: cuánto quedaba pendiente EXACTAMENTE al último día de ese mes
+  // (no el saldo de hoy — se recalcula con la fecha real de cada abono, así que sigue siendo correcto
+  // aunque el cliente ya haya pagado después, en un mes posterior).
+  const [añoFinMes,mesFinMesNum]=mesVer.split("-").map(Number);
+  const finDeMesStr=new Date(añoFinMes,mesFinMesNum,0).toISOString().split("T")[0]; // último día calendario de mesVer
+  const saldoAlFinDeMes=v=>{
+    const pagadoAlFinMes=(v.abonos||[]).filter(ab=>fechaLocal(ab.fecha)<=finDeMesStr).reduce((a,ab)=>a+ab.monto,0);
+    return parseFloat((v.total-pagadoAlFinMes).toFixed(2));
+  };
+  const pendientesMes=ventas.filter(v=>!v.anulada&&mesK(v.fecha)===mesVer&&saldoAlFinDeMes(v)>0.01).sort((a,b)=>new Date(a.fecha)-new Date(b.fecha));
+  const totalPendienteMes=parseFloat(pendientesMes.reduce((a,v)=>a+saldoAlFinDeMes(v),0).toFixed(2));
+  // Cuánto de ese pendiente-al-fin-de-mes ya se cobró después (en meses posteriores) — útil para ver el avance
+  const pendienteMesYaCobradoDespues=parseFloat(pendientesMes.reduce((a,v)=>a+(saldoAlFinDeMes(v)-saldo(v)),0).toFixed(2));
 
   const toggleAbono=(folio,idx)=>setVentas(prev=>{
     const next=prev.map(v=>{
@@ -6968,6 +7013,7 @@ function Conciliacion({ventas,setVentas,upsertVenta,depositos,setDepositos,upser
                   <div style={{fontSize:11,color:"#888"}}>
                     {m.fecha}{m.quien?" · "+m.quien:""}{tipo==="dep"&&m.notas?" · "+m.notas:""}
                   </div>
+                  {m.esMesAnterior&&<div style={{display:"inline-block",marginTop:3,fontSize:10,fontWeight:700,color:"#e65100",background:"#fff3e0",borderRadius:6,padding:"2px 6px"}}>🔙 Venta de {m.mesVenta}</div>}
                 </div>
                 <div style={{fontWeight:800,fontSize:14,color:m.conciliado?"#2e7d32":color}}>${m.monto.toFixed(2)}</div>
               </label>
@@ -6988,13 +7034,19 @@ function Conciliacion({ventas,setVentas,upsertVenta,depositos,setDepositos,upser
         +ordenar(lista).map(m=>"<tr style='border-bottom:1px solid #eee'>"
           +"<td style='text-align:center;padding:4px'>"+(m.conciliado?"✔":"◻")+"</td>"
           +"<td style='padding:4px'>"+m.fecha+"</td>"
-          +"<td style='padding:4px'>"+(tipo==="dep"?(m.banco+" · "+m.comprobante):m.cliente)+"</td>"
+          +"<td style='padding:4px'>"+(tipo==="dep"?(m.banco+" · "+m.comprobante):m.cliente+(m.esMesAnterior?" <span style='color:#e65100;font-weight:bold'>(🔙 venta de "+m.mesVenta+")</span>":""))+"</td>"
           +"<td style='padding:4px;text-align:right;font-weight:bold'>$"+m.monto.toFixed(2)+"</td></tr>").join("")
         +"<tr><td colspan='3' style='padding:4px;font-weight:bold'>Total: $"+r.tot.toFixed(2)+" · Conciliado: $"+r.con.toFixed(2)+"</td><td style='padding:4px;text-align:right;font-weight:bold;color:"+(r.pend>0?"#c62828":"#2e7d32")+"'>"+(r.pend>0?"Pendiente $"+r.pend.toFixed(2):"✔ OK")+"</td></tr>"
         +"</table>";
     };
     const w=window.open("","_blank","width=750,height=700");
     if(!w)return;
+    const pendHtml=pendientesMes.length===0?"":"<h3 style='color:#e65100;margin-top:16px'>⏳ Pendiente al último día de "+mesVer+" ("+fmtD(finDeMesStr)+")</h3>"
+      +"<table cellpadding='4' cellspacing='0' style='border-collapse:collapse;width:100%;font-size:11px'>"
+      +"<tr><th style='background:#fff3e0;text-align:left;padding:4px'>Folio</th><th style='background:#fff3e0;text-align:left;padding:4px'>Cliente</th><th style='background:#fff3e0;text-align:left;padding:4px'>Fecha venta</th><th style='background:#fff3e0;text-align:right;padding:4px'>Total</th><th style='background:#fff3e0;text-align:right;padding:4px'>Pendiente al cierre</th><th style='background:#fff3e0;text-align:right;padding:4px'>Pendiente hoy</th></tr>"
+      +pendientesMes.map(v=>"<tr style='border-bottom:1px solid #eee'><td style='padding:4px'>"+v.folio+"</td><td style='padding:4px'>"+(v.clienteNombre||"")+"</td><td style='padding:4px'>"+fmtD(v.fecha)+"</td><td style='padding:4px;text-align:right'>$"+v.total.toFixed(2)+"</td><td style='padding:4px;text-align:right;font-weight:bold;color:#e65100'>$"+saldoAlFinDeMes(v).toFixed(2)+"</td><td style='padding:4px;text-align:right'>$"+saldo(v).toFixed(2)+"</td></tr>").join("")
+      +"<tr><td colspan='4' style='padding:4px;font-weight:bold'>Total pendiente al cierre de "+mesVer+"</td><td style='padding:4px;text-align:right;font-weight:bold;color:#e65100'>$"+totalPendienteMes.toFixed(2)+"</td><td></td></tr>"
+      +"</table>";
     const banner=todoConciliado
       ?"<div style='border:2px solid #2e7d32;background:#e8f5e9;border-radius:10px;padding:12px;text-align:center;font-size:18px;font-weight:800;color:#1b5e20;margin-top:14px'>✅ MES TOTALMENTE CONCILIADO</div>"
       :"<div style='border:2px solid #c62828;background:#ffebee;border-radius:10px;padding:12px;text-align:center;font-size:16px;font-weight:800;color:#c62828;margin-top:14px'>⏳ PENDIENTE POR CONCILIAR: $"+totalPend.toFixed(2)+" ("+nTotalPend+" movimientos)</div>";
@@ -7004,6 +7056,7 @@ function Conciliacion({ventas,setVentas,upsertVenta,depositos,setDepositos,upser
       +secHtml("🏦 Transferencias Pichincha recibidas",movs.pichincha,"ab")
       +secHtml("🏦 Transferencias JEP recibidas",movs.jep,"ab")
       +secHtml("💳 Cobros con tarjeta",movs.tarjeta,"ab")
+      +pendHtml
       +banner
       +"<p style='font-size:10px;color:#aaa;text-align:center'>Impreso: "+new Date().toLocaleString("es-MX")+"</p>"
       +"<scr"+"ipt>window.print();window.close();</"+"script></body></html>";
@@ -7035,6 +7088,35 @@ function Conciliacion({ventas,setVentas,upsertVenta,depositos,setDepositos,upser
       <Seccion titulo="🏦 Transferencias Pichincha" color="#1565c0" bg="#e3f2fd" lista={movs.pichincha} tipo="ab" r={rPic}/>
       <Seccion titulo="🏦 Transferencias JEP" color="#1565c0" bg="#e3f2fd" lista={movs.jep} tipo="ab" r={rJep}/>
       <Seccion titulo="💳 Tarjeta" color="#7c3aed" bg="#f3e8fd" lista={movs.tarjeta} tipo="ab" r={rTar}/>
+
+      <div style={{background:"#fff",borderRadius:12,marginBottom:14,overflow:"hidden",boxShadow:"0 1px 6px rgba(26,60,94,.08)"}}>
+        <div style={{background:"#fff3e0",padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:6}}>
+          <div style={{fontWeight:800,fontSize:14,color:"#e65100"}}>⏳ Pendiente al último día de {mesVer}</div>
+          <div style={{fontSize:12,fontWeight:700,color:"#e65100"}}>Total: ${totalPendienteMes.toFixed(2)}</div>
+        </div>
+        <div style={{padding:"6px 14px 10px"}}>
+          <div style={{fontSize:11,color:"#888",padding:"6px 0"}}>Esto es lo que quedaba pendiente exactamente al cierre de {mesVer} ({fmtD(finDeMesStr)}) — se calcula con la fecha real de cada abono, así que es el mismo número aunque el cliente ya haya pagado después.</div>
+          {pendienteMesYaCobradoDespues>0.01&&<div style={{fontSize:11,color:"#2e7d32",background:"#e8f5e9",borderRadius:6,padding:"6px 8px",marginBottom:6}}>✅ De ese total, ${pendienteMesYaCobradoDespues.toFixed(2)} ya se cobraron después (en meses posteriores) — hoy el pendiente real de estas ventas es ${(totalPendienteMes-pendienteMesYaCobradoDespues).toFixed(2)}.</div>}
+          {pendientesMes.length===0
+            ?<div style={{...S.empty,padding:"12px 0"}}>No quedó nada pendiente al cierre de {mesVer} ✅</div>
+            :pendientesMes.map(v=>{
+              const pendAlFin=saldoAlFinDeMes(v);
+              const pendHoy=saldo(v);
+              const yaSeCobro=pendAlFin-pendHoy>0.01;
+              return(
+                <div key={v.folio} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:"1px solid #f0f4f8"}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:13,fontWeight:600,color:"#1a3c5e"}}>{v.clienteNombre||"—"} <span style={{color:"#aaa",fontWeight:400,fontSize:11}}>({v.folio})</span></div>
+                    <div style={{fontSize:11,color:"#888"}}>Vendido {fmtD(v.fecha)} · Total ${v.total.toFixed(2)}</div>
+                    {yaSeCobro&&<div style={{fontSize:11,color:"#2e7d32",fontWeight:600}}>✅ Ya se cobró después — hoy debe ${pendHoy.toFixed(2)}</div>}
+                  </div>
+                  <div style={{fontWeight:800,fontSize:14,color:"#e65100"}}>${pendAlFin.toFixed(2)}</div>
+                </div>
+              );
+            })
+          }
+        </div>
+      </div>
 
       <div style={{fontSize:12,color:"#888"}}>💡 Consejo: abre el estado de cuenta del banco en el celular o impreso, y ve marcando aquí cada valor que encuentres. Lo que quede sin ✓ al final es lo que hay que investigar (depósito no realizado, transferencia mal registrada, etc.).</div>
     </div>
