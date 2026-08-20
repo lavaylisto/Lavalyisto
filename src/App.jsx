@@ -333,7 +333,10 @@ const msgWa = (v, tipo) => {
   const E = EMO;
   const items = (v.items||[]).map(it=>`  ${E.item} ${it.label}${it.piezas>1?` x${it.piezas}`:""}`).join("\n");
   const pend = saldo(v);
-  if(tipo==="recibido") return `${E.burbuja} *LAVA & LISTO* ${E.burbuja}\n_Lavanderia & Limpieza Especializada_\n${L}\n¡Hola *${v.clienteNombre}*! ${E.saludo}\nTu orden fue *RECIBIDA* ${E.check}\n\n${E.folio} *Folio:* ${v.folio}\n${L}\n*DETALLE DEL SERVICIO:*\n${items}\n${L}\n${E.dinero} *Total:* $${v.total.toFixed(2)}\n${pend>0?`${E.reloj} *Saldo pendiente:* $${pend.toFixed(2)}`:`${E.check} *Pagado en su totalidad*`}\n${E.fecha} *Entrega estimada:* ${fmtD(v.entrega)}\n${L}\n¡Gracias por confiar en nosotros! ${E.corazon}\n${E.pin} Ricaurte, Cuenca`;
+  if(tipo==="recibido"){
+    const manchaLinea=v.prendaManchaAviso?`\n${E.item} *Prenda que puede destiñir/manchar declarada:* ${v.prendaManchaObs}\n${L}`:"";
+    return `${E.burbuja} *LAVA & LISTO* ${E.burbuja}\n_Lavanderia & Limpieza Especializada_\n${L}\n¡Hola *${v.clienteNombre}*! ${E.saludo}\nTu orden fue *RECIBIDA* ${E.check}\n\n${E.folio} *Folio:* ${v.folio}\n${L}\n*DETALLE DEL SERVICIO:*\n${items}\n${L}${manchaLinea}\n${E.dinero} *Total:* $${v.total.toFixed(2)}\n${pend>0?`${E.reloj} *Saldo pendiente:* $${pend.toFixed(2)}`:`${E.check} *Pagado en su totalidad*`}\n${E.fecha} *Entrega estimada:* ${fmtD(v.entrega)}\n${L}\n¡Gracias por confiar en nosotros! ${E.corazon}\n${E.pin} Ricaurte, Cuenca\n\n_No nos hacemos responsables por daños, manchas o decoloración en su ropa si la información sobre prendas que destiñen o manchan no fue proporcionada correctamente al momento de dejar la orden._`;
+  }
   // 🧽 Detalle del restregado extra (si se solicitó), para que el cliente vea siempre qué se incluyó o no en su cuenta final
   const rEstado=v.clasificacion?.restregadoEstado;
   const rCosto=v.clasificacion?.restregadoCosto;
@@ -3737,6 +3740,8 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
   const [segundaPromoActiva,setSegundaPromoActiva]=useState(null); // 🔁 promo "2da unidad al %" esperando que elijan el servicio
   const [cupInput,setCupInput]=useState("");const [cupApl,setCupApl]=useState(null);const [cupErr,setCupErr]=useState(""); // 🎟️ cupón
   const [descCumple,setDescCumple]=useState(false); // 🎂 10% cumpleaños
+  const [tienePrendaMancha,setTienePrendaMancha]=useState(null); // null=sin responder, true/false — 🧽 obligatorio antes de registrar
+  const [obsPrendaMancha,setObsPrendaMancha]=useState("");
   const cFilt=clientes.filter(c=>c.nombre.toLowerCase().includes(cQ.toLowerCase())||(c.tel&&c.tel.includes(cQ))).slice(0,5);
   const selC=clientes.find(c=>c.id===cId);
   // 🛍️ Productos activos disponibles para vender (catálogo, sin los eliminados)
@@ -3836,6 +3841,9 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
     }
     if(!cId&&mC==="buscar"){setErr("Selecciona o crea un cliente");return;}
     if(mC==="nuevo"&&!nC.nombre.trim()){setErr("Escribe el nombre del cliente");return;}
+    // 🧽 Obligatorio antes de continuar: ¿hay alguna prenda que pueda manchar/destiñir el resto de la carga?
+    if(tienePrendaMancha===null){setErr("Falta indicar si hay alguna prenda que pueda manchar o destiñir el resto de la carga (Sí/No)");return;}
+    if(tienePrendaMancha&&!obsPrendaMancha.trim()){setErr("Describe cuál es la prenda que puede manchar antes de continuar");return;}
     const bruto=calcT();
     const cumpleOk=(mC==="buscar"&&clientes.find(c=>c.id===cId&&esCumpleHoy(c.nacimiento)))||(mC==="nuevo"&&esCumpleHoy(nC.nacimiento));
     const descC=cumpleOk&&descCumple?+(bruto*DESC_CUMPLE).toFixed(2):0;
@@ -3863,7 +3871,8 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
         const s=servicios.find(s=>s.id===it.servId);return{...it,label:s?.label,precio:s?.precio};
       }),...(descC>0?[{custom:true,piezas:1,label:"🎂 DESCUENTO CUMPLEAÑOS (-10%)",precio:-descC}]:[])],
       pago:metodo,total,abonos:abs,pagada:tPago==="completo",notas,checkMsgRetiro:false,checkMsgEntrega:false,facturadoSRI:false,estado:todosProductos?"entregado":"recibido",
-      cuponId:cupApl?.id||null};
+      cuponId:cupApl?.id||null,
+      prendaManchaAviso:!!tienePrendaMancha,prendaManchaObs:tienePrendaMancha?obsPrendaMancha.trim():null};
     setVentas([v,...ventas]);if(upsertVenta)upsertVenta(v);
     // 🛍️ Descuenta del stock cada producto vendido en esta venta
     const prodsVendidos=items.filter(it=>it.esProducto&&it.productoId);
@@ -3901,6 +3910,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
     }
     setWaVenta(v); // WhatsApp obligatorio antes de mostrar el ticket
     setCQ("");setCId(null);setNC({nombre:"",tel:"",cedula:"",email:"",rfc:"",direccion:"",nacimiento:""});setDescCumple(false);setImpulsos([]);setCupApl(null);setCupInput("");setCupErr("");
+    setTienePrendaMancha(null);setObsPrendaMancha("");
     setItems([{servId:servicios[0]?.id,piezas:1,custom:false,esProducto:false,productoId:null,lC:"",pC:""}]);
     setNotas("");setErr("");setAbono("");setTPago("completo");
   };
@@ -3996,6 +4006,20 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
             <div style={{fontSize:11,color:"#ff9800",marginTop:4}}>🧺 Incluye lavado en seco — solo cuenta el 20% como ganancia</div>
           }
         </div>
+      </Card>
+      <Card title="🧽 Prendas que pueden manchar">
+        <div style={{fontSize:13,color:"#1a3c5e",marginBottom:10}}>¿El cliente trae alguna prenda que pueda <strong>destiñir o manchar</strong> el resto de la carga? (ej. ropa nueva de color fuerte, prendas oscuras sin lavar antes, etc.)</div>
+        <div style={{display:"flex",gap:8,marginBottom:10}}>
+          <button style={{...S.pill,flex:1,textAlign:"center",...(tienePrendaMancha===false?S.pillA:{})}} onClick={()=>{setTienePrendaMancha(false);setObsPrendaMancha("");setErr("");}}>No</button>
+          <button style={{...S.pill,flex:1,textAlign:"center",...(tienePrendaMancha===true?{...S.pillA,background:"#e65100",border:"1.5px solid #e65100"}:{})}} onClick={()=>{setTienePrendaMancha(true);setErr("");}}>Sí</button>
+        </div>
+        {tienePrendaMancha===true&&(
+          <div>
+            <label style={S.lbl}>¿Cuál prenda? (obligatorio)</label>
+            <textarea style={{...S.inp,minHeight:56,resize:"vertical"}} placeholder="ej. Camiseta roja nueva, chompa negra..." value={obsPrendaMancha} onChange={e=>{setObsPrendaMancha(e.target.value);setErr("");}}/>
+          </div>
+        )}
+        {tienePrendaMancha===null&&<div style={{fontSize:11,color:"#e65100",fontWeight:600}}>⚠️ Debes responder Sí o No antes de registrar la venta.</div>}
       </Card>
       <Card title="💳 Pago">
         <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
