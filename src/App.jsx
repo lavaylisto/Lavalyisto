@@ -4328,11 +4328,63 @@ function Reportes({ventas,empleadas,salidasCaja}){
     <div style={S.panel}>
       <h2 style={S.ptitle}>📊 Reportes</h2>
       <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
-        {[{id:"resumen",l:"📈 Resumen"},{id:"depositos",l:"💵 Depositos"},{id:"salidas",l:"💸 Salidas"},{id:"cuadre",l:"🧮 Cuadre"},{id:"ventas",l:"📋 Ventas"},{id:"excel",l:"📥 Excel"}].map(t=>(
+        {[{id:"resumen",l:"📈 Resumen"},{id:"empleadas",l:"👩 Vendedoras"},{id:"depositos",l:"💵 Depositos"},{id:"salidas",l:"💸 Salidas"},{id:"cuadre",l:"🧮 Cuadre"},{id:"ventas",l:"📋 Ventas"},{id:"excel",l:"📥 Excel"}].map(t=>(
           <button key={t.id} style={{...S.pill,...(sub===t.id?S.pillA:{}),fontSize:12}} onClick={()=>setSub(t.id)}>{t.l}</button>
         ))}
       </div>
       <div style={{marginBottom:12}}><label style={S.lbl}>Mes</label><input type="month" style={S.inp} value={mesS} onChange={e=>setMesS(e.target.value)}/></div>
+      {sub==="empleadas"&&(()=>{
+        const nombreDeE=id=>empleadas.find(e=>String(e.id)===String(id))?.nombre||"Sin asignar";
+        const vRngOrdenado=[...vRng].sort((a,b)=>new Date(b.fecha)-new Date(a.fecha));
+        const porEmp={};
+        vRng.forEach(v=>{const n=nombreDeE(v.empleadaId);if(!porEmp[n])porEmp[n]={cnt:0,tot:0};porEmp[n].cnt++;porEmp[n].tot+=v.total;});
+        const rankingRango=Object.entries(porEmp).sort((a,b)=>b[1].tot-a[1].tot);
+        const descargarPorEmpleada=()=>{
+          if(vRngOrdenado.length===0){alert("No hay ventas en ese rango de fechas.");return;}
+          const enc=["Empleada","Folio","Cliente","Fecha","Hora","Total"];
+          const filas=vRngOrdenado.map(v=>{
+            const dt=new Date(v.fecha);
+            return[nombreDeE(v.empleadaId),v.folio,v.clienteNombre||"",fmtD(v.fecha),dt.toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"}),"$"+v.total.toFixed(2)];
+          });
+          filas.push(["","","","","",""]);
+          rankingRango.forEach(([n,d])=>filas.push([n,d.cnt+" venta(s)","","","","$"+d.tot.toFixed(2)]));
+          filas.push(["TOTAL",vRngOrdenado.length+" venta(s)","","","","$"+sum(vRng).toFixed(2)]);
+          const csv=[enc,...filas].map(f=>f.map(c=>'"'+String(c).replace(/"/g,'\\"')+'"').join(",")).join("\n");
+          const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
+          const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="ventas_por_vendedora-"+desde+"_a_"+hasta+".csv";a.click();
+        };
+        return(<div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
+            <div><label style={S.lbl}>Desde</label><input type="date" style={S.inp} value={desde} onChange={e=>setDesde(e.target.value)}/></div>
+            <div><label style={S.lbl}>Hasta</label><input type="date" style={S.inp} value={hasta} onChange={e=>setHasta(e.target.value)}/></div>
+          </div>
+          <div style={{fontSize:12,color:"#888",marginBottom:10}}>{vRng.length} ventas · Total: ${sum(vRng).toFixed(2)}</div>
+          <button style={{...S.btnP,marginBottom:14}} onClick={descargarPorEmpleada}>📥 Descargar CSV (quién vendió, fecha, hora y monto)</button>
+          <Card title="🏆 Total facturado por vendedora (en el rango)">
+            {rankingRango.length===0?<div style={S.empty}>Sin ventas en ese rango</div>:rankingRango.map(([n,d])=>(
+              <div key={n} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid #f0f4f8"}}>
+                <span style={{fontWeight:600}}>{n}</span>
+                <span><strong>${d.tot.toFixed(2)}</strong> <span style={{color:"#888",fontSize:12}}>({d.cnt} venta{d.cnt!==1?"s":""})</span></span>
+              </div>
+            ))}
+          </Card>
+          <Card title={`🧾 Detalle venta por venta (${vRngOrdenado.length})`}>
+            {vRngOrdenado.length===0&&<div style={S.empty}>Sin ventas en ese rango</div>}
+            {vRngOrdenado.slice(0,200).map(v=>{
+              const dt=new Date(v.fecha);
+              return(
+                <div key={v.folio} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid #f0f4f8"}}>
+                  <div style={{minWidth:0}}>
+                    <div style={{fontSize:13,fontWeight:600,color:"#1a3c5e"}}>{nombreDeE(v.empleadaId)}</div>
+                    <div style={{fontSize:11,color:"#888"}}>{v.clienteNombre||"—"} · {v.folio} · {fmtD(v.fecha)} {dt.toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"})}</div>
+                  </div>
+                  <strong style={{color:"#1a3c5e",flexShrink:0,marginLeft:8}}>${v.total.toFixed(2)}</strong>
+                </div>
+              );
+            })}
+          </Card>
+        </div>);
+      })()}
       {sub==="resumen"&&(<div>
         <div style={S.kgrid}>
           <KPI icon="☀️" label="Hoy" val={`$${sum(vHoy).toFixed(2)}`} sub={`${vHoy.length} ventas`} color="#f59e0b"/>
