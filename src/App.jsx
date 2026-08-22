@@ -3061,6 +3061,25 @@ function TareasAdminPanel({plantillasTareas,setPlantillasTareas,upsertPlantillaT
     }
     cancelar();
   };
+  // 🔄 Las tareas de HOY ya generadas no se actualizan solas cuando editas una plantilla (ej. activar "requiere foto").
+  // Este botón vuelve a copiar título/foto/nota/etc. de la plantilla actual hacia las tareas de hoy que aún estén pendientes.
+  const sincronizarHoy=()=>{
+    const tareasHoyPendientes=tareasDiarias.filter(t=>t.fecha===hoyK&&!t.eliminada&&t.estado==="pendiente"&&t.plantillaId);
+    if(tareasHoyPendientes.length===0){alert("No hay tareas pendientes de hoy para sincronizar (o ya están completadas).");return;}
+    let actualizadas=0;
+    setTareasDiarias(prev=>{
+      const next=prev.map(t=>{
+        if(t.fecha!==hoyK||t.eliminada||t.estado!=="pendiente"||!t.plantillaId)return t;
+        const p=plantillasTareas.find(pp=>pp.id===t.plantillaId&&!pp.eliminada);
+        if(!p)return t;
+        actualizadas++;
+        return{...t,titulo:p.titulo,descripcion:p.descripcion||null,area:p.area,bloque:p.bloque,horaLimite:p.horaLimite,requiereFoto:!!p.requiereFoto,requiereNota:!!p.requiereNota,rolRequerido:p.rolRequerido||null,empleadaIds:p.empleadaIds||[]};
+      });
+      next.filter((t,i)=>t!==prev[i]).forEach(t=>{if(upsertTareaDiaria)upsertTareaDiaria({...t,_updatedAt:new Date().toISOString()});});
+      return next;
+    });
+    setTimeout(()=>alert(`✅ Se sincronizaron ${actualizadas} tarea(s) pendiente(s) de hoy con los ajustes más recientes.`),100);
+  };
   const bloques=["apertura","media_jornada","cambio_turno","cierre","semanal"];
   const nombreDe=id=>empleadas.find(e=>String(e.id)===String(id))?.nombre||"—";
   return(<div style={S.panel}>
@@ -3079,6 +3098,11 @@ function TareasAdminPanel({plantillasTareas,setPlantillasTareas,upsertPlantillaT
         <div><label style={S.lbl}>Hasta</label><input type="date" style={S.inp} value={repHasta} onChange={e=>setRepHasta(e.target.value)}/></div>
       </div>
       <button style={{...S.btnP,width:"100%"}} onClick={()=>descargarReporteTareas(repDesde,repHasta)}>⬇️ Descargar CSV</button>
+    </Card>
+
+    <Card title="🔄 Sincronizar tareas de hoy">
+      <div style={{fontSize:12,color:"#888",marginBottom:10}}>Si editaste una tarea (ej. activaste "requiere foto" o "requiere nota") DESPUÉS de que ya se generó la de hoy, ese cambio no se aplica solo. Usa este botón para actualizar las tareas de hoy que sigan pendientes con los ajustes más recientes.</div>
+      <button style={{...S.btnP,width:"100%"}} onClick={sincronizarHoy}>🔄 Sincronizar tareas pendientes de hoy</button>
     </Card>
 
     <Card title="🧹 Empezar de cero">
@@ -4341,14 +4365,14 @@ function Reportes({ventas,empleadas,salidasCaja}){
         const rankingRango=Object.entries(porEmp).sort((a,b)=>b[1].tot-a[1].tot);
         const descargarPorEmpleada=()=>{
           if(vRngOrdenado.length===0){alert("No hay ventas en ese rango de fechas.");return;}
-          const enc=["Empleada","Folio","Cliente","Fecha","Hora","Total"];
+          const enc=["Empleada","Folio","Cliente","Servicios","Fecha","Hora","Total"];
           const filas=vRngOrdenado.map(v=>{
             const dt=new Date(v.fecha);
-            return[nombreDeE(v.empleadaId),v.folio,v.clienteNombre||"",fmtD(v.fecha),dt.toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"}),"$"+v.total.toFixed(2)];
+            return[nombreDeE(v.empleadaId),v.folio,v.clienteNombre||"",(v.items||[]).map(it=>it.label+(it.piezas>1?` x${it.piezas}`:"")).join(" | "),fmtD(v.fecha),dt.toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"}),"$"+v.total.toFixed(2)];
           });
-          filas.push(["","","","","",""]);
-          rankingRango.forEach(([n,d])=>filas.push([n,d.cnt+" venta(s)","","","","$"+d.tot.toFixed(2)]));
-          filas.push(["TOTAL",vRngOrdenado.length+" venta(s)","","","","$"+sum(vRng).toFixed(2)]);
+          filas.push(["","","","","","",""]);
+          rankingRango.forEach(([n,d])=>filas.push([n,d.cnt+" venta(s)","","","","","$"+d.tot.toFixed(2)]));
+          filas.push(["TOTAL",vRngOrdenado.length+" venta(s)","","","","","$"+sum(vRng).toFixed(2)]);
           const csv=[enc,...filas].map(f=>f.map(c=>'"'+String(c).replace(/"/g,'\\"')+'"').join(",")).join("\n");
           const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
           const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="ventas_por_vendedora-"+desde+"_a_"+hasta+".csv";a.click();
@@ -4359,7 +4383,7 @@ function Reportes({ventas,empleadas,salidasCaja}){
             <div><label style={S.lbl}>Hasta</label><input type="date" style={S.inp} value={hasta} onChange={e=>setHasta(e.target.value)}/></div>
           </div>
           <div style={{fontSize:12,color:"#888",marginBottom:10}}>{vRng.length} ventas · Total: ${sum(vRng).toFixed(2)}</div>
-          <button style={{...S.btnP,marginBottom:14}} onClick={descargarPorEmpleada}>📥 Descargar CSV (quién vendió, fecha, hora y monto)</button>
+          <button style={{...S.btnP,marginBottom:14}} onClick={descargarPorEmpleada}>📥 Descargar CSV (quién vendió, servicio, fecha, hora y monto)</button>
           <Card title="🏆 Total facturado por vendedora (en el rango)">
             {rankingRango.length===0?<div style={S.empty}>Sin ventas en ese rango</div>:rankingRango.map(([n,d])=>(
               <div key={n} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid #f0f4f8"}}>
@@ -4377,6 +4401,7 @@ function Reportes({ventas,empleadas,salidasCaja}){
                   <div style={{minWidth:0}}>
                     <div style={{fontSize:13,fontWeight:600,color:"#1a3c5e"}}>{nombreDeE(v.empleadaId)}</div>
                     <div style={{fontSize:11,color:"#888"}}>{v.clienteNombre||"—"} · {v.folio} · {fmtD(v.fecha)} {dt.toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"})}</div>
+                    <div style={{fontSize:12,color:"#4db6e4",marginTop:2}}>{(v.items||[]).map(it=>it.label+(it.piezas>1?` x${it.piezas}`:"")).join(" · ")}</div>
                   </div>
                   <strong style={{color:"#1a3c5e",flexShrink:0,marginLeft:8}}>${v.total.toFixed(2)}</strong>
                 </div>
