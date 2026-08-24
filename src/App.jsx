@@ -3061,14 +3061,14 @@ function TareasAdminPanel({plantillasTareas,setPlantillasTareas,upsertPlantillaT
     }
     cancelar();
   };
-  // 🔄 Las tareas de HOY ya generadas no se actualizan solas cuando editas una plantilla (ej. activar "requiere foto").
-  // Este botón vuelve a copiar título/foto/nota/etc. de la plantilla actual hacia las tareas de hoy que aún estén pendientes.
+  // 🔄 Las tareas de HOY ya generadas no se actualizan solas cuando editas una plantilla (ej. activar "requiere foto"),
+  // y una tarea NUEVA creada después de que ya se generó el día tampoco aparece sola. Este botón hace ambas cosas:
+  // 1) actualiza las de hoy que sigan pendientes con los ajustes más recientes de su plantilla, y
+  // 2) genera las tareas de hoy que falten (de cualquier plantilla activa nueva que aún no tenga tarea creada para hoy).
   const sincronizarHoy=()=>{
-    const tareasHoyPendientes=tareasDiarias.filter(t=>t.fecha===hoyK&&!t.eliminada&&t.estado==="pendiente"&&t.plantillaId);
-    if(tareasHoyPendientes.length===0){alert("No hay tareas pendientes de hoy para sincronizar (o ya están completadas).");return;}
     let actualizadas=0;
     setTareasDiarias(prev=>{
-      const next=prev.map(t=>{
+      let next=prev.map(t=>{
         if(t.fecha!==hoyK||t.eliminada||t.estado!=="pendiente"||!t.plantillaId)return t;
         const p=plantillasTareas.find(pp=>pp.id===t.plantillaId&&!pp.eliminada);
         if(!p)return t;
@@ -3076,9 +3076,22 @@ function TareasAdminPanel({plantillasTareas,setPlantillasTareas,upsertPlantillaT
         return{...t,titulo:p.titulo,descripcion:p.descripcion||null,area:p.area,bloque:p.bloque,horaLimite:p.horaLimite,requiereFoto:!!p.requiereFoto,requiereNota:!!p.requiereNota,rolRequerido:p.rolRequerido||null,empleadaIds:p.empleadaIds||[]};
       });
       next.filter((t,i)=>t!==prev[i]).forEach(t=>{if(upsertTareaDiaria)upsertTareaDiaria({...t,_updatedAt:new Date().toISOString()});});
+
+      // 👇 Generar las que falten hoy: cualquier plantilla activa que aplique hoy y todavía no tenga tarea creada para hoy
+      const diaSemana=DIAS_KEY[new Date().getDay()];
+      const yaCreadasPlantillaIds=new Set(next.filter(t=>t.fecha===hoyK).map(t=>t.plantillaId));
+      const faltantes=plantillasTareas.filter(p=>p.activa&&!p.eliminada&&(p.diasSemana||[]).includes(diaSemana)&&(!p.fechaInicio||hoyK>=p.fechaInicio)&&(!p.fechaFin||hoyK<=p.fechaFin)&&!yaCreadasPlantillaIds.has(p.id));
+      const nuevas=faltantes.map(p=>({
+        id:hoyK+"_"+p.id,fecha:hoyK,plantillaId:p.id,titulo:p.titulo,descripcion:p.descripcion||null,
+        area:p.area,bloque:p.bloque,horaLimite:p.horaLimite,orden:p.orden,requiereFoto:!!p.requiereFoto,requiereNota:!!p.requiereNota,rolRequerido:p.rolRequerido||null,empleadaIds:p.empleadaIds||[],
+        estado:"pendiente",completadaPor:null,completadaEn:null,atrasada:false,fotoUrl:null,observacion:null,
+      }));
+      nuevas.forEach(t=>{if(upsertTareaDiaria)upsertTareaDiaria(t);});
+      next=[...next,...nuevas];
+
+      setTimeout(()=>alert(`✅ Listo: ${actualizadas} tarea(s) actualizada(s) y ${nuevas.length} tarea(s) nueva(s) agregada(s) para hoy.`),100);
       return next;
     });
-    setTimeout(()=>alert(`✅ Se sincronizaron ${actualizadas} tarea(s) pendiente(s) de hoy con los ajustes más recientes.`),100);
   };
   const bloques=["apertura","media_jornada","cambio_turno","cierre","semanal"];
   const nombreDe=id=>empleadas.find(e=>String(e.id)===String(id))?.nombre||"—";
@@ -3101,8 +3114,8 @@ function TareasAdminPanel({plantillasTareas,setPlantillasTareas,upsertPlantillaT
     </Card>
 
     <Card title="🔄 Sincronizar tareas de hoy">
-      <div style={{fontSize:12,color:"#888",marginBottom:10}}>Si editaste una tarea (ej. activaste "requiere foto" o "requiere nota") DESPUÉS de que ya se generó la de hoy, ese cambio no se aplica solo. Usa este botón para actualizar las tareas de hoy que sigan pendientes con los ajustes más recientes.</div>
-      <button style={{...S.btnP,width:"100%"}} onClick={sincronizarHoy}>🔄 Sincronizar tareas pendientes de hoy</button>
+      <div style={{fontSize:12,color:"#888",marginBottom:10}}>Si creaste una tarea NUEVA hoy (después de que ya se generó el día), o editaste una existente (ej. activaste "requiere foto"/"requiere nota"), esos cambios no aparecen solos. Usa este botón para agregar las tareas nuevas que falten hoy y actualizar las pendientes con los ajustes más recientes.</div>
+      <button style={{...S.btnP,width:"100%"}} onClick={sincronizarHoy}>🔄 Sincronizar tareas de hoy</button>
     </Card>
 
     <Card title="🧹 Empezar de cero">
