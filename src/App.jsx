@@ -634,11 +634,9 @@ function TicketModal({venta,empleadas,onClose}){
     const w=window.open("","_blank","width=400,height=800");
     if(!w)return;
     const thtml="<html><head><title>Comprobante</title>"
-      +"<style>body{font-family:sans-serif;padding:10px;max-width:340px;margin:0 auto}.copy{border:1px solid #eee;border-radius:8px;padding:16px;margin-bottom:8px}.lbl{text-align:center;font-size:10px;color:#aaa;font-weight:bold;margin-bottom:8px;border-bottom:1px dashed #ccc;padding-bottom:6px}@media print{body{margin:0;padding:5px}}</style>"
+      +"<style>body{font-family:sans-serif;padding:10px;max-width:340px;margin:0 auto}.copy{border:1px solid #eee;border-radius:8px;padding:16px}@media print{body{margin:0;padding:5px}}</style>"
       +"</head><body>"
-      +"<div class='copy'><div class='lbl'>✂️ COPIA CLIENTE</div>"+html+"</div>"
-      +"<div style='border-top:2px dashed #ccc;margin:10px 0;text-align:center;font-size:11px;color:#aaa'>— cortar aquí —</div>"
-      +"<div class='copy'><div class='lbl'>✂️ COPIA NEGOCIO</div>"+html+"</div>"
+      +"<div class='copy'>"+html+"</div>"
       +"<scr"+"ipt>window.print();window.close();</"+"script></body></html>";
     w.document.write(thtml);
     w.document.close();
@@ -667,7 +665,7 @@ function TicketModal({venta,empleadas,onClose}){
         <div style={{...S.tdiv}}/><div style={{textAlign:"center",fontSize:11,color:"#aaa"}}>¡Gracias! 💙</div>
       </div>
       <div style={{display:"flex",gap:10,marginTop:16}}>
-        <button style={{background:"#1a3c5e",color:"#fff",border:"none",borderRadius:8,padding:"10px 20px",fontSize:14,fontWeight:700,cursor:"pointer"}} onClick={print2}>🖨️ Imprimir 2 copias</button>
+        <button style={{background:"#1a3c5e",color:"#fff",border:"none",borderRadius:8,padding:"10px 20px",fontSize:14,fontWeight:700,cursor:"pointer"}} onClick={print2}>🖨️ Imprimir</button>
         <button style={S.btnC} onClick={onClose}>Cerrar</button>
       </div>
     </div>
@@ -1034,41 +1032,10 @@ function LoginScreen({onLogin}){
     }catch(e){console.log("No se pudo sincronizar usuarios:",e);}
   })();},[]);
   const [verificando,setVerificando]=useState(false);
-  const go=async()=>{
+  const go=()=>{
     const users=load("ll_usuarios",USUARIOS_DEFAULT);
     const found=users.find(x=>x.usuario.toLowerCase()===u.toLowerCase().trim()&&x.clave===c);
     if(!found){setErr("Usuario o clave incorrectos");return;}
-    // 🔒 El admin nunca maneja caja, así que no aplica esta verificación para esa cuenta
-    if(found.rol==="Administrador"){onLogin(found);return;}
-    // 🔒 Antes de dejar entrar, revisa si hay una caja de OTRA persona abierta hoy sin cerrar
-    // (protege contra el caso de que el navegador pierda la sesión guardada — ej. Safari liberando espacio —
-    // y alguien pueda entrar con otro usuario dejando la caja anterior sin cuadrar)
-    setVerificando(true);
-    try{
-      const {db}=await import("./firebase");
-      const {collection,getDocs}=await import("firebase/firestore");
-      const hoy=fechaHoyLocal();
-      const snap=await getDocs(collection(db,"cajas"));
-      const cajasHoy=snap.docs.map(d=>d.data()).filter(c=>c.dia===hoy);
-      const porEmpleado={};
-      cajasHoy.forEach(c=>{
-        const id=String(c.empleadaId);
-        if(!porEmpleado[id])porEmpleado[id]={aperturas:[],cierres:[],nombre:""};
-        if(c.tipo==="apertura"){porEmpleado[id].aperturas.push(c);if(c.empleadaNombre)porEmpleado[id].nombre=c.empleadaNombre;}
-        else if(c.tipo==="cierre"){porEmpleado[id].cierres.push(c);if(c.emp)porEmpleado[id].nombre=c.emp;}
-      });
-      let abiertaDe=null;
-      Object.entries(porEmpleado).forEach(([id,d])=>{
-        if(String(id)===String(found.id))return; // su propia caja no bloquea su propio ingreso
-        if(d.aperturas.length===0)return;
-        const ultApertura=d.aperturas.sort((a,b)=>new Date(b.fecha)-new Date(a.fecha))[0];
-        const ultCierre=d.cierres.sort((a,b)=>new Date(b.fecha)-new Date(a.fecha))[0];
-        const sigueAbierta=!ultCierre||new Date(ultCierre.fecha)<new Date(ultApertura.fecha);
-        if(sigueAbierta)abiertaDe=d.nombre||"otra persona";
-      });
-      setVerificando(false);
-      if(abiertaDe){setErr(`⚠️ ${abiertaDe} tiene la caja abierta sin cerrar hoy. Debe entrar ${abiertaDe.split(" ")[0]} y hacer el cierre de caja antes de que otra persona pueda ingresar.`);return;}
-    }catch(e){console.log("No se pudo verificar cajas abiertas:",e);setVerificando(false);}
     onLogin(found);
   };
   return(
@@ -4070,14 +4037,16 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
         )}
         {tienePrendaMancha===null&&<div style={{fontSize:11,color:"#e65100",fontWeight:600}}>⚠️ Debes responder Sí o No antes de registrar la venta.</div>}
       </Card>
-      <Card title="🌟 Boleto extra por seguirnos y dejar reseña">
-        <div style={{fontSize:13,color:"#1a3c5e",marginBottom:10}}>¿El cliente acepta seguirnos en redes (Instagram/Facebook) y dejarnos una reseña en Google? Si acepta, se le suma <strong>1 boleto extra</strong> al sorteo activo.</div>
-        <label style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:boletoResena?"#fff8e1":"#f8fbfd",borderRadius:10,cursor:"pointer",border:"1.5px solid "+(boletoResena?"#f59e0b":"#e8f0f7")}}>
-          <input type="checkbox" checked={boletoResena} onChange={e=>setBoletoResena(e.target.checked)} style={{width:18,height:18}}/>
-          <span style={{fontWeight:600,fontSize:13,color:"#1a3c5e"}}>🌟 Sí, el cliente sigue nuestras redes y dejó su reseña — dale su boleto extra</span>
-        </label>
-        <div style={{fontSize:11,color:"#888",marginTop:6}}>Opcional — no es necesario para poder registrar la venta.</div>
-      </Card>
+      {sorteoActivoHoy(sorteos)&&(
+        <Card title="🌟 Boleto extra por seguirnos y dejar reseña">
+          <div style={{fontSize:13,color:"#1a3c5e",marginBottom:10}}>¿El cliente acepta seguirnos en redes (Instagram/Facebook) y dejarnos una reseña en Google? Si acepta, se le suma <strong>1 boleto extra</strong> al sorteo activo.</div>
+          <label style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:boletoResena?"#fff8e1":"#f8fbfd",borderRadius:10,cursor:"pointer",border:"1.5px solid "+(boletoResena?"#f59e0b":"#e8f0f7")}}>
+            <input type="checkbox" checked={boletoResena} onChange={e=>setBoletoResena(e.target.checked)} style={{width:18,height:18}}/>
+            <span style={{fontWeight:600,fontSize:13,color:"#1a3c5e"}}>🌟 Sí, el cliente sigue nuestras redes y dejó su reseña — dale su boleto extra</span>
+          </label>
+          <div style={{fontSize:11,color:"#888",marginTop:6}}>Opcional — no es necesario para poder registrar la venta.</div>
+        </Card>
+      )}
       <Card title="💳 Pago">
         <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
           {[{id:"completo",l:"✅ Pago completo"},{id:"abono",l:"💵 Abono"},{id:"retiro",l:"⏳ Paga al retirar"}].map(op=>(
@@ -6432,7 +6401,9 @@ function AppContent({sesion,onLogout}){
   const [cajaOk,setCajaOk]=useState(()=>{try{return !!localStorage.getItem(AK);}catch{return false;}});
   const [cierreOk,setCierreOk]=useState(()=>{try{return !!localStorage.getItem(CK);}catch{return false;}});
   const [esperandoApertura,setEsperandoApertura]=useState(false);
-  const [vista,setVista]=useState(null); // 🏭 null | "facturacion" | "produccion" — elegido en SelectorVista
+  const VK="ll_vista_"+sesion.id+"_"+sesId; // 🔑 recuerda qué pantalla eligió (Facturación/Producción/Tareas) en esta sesión
+  const [vista,setVistaRaw]=useState(()=>{try{return localStorage.getItem(VK)||null;}catch{return null;}}); // 🏭 null | "facturacion" | "produccion" | "tareas" — elegido en SelectorVista
+  const setVista=v=>{try{if(v)localStorage.setItem(VK,v);else localStorage.removeItem(VK);}catch{}setVistaRaw(v);};
   const [tab,setTab]=useState("ventas");
   const { data: ventas, setData: setVentas, upsert: upsertVenta } = useCollection("ventas", KEYS.ventas, []);
 const { data: clientes, setData: setClientes, upsert: upsertCliente } = useCollection("clientes", KEYS.clientes, []);
