@@ -63,6 +63,7 @@ const generarBoletosParaVenta=(venta,{sorteos,setSorteos,upsertSorteo,setBoletos
     return p?.categoria==="aromatizador";
   });
   if(tienePerfume)motivos.push("perfume");
+  if(venta.boletoResenaSolicitado)motivos.push("resena");
   if(motivos.length===0)return[];
   let ultimo=sorteo.ultimoNumeroBoleto||0;
   const nuevos=motivos.map(motivo=>{
@@ -90,7 +91,7 @@ const generarBoletosParaVenta=(venta,{sorteos,setSorteos,upsertSorteo,setBoletos
 const imprimirBoletoSorteo=(boleto,sorteo)=>{
   const w=window.open("","_blank","width=320,height=520");
   if(!w)return;
-  const html="<html><head><title>Boleto #"+boleto.numeroBoleto+"</title><style>"
+  const html="<html><head><meta charset='UTF-8'><title>Boleto #"+boleto.numeroBoleto+"</title><style>"
     +"body{font-family:sans-serif;margin:0;padding:14px;width:280px;text-align:center}"
     +".lbl{font-size:11px;color:#555;text-transform:uppercase;letter-spacing:1px}"
     +".num{font-size:58px;font-weight:900;color:#000;letter-spacing:2px;margin:12px 0}"
@@ -104,7 +105,9 @@ const imprimirBoletoSorteo=(boleto,sorteo)=>{
     +"<div class='premio'>"+(sorteo?.premio||"")+"</div>"
     +"<div class='lbl' style='margin-top:4px'>"+(sorteo?.nombre||"")+"</div>"
     +"<div class='div'></div>"
-    +"<div style='font-size:11px;color:#888'>"+fmtD(boleto.fecha)+"</div>"
+    +"<div style='font-size:13px;font-weight:700;color:#1a3c5e'>"+(boleto.clienteNombre||"")+"</div>"
+    +"<div style='font-size:11px;color:#888;margin-top:2px'>Orden: "+(boleto.ventaId||"")+"</div>"
+    +"<div style='font-size:11px;color:#888;margin-top:6px'>"+fmtD(boleto.fecha)+"</div>"
     +"<div style='font-size:10px;color:#aaa;margin-top:10px'>🫧 Lava&amp;Listo · Ricaurte, Cuenca</div>"
     +"<scr"+"ipt>window.print();window.close();</"+"script></body></html>";
   w.document.write(html);
@@ -120,6 +123,8 @@ const waBoletoSorteoUrl=(boleto,sorteo)=>{
   if(!tel)return null;
   return `https://api.whatsapp.com/send/?phone=${tel}&text=${encodeURIComponent(msgWaBoletoSorteo(boleto,sorteo))}`;
 };
+// 🎟️ Etiqueta legible para cada motivo de boleto
+const etiquetaMotivoBoleto=motivo=>motivo==="monto"?"Por monto de compra":motivo==="perfume"?"Por aromatizador textil":motivo==="resena"?"Por reseña/seguir en redes":motivo;
 const EMPLEADAS_DEFAULT = [
   {id:1,nombre:"Ana Garcia",activa:true,metaVentas:20,montoBonus:20},
   {id:2,nombre:"Maria Lopez",activa:true,metaVentas:20,montoBonus:20},
@@ -163,8 +168,14 @@ const subirFoto=async(file,carpeta)=>{
   const blob=await comprimirImagen(file);
   const nombre=`${carpeta}/${Date.now()}_${Math.random().toString(36).slice(2,8)}.jpg`;
   const r=storageRef(storage,nombre);
-  await uploadBytes(r,blob,{contentType:"image/jpeg"});
-  return await getDownloadURL(r);
+  // ⏱️ Si la subida no responde en 20 segundos (ej. problema de conexión o de configuración de Storage),
+  // se cancela con un error claro en vez de dejar la pantalla "cargando" para siempre.
+  const conTiempoLimite=(promesa,ms,mensaje)=>Promise.race([
+    promesa,
+    new Promise((_,reject)=>setTimeout(()=>reject(new Error(mensaje)),ms))
+  ]);
+  await conTiempoLimite(uploadBytes(r,blob,{contentType:"image/jpeg"}),20000,"La subida tardó demasiado — revisa tu conexión a internet e intenta de nuevo.");
+  return await conTiempoLimite(getDownloadURL(r),10000,"No se pudo obtener el enlace de la foto — intenta de nuevo.");
 };
 // 🔔 Sonido de alerta corto (sin archivo externo) para avisos nuevos, ej. restregado que llega
 const reproducirSonidoAlerta=()=>{
@@ -595,7 +606,7 @@ function BoletosSorteoModal({data,sorteos,onClose}){
         {data.boletos.map(b=>(
           <div key={b.id} style={{background:"#f8fbfd",border:"1.5px solid #e8f0f7",borderRadius:10,padding:"10px 14px",marginBottom:8}}>
             <div style={{fontWeight:800,fontSize:26,color:"#1a3c5e",textAlign:"center"}}>#{String(b.numeroBoleto).padStart(4,"0")}</div>
-            <div style={{fontSize:11,color:"#888",textAlign:"center"}}>{b.motivo==="monto"?"Por monto de compra":"Por compra de aromatizador textil"}</div>
+            <div style={{fontSize:11,color:"#888",textAlign:"center"}}>{etiquetaMotivoBoleto(b.motivo)}</div>
             <div style={{display:"flex",gap:8,marginTop:8}}>
               <button style={{...S.btnP,flex:1,padding:"9px"}} onClick={()=>imprimirBoletoSorteo(b,sorteo)}>🖨️ Imprimir</button>
               {waBoletoSorteoUrl(b,sorteo)
@@ -1251,7 +1262,7 @@ function TareasChecklist({tareasDiarias,setTareasDiarias,upsertTareaDiaria,pins,
     if(!pinFor)return;
     const{tareaId,fotoUrl,nota}=pinFor;
     const t=tareasDiarias.find(x=>x.id===tareaId);
-    if(!t){setPinFor(null);return;}
+    if(!t){alert("⚠️ No se pudo guardar: esta tarea ya no se encontró en el sistema. Cierra y vuelve a intentar.");setPinFor(null);return;}
     const ahora=new Date();
     const[h,m]=t.horaLimite.split(":").map(Number);
     const lim=new Date();lim.setHours(h,m,0,0);
@@ -2877,7 +2888,7 @@ function SorteosAdmin({sorteos,setSorteos,upsertSorteo,boletosSorteo,productos})
     const lista=boletosDe(s.id).sort((a,b)=>a.numeroBoleto-b.numeroBoleto);
     if(lista.length===0){alert("Este sorteo todavía no tiene boletos generados.");return;}
     const enc=["N° Boleto","Motivo","Cliente","Teléfono","Monto venta","Folio venta","Fecha"];
-    const filas=lista.map(b=>[b.numeroBoleto,b.motivo==="monto"?"Por monto":"Por aromatizador textil",b.clienteNombre||"",b.clienteTelefono||"",b.montoVenta!=null?"$"+b.montoVenta.toFixed(2):"",b.ventaId||"",fmt(b.fecha)]);
+    const filas=lista.map(b=>[b.numeroBoleto,etiquetaMotivoBoleto(b.motivo),b.clienteNombre||"",b.clienteTelefono||"",b.montoVenta!=null?"$"+b.montoVenta.toFixed(2):"",b.ventaId||"",fmt(b.fecha)]);
     const csv=[enc,...filas].map(f=>f.map(c=>'"'+String(c).replace(/"/g,'\\"')+'"').join(",")).join("\n");
     const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
     const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="boletos_"+s.nombre.replace(/[^a-z0-9]/gi,"_")+".csv";a.click();
@@ -2893,24 +2904,29 @@ function SorteosAdmin({sorteos,setSorteos,upsertSorteo,boletosSorteo,productos})
       const lista=boletosDe(activo.id);
       const porMonto=lista.filter(b=>b.motivo==="monto").length;
       const porPerfume=lista.filter(b=>b.motivo==="perfume").length;
+      const porResena=lista.filter(b=>b.motivo==="resena").length;
       return(
         <div style={{background:"linear-gradient(135deg,#1a3c5e,#2563a8)",borderRadius:14,padding:16,marginBottom:14,color:"#fff"}}>
           <div style={{fontSize:12,color:"#a0c4da",fontWeight:600}}>🟢 SORTEO ACTIVO</div>
           <div style={{fontFamily:"'Playfair Display',serif",fontSize:20,fontWeight:800,marginTop:2}}>{activo.nombre}</div>
           <div style={{fontSize:13,color:"#e3f2fd",marginTop:2}}>🎁 {activo.premio}</div>
           <div style={{fontSize:12,color:"#a0c4da",marginTop:6}}>${activo.umbralMonto.toFixed(2)} mínimo · {fmtD(activo.fechaInicio)} – {fmtD(activo.fechaFin)}</div>
-          <div style={{display:"flex",gap:10,marginTop:12}}>
-            <div style={{flex:1,background:"rgba(255,255,255,.15)",borderRadius:10,padding:10,textAlign:"center"}}>
+          <div style={{display:"flex",gap:10,marginTop:12,flexWrap:"wrap"}}>
+            <div style={{flex:"1 1 40%",background:"rgba(255,255,255,.15)",borderRadius:10,padding:10,textAlign:"center"}}>
               <div style={{fontWeight:800,fontSize:22}}>{lista.length}</div>
               <div style={{fontSize:10,color:"#e3f2fd"}}>Total boletos</div>
             </div>
-            <div style={{flex:1,background:"rgba(255,255,255,.15)",borderRadius:10,padding:10,textAlign:"center"}}>
+            <div style={{flex:"1 1 25%",background:"rgba(255,255,255,.15)",borderRadius:10,padding:10,textAlign:"center"}}>
               <div style={{fontWeight:800,fontSize:22}}>{porMonto}</div>
               <div style={{fontSize:10,color:"#e3f2fd"}}>Por monto</div>
             </div>
-            <div style={{flex:1,background:"rgba(255,255,255,.15)",borderRadius:10,padding:10,textAlign:"center"}}>
+            <div style={{flex:"1 1 25%",background:"rgba(255,255,255,.15)",borderRadius:10,padding:10,textAlign:"center"}}>
               <div style={{fontWeight:800,fontSize:22}}>{porPerfume}</div>
               <div style={{fontSize:10,color:"#e3f2fd"}}>🧴 Aromatizador</div>
+            </div>
+            <div style={{flex:"1 1 25%",background:"rgba(255,255,255,.15)",borderRadius:10,padding:10,textAlign:"center"}}>
+              <div style={{fontWeight:800,fontSize:22}}>{porResena}</div>
+              <div style={{fontSize:10,color:"#e3f2fd"}}>🌟 Reseña</div>
             </div>
           </div>
           <div style={{display:"flex",gap:8,marginTop:12}}>
@@ -2929,7 +2945,7 @@ function SorteosAdmin({sorteos,setSorteos,upsertSorteo,boletosSorteo,productos})
             <div style={{fontWeight:800,fontSize:20,color:"#2e7d32"}}>#{boletoEncontrado.numeroBoleto}</div>
             <div style={{fontSize:13,marginTop:4}}>👤 {boletoEncontrado.clienteNombre||"—"}</div>
             <div style={{fontSize:13}}>📱 {boletoEncontrado.clienteTelefono||"—"}</div>
-            <div style={{fontSize:12,color:"#888"}}>Folio: {boletoEncontrado.ventaId} · {fmt(boletoEncontrado.fecha)} · {boletoEncontrado.motivo==="monto"?"Por monto":"🧴 Aromatizador textil"}</div>
+            <div style={{fontSize:12,color:"#888"}}>Folio: {boletoEncontrado.ventaId} · {fmt(boletoEncontrado.fecha)} · {etiquetaMotivoBoleto(boletoEncontrado.motivo)}</div>
           </div>
         ):buscarNum.trim()&&<div style={{marginTop:10,color:"#c62828",fontSize:13}}>No se encontró ese número en el sorteo activo.</div>}
       </Card>
@@ -3140,14 +3156,8 @@ function TareasAdminPanel({plantillasTareas,setPlantillasTareas,upsertPlantillaT
           </select>
         </div>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
-        <div><label style={S.lbl}>Hora límite</label><input type="time" style={S.inp} value={form.horaLimite} onChange={e=>setForm({...form,horaLimite:e.target.value})}/></div>
-        <div><label style={S.lbl}>Rol requerido</label>
-          <select style={S.inp} value={form.rolRequerido} onChange={e=>setForm({...form,rolRequerido:e.target.value})}>
-            <option value="">Todo el equipo</option>
-            <option value="recepcionista">🧾 Solo Recepcionista</option>
-          </select>
-        </div>
+      <div style={{marginBottom:8}}>
+        <label style={S.lbl}>Hora límite</label><input type="time" style={S.inp} value={form.horaLimite} onChange={e=>setForm({...form,horaLimite:e.target.value})}/>
       </div>
       <label style={S.lbl}>¿Qué días se genera?</label>
       <div style={{display:"flex",gap:5,marginBottom:10,flexWrap:"wrap"}}>
@@ -3157,7 +3167,7 @@ function TareasAdminPanel({plantillasTareas,setPlantillasTareas,upsertPlantillaT
       </div>
 
       <label style={S.lbl}>👤 Asignar a perfiles activos (opcional)</label>
-      <div style={{fontSize:11,color:"#888",marginBottom:6}}>Si no marcas a nadie, la tarea sigue el criterio de Área/Rol de arriba. Si marcas a una o más personas, la tarea solo le sale a ellas, sin importar el rol.</div>
+      <div style={{fontSize:11,color:"#888",marginBottom:6}}>Si no marcas a nadie, la tarea le sale a todo el equipo. Si marcas a una o más personas, la tarea solo le sale a ellas — si marcas a dos, la tarea es compartida entre esas dos (no se duplica en dos tareas separadas).</div>
       <div style={{display:"flex",gap:5,marginBottom:10,flexWrap:"wrap"}}>
         {empleadasActivas.length===0&&<div style={{fontSize:12,color:"#c62828"}}>No hay perfiles activos en Equipo todavía.</div>}
         {empleadasActivas.map(e=>(
@@ -3778,6 +3788,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
   const [cupInput,setCupInput]=useState("");const [cupApl,setCupApl]=useState(null);const [cupErr,setCupErr]=useState(""); // 🎟️ cupón
   const [descCumple,setDescCumple]=useState(false); // 🎂 10% cumpleaños
   const [tienePrendaMancha,setTienePrendaMancha]=useState(null); // null=sin responder, true/false — 🧽 obligatorio antes de registrar
+  const [boletoResena,setBoletoResena]=useState(false); // 🌟 opcional — boleto extra si sigue redes y deja reseña en Google
   const [obsPrendaMancha,setObsPrendaMancha]=useState("");
   const cFilt=clientes.filter(c=>c.nombre.toLowerCase().includes(cQ.toLowerCase())||(c.tel&&c.tel.includes(cQ))).slice(0,5);
   const selC=clientes.find(c=>c.id===cId);
@@ -3909,7 +3920,8 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
       }),...(descC>0?[{custom:true,piezas:1,label:"🎂 DESCUENTO CUMPLEAÑOS (-10%)",precio:-descC}]:[])],
       pago:metodo,total,abonos:abs,pagada:tPago==="completo",notas,checkMsgRetiro:false,checkMsgEntrega:false,facturadoSRI:false,estado:todosProductos?"entregado":"recibido",
       cuponId:cupApl?.id||null,
-      prendaManchaAviso:!!tienePrendaMancha,prendaManchaObs:tienePrendaMancha?obsPrendaMancha.trim():null};
+      prendaManchaAviso:!!tienePrendaMancha,prendaManchaObs:tienePrendaMancha?obsPrendaMancha.trim():null,
+      boletoResenaSolicitado:!!boletoResena};
     setVentas([v,...ventas]);if(upsertVenta)upsertVenta(v);
     // 🛍️ Descuenta del stock cada producto vendido en esta venta
     const prodsVendidos=items.filter(it=>it.esProducto&&it.productoId);
@@ -3947,7 +3959,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
     }
     setWaVenta(v); // WhatsApp obligatorio antes de mostrar el ticket
     setCQ("");setCId(null);setNC({nombre:"",tel:"",cedula:"",email:"",rfc:"",direccion:"",nacimiento:""});setDescCumple(false);setImpulsos([]);setCupApl(null);setCupInput("");setCupErr("");
-    setTienePrendaMancha(null);setObsPrendaMancha("");
+    setTienePrendaMancha(null);setObsPrendaMancha("");setBoletoResena(false);
     setItems([{servId:servicios[0]?.id,piezas:1,custom:false,esProducto:false,productoId:null,lC:"",pC:""}]);
     setNotas("");setErr("");setAbono("");setTPago("completo");
   };
@@ -4057,6 +4069,14 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
           </div>
         )}
         {tienePrendaMancha===null&&<div style={{fontSize:11,color:"#e65100",fontWeight:600}}>⚠️ Debes responder Sí o No antes de registrar la venta.</div>}
+      </Card>
+      <Card title="🌟 Boleto extra por seguirnos y dejar reseña">
+        <div style={{fontSize:13,color:"#1a3c5e",marginBottom:10}}>¿El cliente acepta seguirnos en redes (Instagram/Facebook) y dejarnos una reseña en Google? Si acepta, se le suma <strong>1 boleto extra</strong> al sorteo activo.</div>
+        <label style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:boletoResena?"#fff8e1":"#f8fbfd",borderRadius:10,cursor:"pointer",border:"1.5px solid "+(boletoResena?"#f59e0b":"#e8f0f7")}}>
+          <input type="checkbox" checked={boletoResena} onChange={e=>setBoletoResena(e.target.checked)} style={{width:18,height:18}}/>
+          <span style={{fontWeight:600,fontSize:13,color:"#1a3c5e"}}>🌟 Sí, el cliente sigue nuestras redes y dejó su reseña — dale su boleto extra</span>
+        </label>
+        <div style={{fontSize:11,color:"#888",marginTop:6}}>Opcional — no es necesario para poder registrar la venta.</div>
       </Card>
       <Card title="💳 Pago">
         <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
