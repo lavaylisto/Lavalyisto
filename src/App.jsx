@@ -38,6 +38,16 @@ const INSUMOS_DEFAULT = [
 ];
 // 🛍️ PRODUCTOS: artículos que se venden directamente (no pasan por Producción). Cada venta descuenta el stock solo.
 const PRODUCTOS_DEFAULT = [];
+// 📒 KARDEX — ficha de movimientos de cada producto/insumo: fecha/hora, tipo, cantidad, folio de referencia y saldo resultante
+const KARDEX_PRODUCTOS_DEFAULT = [];
+const KARDEX_INSUMOS_DEFAULT = [];
+const registrarKardex=({itemId,itemNombre,tipo,cantidad,folio,motivo,saldoResultante,registradoPor},{setKardex,upsertKardex}) => {
+  const entry={id:"kx_"+Date.now()+"_"+Math.random().toString(36).slice(2,7),itemId,itemNombre:itemNombre||"",tipo,cantidad,folio:folio||null,motivo:motivo||null,saldoResultante,registradoPor:registradoPor||null,fecha:new Date().toISOString()};
+  if(setKardex)setKardex(prev=>[entry,...prev]);
+  if(upsertKardex)upsertKardex(entry);
+  return entry;
+};
+const TIPO_KARDEX_LBL={venta:{label:"Venta",icon:"🛍️",color:"#c62828"},nota_credito:{label:"Nota de crédito",icon:"↩️",color:"#2e7d32"},ajuste_manual:{label:"Ajuste manual",icon:"✏️",color:"#1565c0"},ingreso_inicial:{label:"Ingreso inicial",icon:"🆕",color:"#7b1fa2"},entrada_factura:{label:"Entrada por factura",icon:"🧾",color:"#2e7d32"},consumo:{label:"Consumo/uso",icon:"📉",color:"#c62828"}};
 
 // 🎟️ SORTEO POR BOLETOS — datos semilla (vacío, se crea desde el panel admin)
 const SORTEOS_DEFAULT = [];
@@ -3329,7 +3339,7 @@ function PinsAdmin({empleadas,pins,setPins,upsertPin}){
   </div>);
 }
 
-function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,onIrProduccion,onIrTareas,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta,upsertSalida,upsertCliente,upsertCaja,cupones,setCupones,upsertCupon,promos,cfgInc,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga,pins,eventosProduccion,setEventosProduccion,upsertEvento,productos,setProductos,upsertProducto,sorteos,setSorteos,upsertSorteo,setBoletosSorteo,upsertBoletoSorteo,boletosParaImprimir,setBoletosParaImprimir,depositos,setDepositos,upsertDeposito}){
+function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,onIrProduccion,onIrTareas,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta,upsertSalida,upsertCliente,upsertCaja,cupones,setCupones,upsertCupon,promos,cfgInc,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga,pins,eventosProduccion,setEventosProduccion,upsertEvento,productos,setProductos,upsertProducto,setKardexProductos,upsertKardexProducto,sorteos,setSorteos,upsertSorteo,setBoletosSorteo,upsertBoletoSorteo,boletosParaImprimir,setBoletosParaImprimir,depositos,setDepositos,upsertDeposito}){
   const [tab,setTab]=useState("hoy");const [busq,setBusq]=useState("");
   const [showNueva,setShowNueva]=useState(false);
   const [filtroTile,setFiltroTile]=useState(null); // 🔎 filtro rápido al tocar un contador (recibido/proceso/listo/entregado_pend)
@@ -3454,7 +3464,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
               <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e"}}>➕ Nueva Venta</div>
               <button style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:"#888"}} onClick={()=>setShowNueva(false)}>✕</button>
             </div>
-            <NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={v=>{setShowNueva(false);setTicket(v);}} servicios={servicios} sesion={sesion} upsertVenta={upsertVenta} upsertCliente={upsertCliente} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} sorteos={sorteos} setSorteos={setSorteos} upsertSorteo={upsertSorteo} setBoletosSorteo={setBoletosSorteo} upsertBoletoSorteo={upsertBoletoSorteo} onBoletosGenerados={setBoletosParaImprimir}/>
+            <NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={v=>{setShowNueva(false);setTicket(v);}} servicios={servicios} sesion={sesion} upsertVenta={upsertVenta} upsertCliente={upsertCliente} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto} sorteos={sorteos} setSorteos={setSorteos} upsertSorteo={upsertSorteo} setBoletosSorteo={setBoletosSorteo} upsertBoletoSorteo={upsertBoletoSorteo} onBoletosGenerados={setBoletosParaImprimir}/>
           </div>
         </div>
       )}
@@ -3731,7 +3741,7 @@ function PromosDelDia({promos,servicios,onAgregar,onCerrar}){
   );
 }
 
-function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,servicios,sesion,upsertVenta,upsertCliente,cupones=[],setCupones,upsertCupon,promos,productos=[],setProductos,upsertProducto,sorteos=[],setSorteos,upsertSorteo,setBoletosSorteo,upsertBoletoSorteo,onBoletosGenerados}){
+function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,servicios,sesion,upsertVenta,upsertCliente,cupones=[],setCupones,upsertCupon,promos,productos=[],setProductos,upsertProducto,setKardexProductos,upsertKardexProducto,sorteos=[],setSorteos,upsertSorteo,setBoletosSorteo,upsertBoletoSorteo,onBoletosGenerados}){
   const man=new Date();man.setDate(man.getDate()+1);
   const [cQ,setCQ]=useState("");const [cId,setCId]=useState(null);
   const [nC,setNC]=useState({nombre:"",tel:"",cedula:"",email:"",rfc:"",direccion:"",nacimiento:""});
@@ -3892,7 +3902,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
       prendaManchaAviso:!!tienePrendaMancha,prendaManchaObs:tienePrendaMancha?obsPrendaMancha.trim():null,
       boletoResenaSolicitado:!!boletoResena};
     setVentas([v,...ventas]);if(upsertVenta)upsertVenta(v);
-    // 🛍️ Descuenta del stock cada producto vendido en esta venta
+    // 🛍️ Descuenta del stock cada producto vendido en esta venta, y deja el movimiento en el Kardex
     const prodsVendidos=items.filter(it=>it.esProducto&&it.productoId);
     if(prodsVendidos.length>0&&setProductos){
       setProductos(prev=>{
@@ -3904,6 +3914,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
         prodsVendidos.forEach(it=>{
           const updated=next.find(p=>p.id===it.productoId);
           if(updated&&upsertProducto)upsertProducto({...updated,_updatedAt:new Date().toISOString()});
+          if(updated&&setKardexProductos)registrarKardex({itemId:it.productoId,itemNombre:updated.nombre,tipo:"venta",cantidad:-(it.piezas||1),folio:v.folio,saldoResultante:updated.stock,registradoPor:sesion?.nombre},{setKardex:setKardexProductos,upsertKardex:upsertKardexProducto});
         });
         return next;
       });
@@ -4172,9 +4183,83 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
   );
 }
 
-function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertVenta,sesion}){
+// ↩️ NOTA DE CRÉDITO — devuelve al stock los productos de una venta (por defecto/anulación parcial), dejando registro en el Kardex
+function NotaCreditoModal({venta,productos,onConfirmar,onCancelar}){
+  const itemsProducto=(venta.items||[]).map((it,idx)=>({...it,idx})).filter(it=>it.esProducto&&it.productoId);
+  const [sel,setSel]=useState({}); // {idx:cantidadADevolver}
+  const [motivo,setMotivo]=useState("");
+  const [err,setErr]=useState("");
+  const toggle=(idx,piezasMax)=>setSel(prev=>{const c={...prev};if(c[idx]!==undefined)delete c[idx];else c[idx]=piezasMax;return c;});
+  const confirmar=()=>{
+    if(Object.keys(sel).length===0){setErr("Selecciona al menos un producto para devolver");return;}
+    if(!motivo.trim()){setErr("Escribe el motivo de la nota de crédito");return;}
+    const devoluciones=itemsProducto.filter(it=>sel[it.idx]!==undefined).map(it=>({productoId:it.productoId,nombre:it.label,cantidad:parseInt(sel[it.idx])||1}));
+    onConfirmar(devoluciones,motivo.trim());
+  };
+  return(
+    <div style={S.ov}>
+      <div style={{background:"#fff",borderRadius:18,width:"100%",maxWidth:400,maxHeight:"85vh",overflowY:"auto",padding:20}}>
+        <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e",marginBottom:4,textAlign:"center"}}>↩️ Nota de crédito</div>
+        <div style={{fontSize:12,color:"#888",textAlign:"center",marginBottom:14}}>Selecciona qué productos de esta venta se devuelven al inventario</div>
+        {itemsProducto.length===0&&<div style={{textAlign:"center",color:"#aaa",fontSize:13,padding:"10px 0"}}>Esta venta no tiene productos de catálogo con control de stock.</div>}
+        {itemsProducto.map(it=>{
+          const p=(productos||[]).find(x=>x.id===it.productoId);
+          return(
+            <label key={it.idx} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",background:sel[it.idx]!==undefined?"#e8f5e9":"#f8fbfd",border:"1.5px solid "+(sel[it.idx]!==undefined?"#2e7d32":"#e8f0f7"),borderRadius:10,marginBottom:8,cursor:"pointer"}}>
+              <input type="checkbox" checked={sel[it.idx]!==undefined} onChange={()=>toggle(it.idx,it.piezas||1)}/>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:600,fontSize:13,color:"#1a3c5e"}}>{it.label}</div>
+                <div style={{fontSize:11,color:"#888"}}>Vendidas: {it.piezas||1} · Stock actual: {p?.stock??"—"}</div>
+              </div>
+              {sel[it.idx]!==undefined&&<input type="number" min="1" max={it.piezas||1} style={{...S.inp,width:56,padding:"4px 6px"}} value={sel[it.idx]} onChange={e=>setSel({...sel,[it.idx]:Math.min(parseInt(e.target.value)||1,it.piezas||1)})}/>}
+            </label>
+          );
+        })}
+        <div style={{marginTop:6}}>
+          <label style={S.lbl}>Motivo (obligatorio)</label>
+          <textarea style={{...S.inp,minHeight:56,resize:"vertical"}} placeholder="ej. Cliente devolvió el producto sin abrir..." value={motivo} onChange={e=>{setMotivo(e.target.value);setErr("");}}/>
+        </div>
+        {err&&<div style={{color:"#c62828",fontSize:12,fontWeight:600,marginTop:8}}>{err}</div>}
+        <div style={{display:"flex",gap:8,marginTop:14}}>
+          <button style={{...S.btnP,flex:1}} onClick={confirmar}>✓ Confirmar devolución</button>
+          <button style={{...S.btnS,flex:1}} onClick={onCancelar}>Cancelar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertVenta,sesion,productos,setProductos,upsertProducto,setKardexProductos,upsertKardexProducto}){
   const [showAb,setShowAb]=useState(false);
   const [waListo,setWaListo]=useState(false);
+  const [showNotaCredito,setShowNotaCredito]=useState(false);
+  const tieneProductos=(v.items||[]).some(it=>it.esProducto&&it.productoId);
+  const confirmarNotaCredito=(devoluciones,motivo)=>{
+    if(setProductos){
+      setProductos(prev=>{
+        const next=prev.map(p=>{
+          const dev=devoluciones.find(d=>d.productoId===p.id);
+          if(!dev)return p;
+          return{...p,stock:(p.stock||0)+dev.cantidad};
+        });
+        devoluciones.forEach(dev=>{
+          const updated=next.find(p=>p.id===dev.productoId);
+          if(updated&&upsertProducto)upsertProducto({...updated,_updatedAt:new Date().toISOString()});
+          if(updated)registrarKardex({itemId:dev.productoId,itemNombre:updated.nombre,tipo:"nota_credito",cantidad:dev.cantidad,folio:v.folio,motivo,saldoResultante:updated.stock,registradoPor:sesion?.nombre},{setKardex:setKardexProductos,upsertKardex:upsertKardexProducto});
+        });
+        return next;
+      });
+    }
+    if(setVentas){
+      setVentas(prev=>{
+        const next=prev.map(vv=>vv.folio===v.folio?{...vv,notasCredito:[...(vv.notasCredito||[]),{fecha:new Date().toISOString(),motivo,devoluciones,registradoPor:sesion?.nombre||null}]}:vv);
+        const updated=next.find(vv=>vv.folio===v.folio);
+        if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
+        return next;
+      });
+    }
+    setShowNotaCredito(false);
+  };
   const emp=empleadas.find(e=>e.id===v.empleadaId);
   const pend=saldo(v);const esPag=pagada(v);
   const abs=v.abonos||[];const totAb=abs.reduce((a,ab)=>a+ab.monto,0);
@@ -4222,15 +4307,24 @@ function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertV
           <button style={S.btnT} onClick={()=>setTicket(v)}>🧾 Ticket</button>
           {!esPag&&!v.anulada&&<button style={{...S.btnT,background:"#fff3e0",color:"#e65100"}} onClick={()=>setShowAb(true)}>💰 Pago</button>}
           {!v.anulada&&esAdmin&&setVentas&&<button style={{...S.btnT,background:"#ffebee",color:"#c62828"}} onClick={()=>{const m=window.prompt("Motivo de anulacion:");if(m===null||!m.trim())return;setVentas(prev=>{const next=prev.map(vv=>vv.folio===v.folio?{...vv,anulada:true,motivoAnulacion:m,anuladaPor:sesion?.nombre||"Administrador",anuladaEn:new Date().toISOString()}:vv);const updated=next.find(vv=>vv.folio===v.folio);if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});return next;});}}>❌ Anular</button>}
+          {!v.anulada&&esAdmin&&tieneProductos&&setProductos&&<button style={{...S.btnT,background:"#e8f5e9",color:"#2e7d32"}} onClick={()=>setShowNotaCredito(true)}>↩️ Nota de crédito</button>}
         </div>
+        {(v.notasCredito||[]).length>0&&(
+          <div style={{marginTop:8,background:"#e8f5e9",borderRadius:8,padding:"8px 10px"}}>
+            {v.notasCredito.map((nc,i)=>(
+              <div key={i} style={{fontSize:11,color:"#2e7d32",marginBottom:2}}>↩️ {fmt(nc.fecha)} · {nc.devoluciones.map(d=>`${d.nombre} x${d.cantidad}`).join(", ")} · {nc.motivo}</div>
+            ))}
+          </div>
+        )}
       </div>
       {showAb&&<AbonoModal venta={v} onSave={ab=>{addAbono(v.folio,ab);setShowAb(false);}} onClose={()=>setShowAb(false)}/>}
       {waListo&&<WhatsAppObligatorio venta={v} tipo="listo" onConfirm={info=>{aplicarEstado("listo",{checkMsgRetiro:info.enviado,msgListo:info});setWaListo(false);}} onCancel={()=>setWaListo(false)}/>}
+      {showNotaCredito&&<NotaCreditoModal venta={v} productos={productos} onConfirmar={confirmarNotaCredito} onCancelar={()=>setShowNotaCredito(false)}/>}
     </>
   );
 }
 
-function Historial({ventas,setVentas,empleadas,setTicket,addAbono,esAdmin,upsertVenta,sesion}){
+function Historial({ventas,setVentas,empleadas,setTicket,addAbono,esAdmin,upsertVenta,sesion,productos,setProductos,upsertProducto,setKardexProductos,upsertKardexProducto}){
   const [fP,setFP]=useState("Todos");const [fE,setFE]=useState("Todos");
   const [fEmp,setFEmp]=useState("Todos");const [fF,setFF]=useState("");const [busq,setBusq]=useState("");
   const filtered=ventas.filter(v=>{
@@ -4255,7 +4349,7 @@ function Historial({ventas,setVentas,empleadas,setTicket,addAbono,esAdmin,upsert
         </div>
       </Card>
       <div style={{fontSize:12,color:"#888",marginBottom:8}}>{filtered.length} ventas — Total: ${filtered.reduce((a,v)=>a+v.total,0).toFixed(2)}</div>
-      {filtered.length===0?<div style={S.empty}>Sin resultados</div>:filtered.map(v=><VentaCardItem key={v.folio} v={v} empleadas={empleadas} setTicket={setTicket} addAbono={addAbono} setVentas={setVentas} esAdmin={esAdmin} upsertVenta={upsertVenta} sesion={sesion}/>)}
+      {filtered.length===0?<div style={S.empty}>Sin resultados</div>:filtered.map(v=><VentaCardItem key={v.folio} v={v} empleadas={empleadas} setTicket={setTicket} addAbono={addAbono} setVentas={setVentas} esAdmin={esAdmin} upsertVenta={upsertVenta} sesion={sesion} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto}/>)}
     </div>
   );
 }
@@ -4579,15 +4673,32 @@ function Reportes({ventas,empleadas,salidasCaja}){
 }
 
 // 🛍️ PRODUCTOS — catálogo de artículos que se venden directamente (sin pasar por Producción). Stock editable a mano o descontado solo al vender.
-function ProductosAdmin({productos,setProductos,upsertProducto}){
+function ProductosAdmin({productos,setProductos,upsertProducto,kardexProductos,setKardexProductos,upsertKardexProducto,sesion}){
   const [nv,setNv]=useState({nombre:"",precio:"",stock:"",min:"1",categoria:""});
+  const [verKardexDe,setVerKardexDe]=useState(null); // id del producto cuyo kardex está expandido
   const activos=productos.filter(p=>!p.eliminada);
+  const kardexDe=id=>(kardexProductos||[]).filter(k=>k.itemId===id).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha));
   const add=()=>{
     if(!nv.nombre.trim()||!nv.precio){alert("Escribe el nombre y el precio del producto");return;}
-    const np={id:"prod_"+Date.now(),nombre:nv.nombre.trim(),precio:parseFloat(nv.precio)||0,stock:parseFloat(nv.stock)||0,min:parseFloat(nv.min)||1,categoria:nv.categoria||null,activa:true};
+    const stockInicial=parseFloat(nv.stock)||0;
+    const np={id:"prod_"+Date.now(),nombre:nv.nombre.trim(),precio:parseFloat(nv.precio)||0,stock:stockInicial,min:parseFloat(nv.min)||1,categoria:nv.categoria||null,activa:true};
     setProductos(prev=>[...prev,np]);
     if(upsertProducto)upsertProducto({...np,_updatedAt:new Date().toISOString()});
+    if(stockInicial>0)registrarKardex({itemId:np.id,itemNombre:np.nombre,tipo:"ingreso_inicial",cantidad:stockInicial,saldoResultante:stockInicial,registradoPor:sesion?.nombre},{setKardex:setKardexProductos,upsertKardex:upsertKardexProducto});
     setNv({nombre:"",precio:"",stock:"",min:"1",categoria:""});
+  };
+  // ✏️ Ajuste manual de stock (+/−), con motivo obligatorio y registro en el kardex
+  const ajustarStock=(p,delta)=>{
+    const motivo=window.prompt(`¿Motivo del ajuste ${delta>0?"(+"+delta+")":"("+delta+")"} para "${p.nombre}"?`,"");
+    if(motivo===null)return; // canceló
+    const nuevoStock=Math.max(0,(p.stock||0)+delta);
+    setProductos(prev=>{
+      const next=prev.map(x=>x.id===p.id?{...x,stock:nuevoStock}:x);
+      const updated=next.find(x=>x.id===p.id);
+      if(updated&&upsertProducto)upsertProducto({...updated,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+    registrarKardex({itemId:p.id,itemNombre:p.nombre,tipo:"ajuste_manual",cantidad:delta,motivo:motivo.trim()||null,saldoResultante:nuevoStock,registradoPor:sesion?.nombre},{setKardex:setKardexProductos,upsertKardex:upsertKardexProducto});
   };
   const upd=(id,f,v)=>setProductos(prev=>{
     const next=prev.map(p=>p.id===id?{...p,[f]:v}:p);
@@ -4607,7 +4718,7 @@ function ProductosAdmin({productos,setProductos,upsertProducto}){
   const bajo=activos.filter(p=>p.stock<=p.min);
   return(<div style={S.panel}>
     <h2 style={S.ptitle}>🛍️ Productos</h2>
-    <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ Estos productos se pueden agregar a una venta como "🛍️ Producto". El stock se descuenta solo al momento de vender, y no pasan por el módulo de Producción — se facturan y salen directo. Marca "🧴 Aromatizador Textil" en los que quieras que generen boleto extra en el sorteo activo.</div>
+    <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ Estos productos se pueden agregar a una venta como "🛍️ Producto". El stock se descuenta solo al momento de vender, y no pasan por el módulo de Producción — se facturan y salen directo. Marca "🧴 Aromatizador Textil" en los que quieras que generen boleto extra en el sorteo activo. Toca "📒 Kardex" para ver el historial completo de movimientos de cada uno.</div>
     {bajo.length>0&&<div style={S.alrt}>⚠️ Stock bajo: {bajo.map(p=>p.nombre).join(", ")}</div>}
     <Card title="📋 Catálogo">
       {activos.length===0&&<div style={S.empty}>Aún no has agregado productos.</div>}
@@ -4620,9 +4731,9 @@ function ProductosAdmin({productos,setProductos,upsertProducto}){
           </div>
         </div>
         <div style={{display:"flex",gap:6,marginTop:8,alignItems:"center",flexWrap:"wrap"}}>
-          <button style={S.btnS} onClick={()=>upd(p.id,"stock",Math.max(0,p.stock-1))}>−</button>
-          <input type="number" style={{...S.inp,width:70,textAlign:"center",padding:"4px 6px"}} value={p.stock} onChange={e=>upd(p.id,"stock",parseFloat(e.target.value)||0)}/>
-          <button style={S.btnS} onClick={()=>upd(p.id,"stock",p.stock+1)}>+</button>
+          <button style={S.btnS} onClick={()=>ajustarStock(p,-1)}>−</button>
+          <div style={{...S.inp,width:70,textAlign:"center",padding:"4px 6px",background:"#f0f4f8"}}>{p.stock}</div>
+          <button style={S.btnS} onClick={()=>ajustarStock(p,1)}>+</button>
           <label style={{fontSize:11,color:"#888"}}>Precio:</label>
           <input type="number" style={{...S.inp,width:80,padding:"4px 6px"}} value={p.precio} onChange={e=>upd(p.id,"precio",parseFloat(e.target.value)||0)}/>
           <label style={{fontSize:11,color:"#888"}}>Mín:</label>
@@ -4631,7 +4742,29 @@ function ProductosAdmin({productos,setProductos,upsertProducto}){
             <option value="">Sin categoría</option>
             <option value="aromatizador">🧴 Aromatizador Textil (boleto extra)</option>
           </select>
+          <button style={{...S.btnS,marginLeft:"auto"}} onClick={()=>setVerKardexDe(verKardexDe===p.id?null:p.id)}>📒 {verKardexDe===p.id?"Ocultar kardex":"Kardex"}</button>
         </div>
+        {verKardexDe===p.id&&(
+          <div style={{marginTop:10,background:"#f8fbfd",borderRadius:8,padding:"8px 10px",border:"1px solid #e8f0f7"}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#1a3c5e",marginBottom:6}}>📒 Kardex — {p.nombre}</div>
+            {kardexDe(p.id).length===0&&<div style={{fontSize:12,color:"#aaa"}}>Sin movimientos registrados todavía.</div>}
+            {kardexDe(p.id).map(k=>{
+              const t=TIPO_KARDEX_LBL[k.tipo]||{label:k.tipo,icon:"•",color:"#888"};
+              return(
+                <div key={k.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderBottom:"1px solid #f0f4f8"}}>
+                  <div style={{minWidth:0}}>
+                    <div style={{fontSize:12,fontWeight:600,color:t.color}}>{t.icon} {t.label}{k.folio?` · ${k.folio}`:""}</div>
+                    <div style={{fontSize:10,color:"#888"}}>{fmt(k.fecha)}{k.registradoPor?` · ${k.registradoPor}`:""}{k.motivo?` · ${k.motivo}`:""}</div>
+                  </div>
+                  <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
+                    <div style={{fontSize:13,fontWeight:800,color:k.cantidad>=0?"#2e7d32":"#c62828"}}>{k.cantidad>=0?"+":""}{k.cantidad}</div>
+                    <div style={{fontSize:9,color:"#aaa"}}>saldo: {k.saldoResultante}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>))}
     </Card>
     <Card title="➕ Agregar producto">
@@ -4650,35 +4783,97 @@ function ProductosAdmin({productos,setProductos,upsertProducto}){
   </div>);
 }
 
-function Inventario({inventario,setInventario,upsertInventario}){
-  const [nv,setNv]=useState({nombre:"",stock:0,min:1,unidad:"pzas"});
+function Inventario({inventario,setInventario,upsertInventario,kardexInsumos,setKardexInsumos,upsertKardexInsumo,sesion}){
+  const [nv,setNv]=useState({nombre:"",codigo:"",stock:0,min:1,unidad:"pzas"});
+  const [verKardexDe,setVerKardexDe]=useState(null);
+  const [showEntrada,setShowEntrada]=useState(null); // insumo para registrar entrada por factura
   const activos=inventario.filter(i=>!i.eliminada);
+  const kardexDe=id=>(kardexInsumos||[]).filter(k=>k.itemId===id).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha));
   const upd=(id,f,v)=>setInventario(prev=>{const next=prev.map(i=>i.id===id?{...i,[f]:v}:i);const updated=next.find(i=>i.id===id);if(updated&&upsertInventario)upsertInventario({...updated,_updatedAt:new Date().toISOString()});return next;});
   const del=id=>{if(!window.confirm("¿Eliminar este insumo?"))return;setInventario(prev=>{const next=prev.map(i=>i.id===id?{...i,eliminada:true}:i);const borrado=next.find(i=>i.id===id);if(borrado&&upsertInventario)upsertInventario({...borrado,_updatedAt:new Date().toISOString()});return next;});};
-  const add=()=>{if(!nv.nombre.trim())return;const ni={...nv,id:Date.now(),stock:parseFloat(nv.stock)||0};setInventario(prev=>[...prev,ni]);if(upsertInventario)upsertInventario({...ni,_updatedAt:new Date().toISOString()});setNv({nombre:"",stock:0,min:1,unidad:"pzas"});};
+  const add=()=>{
+    if(!nv.nombre.trim())return;
+    const stockInicial=parseFloat(nv.stock)||0;
+    const ni={id:Date.now(),nombre:nv.nombre.trim(),codigo:nv.codigo.trim()||null,stock:stockInicial,min:parseFloat(nv.min)||1,unidad:nv.unidad};
+    setInventario(prev=>[...prev,ni]);
+    if(upsertInventario)upsertInventario({...ni,_updatedAt:new Date().toISOString()});
+    if(stockInicial>0)registrarKardex({itemId:ni.id,itemNombre:ni.nombre,tipo:"ingreso_inicial",cantidad:stockInicial,saldoResultante:stockInicial,registradoPor:sesion?.nombre},{setKardex:setKardexInsumos,upsertKardex:upsertKardexInsumo});
+    setNv({nombre:"",codigo:"",stock:0,min:1,unidad:"pzas"});
+  };
+  // ✏️ Ajuste manual (consumo diario, mermas, etc.) — pide motivo y deja registro en el kardex
+  const ajustarStock=(it,delta)=>{
+    const motivo=window.prompt(`¿Motivo del ${delta>0?"ingreso":"consumo"} de ${Math.abs(delta)} ${it.unidad} de "${it.nombre}"?`,delta<0?"Uso diario":"");
+    if(motivo===null)return;
+    const nuevoStock=Math.max(0,(it.stock||0)+delta);
+    setInventario(prev=>{
+      const next=prev.map(x=>x.id===it.id?{...x,stock:nuevoStock}:x);
+      const updated=next.find(x=>x.id===it.id);
+      if(updated&&upsertInventario)upsertInventario({...updated,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+    registrarKardex({itemId:it.id,itemNombre:it.nombre,tipo:delta<0?"consumo":"ajuste_manual",cantidad:delta,motivo:motivo.trim()||null,saldoResultante:nuevoStock,registradoPor:sesion?.nombre},{setKardex:setKardexInsumos,upsertKardex:upsertKardexInsumo});
+  };
+  // 🧾 Registrar entrada por factura: suma cantidad al stock y deja el número de factura como referencia en el kardex
+  const registrarEntradaFactura=(it,cantidad,factura)=>{
+    const nuevoStock=(it.stock||0)+cantidad;
+    setInventario(prev=>{
+      const next=prev.map(x=>x.id===it.id?{...x,stock:nuevoStock}:x);
+      const updated=next.find(x=>x.id===it.id);
+      if(updated&&upsertInventario)upsertInventario({...updated,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+    registrarKardex({itemId:it.id,itemNombre:it.nombre,tipo:"entrada_factura",cantidad,folio:factura||null,saldoResultante:nuevoStock,registradoPor:sesion?.nombre},{setKardex:setKardexInsumos,upsertKardex:upsertKardexInsumo});
+    setShowEntrada(null);
+  };
   const bajo=activos.filter(i=>i.stock<=i.min);
   return(<div style={S.panel}>
     <h2 style={S.ptitle}>📦 Inventario</h2>
+    <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ Cada insumo tiene su propio Kardex: entradas por factura, consumo diario y ajustes manuales, todos con fecha/hora y referencia.</div>
     {bajo.length>0&&<div style={S.alrt}>⚠️ Stock bajo: {bajo.map(i=>i.nombre).join(", ")}</div>}
     <Card title="📋 Insumos">
       {activos.map(it=>(<div key={it.id} style={S.vcard}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <div><div style={{fontWeight:600}}>{it.nombre}</div><div style={{fontSize:12,color:"#888"}}>Min: {it.min} {it.unidad}</div></div>
+          <div><div style={{fontWeight:600}}>{it.nombre}{it.codigo?<span style={{color:"#888",fontWeight:400,fontSize:11}}> · Cód: {it.codigo}</span>:""}</div><div style={{fontSize:12,color:"#888"}}>Min: {it.min} {it.unidad}</div></div>
           <div style={{display:"flex",alignItems:"center",gap:8}}>
             <div style={{...S.badge,background:it.stock<=it.min?"#ffebee":"#e8f5e9",color:it.stock<=it.min?"#c62828":"#2e7d32",fontSize:14,fontWeight:700}}>{it.stock} {it.unidad}</div>
             <button style={S.btnR} onClick={()=>del(it.id)}>✕</button>
           </div>
         </div>
-        <div style={{display:"flex",gap:6,marginTop:8,alignItems:"center"}}>
-          <button style={S.btnS} onClick={()=>upd(it.id,"stock",Math.max(0,it.stock-1))}>−</button>
-          <input type="number" style={{...S.inp,width:70,textAlign:"center",padding:"4px 6px"}} value={it.stock} onChange={e=>upd(it.id,"stock",parseFloat(e.target.value)||0)}/>
-          <button style={S.btnS} onClick={()=>upd(it.id,"stock",it.stock+1)}>+</button>
+        <div style={{display:"flex",gap:6,marginTop:8,alignItems:"center",flexWrap:"wrap"}}>
+          <button style={S.btnS} onClick={()=>ajustarStock(it,-1)}>−</button>
+          <div style={{...S.inp,width:70,textAlign:"center",padding:"4px 6px",background:"#f0f4f8"}}>{it.stock}</div>
+          <button style={S.btnS} onClick={()=>ajustarStock(it,1)}>+</button>
+          <button style={{...S.btnS,background:"#e8f5e9",color:"#2e7d32"}} onClick={()=>setShowEntrada(it.id)}>🧾 Entrada por factura</button>
+          <button style={{...S.btnS,marginLeft:"auto"}} onClick={()=>setVerKardexDe(verKardexDe===it.id?null:it.id)}>📒 {verKardexDe===it.id?"Ocultar kardex":"Kardex"}</button>
         </div>
+        {showEntrada===it.id&&<EntradaFacturaInline insumo={it} onConfirmar={(cantidad,factura)=>registrarEntradaFactura(it,cantidad,factura)} onCancelar={()=>setShowEntrada(null)}/>}
+        {verKardexDe===it.id&&(
+          <div style={{marginTop:10,background:"#f8fbfd",borderRadius:8,padding:"8px 10px",border:"1px solid #e8f0f7"}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#1a3c5e",marginBottom:6}}>📒 Kardex — {it.nombre}</div>
+            {kardexDe(it.id).length===0&&<div style={{fontSize:12,color:"#aaa"}}>Sin movimientos registrados todavía.</div>}
+            {kardexDe(it.id).map(k=>{
+              const t=TIPO_KARDEX_LBL[k.tipo]||{label:k.tipo,icon:"•",color:"#888"};
+              return(
+                <div key={k.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderBottom:"1px solid #f0f4f8"}}>
+                  <div style={{minWidth:0}}>
+                    <div style={{fontSize:12,fontWeight:600,color:t.color}}>{t.icon} {t.label}{k.folio?` · Fact. ${k.folio}`:""}</div>
+                    <div style={{fontSize:10,color:"#888"}}>{fmt(k.fecha)}{k.registradoPor?` · ${k.registradoPor}`:""}{k.motivo?` · ${k.motivo}`:""}</div>
+                  </div>
+                  <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
+                    <div style={{fontSize:13,fontWeight:800,color:k.cantidad>=0?"#2e7d32":"#c62828"}}>{k.cantidad>=0?"+":""}{k.cantidad}</div>
+                    <div style={{fontSize:9,color:"#aaa"}}>saldo: {k.saldoResultante}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>))}
     </Card>
     <Card title="➕ Agregar">
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
         <input style={{...S.inp,gridColumn:"1/-1"}} placeholder="Nombre" value={nv.nombre} onChange={e=>setNv({...nv,nombre:e.target.value})}/>
+        <input style={S.inp} placeholder="Código (opcional)" value={nv.codigo} onChange={e=>setNv({...nv,codigo:e.target.value})}/>
         <input type="number" style={S.inp} placeholder="Stock" value={nv.stock} onChange={e=>setNv({...nv,stock:e.target.value})}/>
         <input type="number" style={S.inp} placeholder="Minimo" value={nv.min} onChange={e=>setNv({...nv,min:e.target.value})}/>
         <input style={S.inp} placeholder="Unidad" value={nv.unidad} onChange={e=>setNv({...nv,unidad:e.target.value})}/>
@@ -4686,6 +4881,33 @@ function Inventario({inventario,setInventario,upsertInventario}){
       <button style={{...S.btnP,marginTop:10}} onClick={add}>Agregar</button>
     </Card>
   </div>);
+}
+
+// 🧾 Formulario en línea para registrar la entrada de un insumo por número de factura
+function EntradaFacturaInline({insumo,onConfirmar,onCancelar}){
+  const [cantidad,setCantidad]=useState("");
+  const [factura,setFactura]=useState("");
+  const [err,setErr]=useState("");
+  const confirmar=()=>{
+    const c=parseFloat(cantidad);
+    if(!c||c<=0){setErr("Escribe una cantidad válida");return;}
+    if(!factura.trim()){setErr("Escribe el número de factura");return;}
+    onConfirmar(c,factura.trim());
+  };
+  return(
+    <div style={{marginTop:8,background:"#e8f5e9",borderRadius:8,padding:10,border:"1px solid #a5d6a7"}}>
+      <div style={{fontSize:12,fontWeight:700,color:"#2e7d32",marginBottom:6}}>🧾 Entrada por factura — {insumo.nombre}</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:6}}>
+        <input type="number" style={S.inp} placeholder={`Cantidad (${insumo.unidad})`} value={cantidad} onChange={e=>{setCantidad(e.target.value);setErr("");}}/>
+        <input style={S.inp} placeholder="N° de factura" value={factura} onChange={e=>{setFactura(e.target.value);setErr("");}}/>
+      </div>
+      {err&&<div style={{color:"#c62828",fontSize:11,fontWeight:600,marginBottom:6}}>{err}</div>}
+      <div style={{display:"flex",gap:6}}>
+        <button style={{...S.btnS,flex:1,background:"#2e7d32",color:"#fff"}} onClick={confirmar}>✓ Registrar entrada</button>
+        <button style={{...S.btnS,flex:1}} onClick={onCancelar}>Cancelar</button>
+      </div>
+    </div>
+  );
 }
 
 function Equipo({empleadas,setEmpleadas,ventas,esAdmin,upsertEmpleada}){
@@ -4944,19 +5166,45 @@ function MaquinasAdmin({maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upse
   </div>);
 }
 
-const CATS=["Insumos/Suministros","Servicios","Arriendo","Sueldos","Mantenimiento","Publicidad","Equipos","Otros"];
-function Gastos({gastos,setGastos,sesion,upsertGasto}){
+const CATS=["Insumos/Suministros","Servicios","Arriendo","Sueldos","Mantenimiento","Publicidad","Equipos","Pago de deuda","Otros"];
+function Gastos({gastos,setGastos,sesion,upsertGasto,salidasCaja,activosFijos,setActivosFijos,upsertActivoFijo}){
   const [nv,setNv]=useState({descripcion:"",categoria:"Insumos/Suministros",proveedor:"",numeroFactura:"",monto:"",fecha:fechaHoyLocal(),metodoPago:"Efectivo",notas:""});
+  const [esActivoFijo,setEsActivoFijo]=useState(false);
   const [fMes,setFMes]=useState(mesK(new Date()));const [fCat,setFCat]=useState("Todas");const [err,setErr]=useState("");
-  const add=()=>{if(!nv.descripcion.trim()||!nv.monto){setErr("Completa descripcion y monto");return;}const ng={...nv,id:Date.now(),monto:parseFloat(nv.monto),registradoPor:sesion.nombre};setGastos(prev=>[ng,...prev]);if(upsertGasto)upsertGasto({...ng,_updatedAt:new Date().toISOString()});setNv({descripcion:"",categoria:"Insumos/Suministros",proveedor:"",numeroFactura:"",monto:"",fecha:fechaHoyLocal(),metodoPago:"Efectivo",notas:""});setErr("");};
+  const [incluirSalidas,setIncluirSalidas]=useState(true); // 💸 combinar salidas de caja en este reporte
+  const add=()=>{
+    if(!nv.descripcion.trim()||!nv.monto){setErr("Completa descripcion y monto");return;}
+    const ng={...nv,id:Date.now(),monto:parseFloat(nv.monto),registradoPor:sesion.nombre};
+    setGastos(prev=>[ng,...prev]);
+    if(upsertGasto)upsertGasto({...ng,_updatedAt:new Date().toISOString()});
+    // 📦 Si se marcó como activo fijo, se registra también en Activos Fijos automáticamente
+    if(esActivoFijo&&setActivosFijos){
+      const af={id:"af_"+ng.id,nombre:ng.descripcion,categoria:"General",fechaAdquisicion:ng.fecha,valorCompra:ng.monto,proveedor:ng.proveedor||null,estado:"activo",notas:"Registrado automáticamente desde Gastos",gastoIdOrigen:ng.id};
+      setActivosFijos(prev=>[af,...prev]);
+      if(upsertActivoFijo)upsertActivoFijo({...af,_updatedAt:new Date().toISOString()});
+    }
+    setNv({descripcion:"",categoria:"Insumos/Suministros",proveedor:"",numeroFactura:"",monto:"",fecha:fechaHoyLocal(),metodoPago:"Efectivo",notas:""});
+    setEsActivoFijo(false);
+    setErr("");
+  };
   const del=id=>{if(!window.confirm("Eliminar?"))return;setGastos(prev=>{const next=prev.map(g=>g.id===id?{...g,eliminada:true}:g);const borrado=next.find(g=>g.id===id);if(borrado&&upsertGasto)upsertGasto({...borrado,_updatedAt:new Date().toISOString()});return next;});};
   const fil=gastos.filter(g=>!g.eliminada&&(!fMes||fechaLocal(g.fecha).startsWith(fMes))&&(fCat==="Todas"||g.categoria===fCat));
-  const tot=fil.reduce((a,g)=>a+g.monto,0);
+  // 💸 Salidas de caja del mismo rango — se muestran como una "categoría" más dentro de este reporte, si se incluye
+  const salidasFil=incluirSalidas&&(fCat==="Todas"||fCat==="Salidas de caja")?(salidasCaja||[]).filter(s=>!s.eliminada&&(!fMes||s.fecha.startsWith(fMes))):[];
+  const totGastos=fil.reduce((a,g)=>a+g.monto,0);
+  const totSalidas=salidasFil.reduce((a,s)=>a+s.monto,0);
+  const tot=totGastos+totSalidas;
   const descargarGastosCSV=()=>{
-    if(fil.length===0){alert("No hay gastos para descargar con los filtros actuales.");return;}
+    if(fil.length===0&&salidasFil.length===0){alert("No hay gastos para descargar con los filtros actuales.");return;}
     const enc=["Fecha","Descripción","Categoría","Proveedor","N° Factura","Monto","Método de pago","Registrado por","Notas"];
     const filas=fil.map(g=>[fmtD(g.fecha),g.descripcion||"",g.categoria||"",g.proveedor||"",g.numeroFactura||"","$"+g.monto.toFixed(2),g.metodoPago||"",g.registradoPor||"",g.notas||""]);
-    filas.push(["","","","","","TOTAL: $"+tot.toFixed(2),"","",""]);
+    salidasFil.forEach(s=>filas.push([fmtD(s.fecha),s.motivo||"","Salidas de caja","","","$"+s.monto.toFixed(2),"Efectivo",s.quien||"","Salida de caja del día · "+(s.hora||"")]));
+    filas.push(["","","","","","","","",""]);
+    if(salidasFil.length>0){
+      filas.push(["","","","","Subtotal gastos:","$"+totGastos.toFixed(2),"","",""]);
+      filas.push(["","","","","Subtotal salidas de caja:","$"+totSalidas.toFixed(2),"","",""]);
+    }
+    filas.push(["","","","","TOTAL:","$"+tot.toFixed(2),"","",""]);
     const csv=[enc,...filas].map(f=>f.map(c=>'"'+String(c).replace(/"/g,'\\"')+'"').join(",")).join("\n");
     const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
     const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="gastos-"+(fCat!=="Todas"?fCat.replace(/[^a-z0-9]/gi,"_")+"-":"")+(fMes||"todos")+".csv";a.click();
@@ -4964,15 +5212,20 @@ function Gastos({gastos,setGastos,sesion,upsertGasto}){
   return(<div style={S.panel}>
     <h2 style={S.ptitle}>🛒 Gastos & Facturas</h2>
     <div style={S.kgrid}>
-      <div style={{...S.kpi,borderLeft:"4px solid #e53935"}}><div style={{fontSize:22}}>💸</div><div><div style={{fontWeight:800,fontSize:18,color:"#e53935"}}>${tot.toFixed(2)}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Total gastos</div></div></div>
-      <div style={{...S.kpi,borderLeft:"4px solid #ff9800"}}><div style={{fontSize:22}}>🧾</div><div><div style={{fontWeight:800,fontSize:18,color:"#ff9800"}}>{fil.length}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Facturas</div></div></div>
+      <div style={{...S.kpi,borderLeft:"4px solid #e53935"}}><div style={{fontSize:22}}>💸</div><div><div style={{fontWeight:800,fontSize:18,color:"#e53935"}}>${tot.toFixed(2)}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Total {incluirSalidas?"(gastos + salidas)":"gastos"}</div></div></div>
+      <div style={{...S.kpi,borderLeft:"4px solid #ff9800"}}><div style={{fontSize:22}}>🧾</div><div><div style={{fontWeight:800,fontSize:18,color:"#ff9800"}}>{fil.length+salidasFil.length}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Movimientos</div></div></div>
     </div>
     <Card title="🔍 Filtros">
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
         <div><label style={S.lbl}>Mes</label><input type="month" style={S.inp} value={fMes} onChange={e=>setFMes(e.target.value)}/></div>
-        <div><label style={S.lbl}>Categoria</label><select style={S.inp} value={fCat} onChange={e=>setFCat(e.target.value)}><option>Todas</option>{CATS.map(c=><option key={c}>{c}</option>)}</select></div>
+        <div><label style={S.lbl}>Categoria</label><select style={S.inp} value={fCat} onChange={e=>setFCat(e.target.value)}><option>Todas</option>{CATS.map(c=><option key={c}>{c}</option>)}<option>Salidas de caja</option></select></div>
       </div>
-      <button style={{...S.btnP,marginTop:10}} onClick={descargarGastosCSV}>📥 Descargar CSV ({fil.length} gasto{fil.length!==1?"s":""})</button>
+      <label style={{display:"flex",alignItems:"center",gap:8,marginTop:10,fontSize:13,cursor:"pointer"}}>
+        <input type="checkbox" checked={incluirSalidas} onChange={e=>setIncluirSalidas(e.target.checked)}/>
+        💸 Incluir salidas de caja en este reporte
+      </label>
+      {incluirSalidas&&salidasFil.length>0&&<div style={{fontSize:12,color:"#888",marginTop:6}}>Gastos: ${totGastos.toFixed(2)} + Salidas de caja: ${totSalidas.toFixed(2)} = <strong>${tot.toFixed(2)}</strong></div>}
+      <button style={{...S.btnP,marginTop:10}} onClick={descargarGastosCSV}>📥 Descargar CSV ({fil.length+salidasFil.length} movimiento{(fil.length+salidasFil.length)!==1?"s":""})</button>
     </Card>
     <Card title="➕ Registrar gasto">
       {err&&<div style={S.err}>{err}</div>}
@@ -4985,6 +5238,10 @@ function Gastos({gastos,setGastos,sesion,upsertGasto}){
         <div><label style={S.lbl}>Fecha</label><input type="date" style={S.inp} value={nv.fecha} onChange={e=>setNv({...nv,fecha:e.target.value})}/></div>
         <div><label style={S.lbl}>Metodo</label><select style={S.inp} value={nv.metodoPago} onChange={e=>setNv({...nv,metodoPago:e.target.value})}>{PAGOS.map(p=><option key={p}>{p}</option>)}</select></div>
       </div>
+      <label style={{display:"flex",alignItems:"center",gap:8,marginTop:10,fontSize:13,cursor:"pointer"}}>
+        <input type="checkbox" checked={esActivoFijo} onChange={e=>setEsActivoFijo(e.target.checked)}/>
+        📦 Esto es un activo fijo (máquina, mueble, equipo) — regístralo también en Activos Fijos
+      </label>
       <button style={{...S.btnP,marginTop:10}} onClick={add}>💾 Registrar gasto</button>
     </Card>
     <Card title={`🧾 Facturas (${fil.length})`}>
@@ -4997,6 +5254,216 @@ function Gastos({gastos,setGastos,sesion,upsertGasto}){
         </div>
       ))}
     </Card>
+    {incluirSalidas&&salidasFil.length>0&&(
+      <Card title={`💸 Salidas de caja incluidas (${salidasFil.length})`}>
+        {salidasFil.map(s=>(
+          <div key={s.id} style={{...S.vcard,borderLeft:"4px solid #c62828"}}>
+            <div style={{display:"flex",justifyContent:"space-between"}}>
+              <div><div style={{fontWeight:700}}>{s.motivo}</div><div style={{fontSize:11,color:"#888"}}>Salida de caja · {fmtD(s.fecha)} {s.hora?`· ${s.hora}`:""}</div>{s.quien&&<div style={{fontSize:11}}>👤 {s.quien}</div>}</div>
+              <div style={{textAlign:"right"}}><div style={{fontWeight:800,color:"#c62828"}}>${s.monto.toFixed(2)}</div></div>
+            </div>
+          </div>
+        ))}
+      </Card>
+    )}
+  </div>);
+}
+
+// 📦 ACTIVOS FIJOS — registro de máquinas, muebles y equipos del negocio
+function ActivosFijosAdmin({activosFijos,setActivosFijos,upsertActivoFijo,sesion}){
+  const CATEGORIAS_AF=["Maquinaria","Muebles y enseres","Equipo de oficina","Vehículos","Herramientas","General"];
+  const vacio={nombre:"",categoria:"General",fechaAdquisicion:fechaHoyLocal(),valorCompra:"",proveedor:"",notas:""};
+  const [form,setForm]=useState(vacio);
+  const [editId,setEditId]=useState(null);
+  const activos=(activosFijos||[]).filter(a=>a.estado!=="dado_de_baja");
+  const bajaDados=(activosFijos||[]).filter(a=>a.estado==="dado_de_baja");
+  const guardar=()=>{
+    if(!form.nombre.trim()||!form.valorCompra){alert("Escribe el nombre y el valor de compra");return;}
+    if(editId){
+      setActivosFijos(prev=>{
+        const next=prev.map(a=>a.id===editId?{...a,nombre:form.nombre.trim(),categoria:form.categoria,fechaAdquisicion:form.fechaAdquisicion,valorCompra:parseFloat(form.valorCompra)||0,proveedor:form.proveedor.trim()||null,notas:form.notas.trim()||null}:a);
+        const updated=next.find(a=>a.id===editId);
+        if(updated&&upsertActivoFijo)upsertActivoFijo({...updated,_updatedAt:new Date().toISOString()});
+        return next;
+      });
+    }else{
+      const na={id:"af_"+Date.now(),nombre:form.nombre.trim(),categoria:form.categoria,fechaAdquisicion:form.fechaAdquisicion,valorCompra:parseFloat(form.valorCompra)||0,proveedor:form.proveedor.trim()||null,notas:form.notas.trim()||null,estado:"activo",gastoIdOrigen:null,registradoPor:sesion?.nombre||null};
+      setActivosFijos(prev=>[na,...prev]);
+      if(upsertActivoFijo)upsertActivoFijo({...na,_updatedAt:new Date().toISOString()});
+    }
+    setForm(vacio);setEditId(null);
+  };
+  const editar=a=>{setEditId(a.id);setForm({nombre:a.nombre,categoria:a.categoria||"General",fechaAdquisicion:a.fechaAdquisicion||fechaHoyLocal(),valorCompra:String(a.valorCompra||0),proveedor:a.proveedor||"",notas:a.notas||""});};
+  const cancelar=()=>{setEditId(null);setForm(vacio);};
+  const darDeBaja=a=>{
+    const motivo=window.prompt(`¿Motivo para dar de baja "${a.nombre}"? (ej. dañado, vendido, obsoleto)`,"");
+    if(motivo===null)return;
+    setActivosFijos(prev=>{
+      const next=prev.map(x=>x.id===a.id?{...x,estado:"dado_de_baja",motivoBaja:motivo.trim()||null,fechaBaja:new Date().toISOString()}:x);
+      const updated=next.find(x=>x.id===a.id);
+      if(updated&&upsertActivoFijo)upsertActivoFijo({...updated,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+  };
+  const totalInvertido=activos.reduce((a,x)=>a+(x.valorCompra||0),0);
+  return(<div style={S.panel}>
+    <h2 style={S.ptitle}>📦 Activos Fijos</h2>
+    <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ Registro de máquinas, muebles y equipos del negocio. Si marcas un gasto como "activo fijo" en la pestaña Gastos, aparece aquí automáticamente.</div>
+    <div style={S.kgrid}>
+      <div style={{...S.kpi,borderLeft:"4px solid #7b1fa2"}}><div style={{fontSize:22}}>📦</div><div><div style={{fontWeight:800,fontSize:18,color:"#7b1fa2"}}>{activos.length}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Activos registrados</div></div></div>
+      <div style={{...S.kpi,borderLeft:"4px solid #2e7d32"}}><div style={{fontSize:22}}>💰</div><div><div style={{fontWeight:800,fontSize:18,color:"#2e7d32"}}>${totalInvertido.toFixed(2)}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Total invertido</div></div></div>
+    </div>
+    <Card title={editId?"✏️ Editar activo":"➕ Nuevo activo fijo"}>
+      <div style={{marginBottom:8}}><label style={S.lbl}>Nombre</label><input style={S.inp} placeholder="ej. Lavadora industrial 25lb" value={form.nombre} onChange={e=>setForm({...form,nombre:e.target.value})}/></div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+        <div><label style={S.lbl}>Categoría</label><select style={S.inp} value={form.categoria} onChange={e=>setForm({...form,categoria:e.target.value})}>{CATEGORIAS_AF.map(c=><option key={c}>{c}</option>)}</select></div>
+        <div><label style={S.lbl}>Valor de compra</label><input type="number" style={S.inp} placeholder="$0.00" value={form.valorCompra} onChange={e=>setForm({...form,valorCompra:e.target.value})}/></div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+        <div><label style={S.lbl}>Fecha de adquisición</label><input type="date" style={S.inp} value={form.fechaAdquisicion} onChange={e=>setForm({...form,fechaAdquisicion:e.target.value})}/></div>
+        <div><label style={S.lbl}>Proveedor</label><input style={S.inp} value={form.proveedor} onChange={e=>setForm({...form,proveedor:e.target.value})}/></div>
+      </div>
+      <div style={{marginBottom:10}}><label style={S.lbl}>Notas</label><input style={S.inp} placeholder="Detalle adicional..." value={form.notas} onChange={e=>setForm({...form,notas:e.target.value})}/></div>
+      <div style={{display:"flex",gap:8}}>
+        <button style={{...S.btnP,flex:1}} onClick={guardar}>{editId?"✓ Guardar cambios":"➕ Agregar activo"}</button>
+        {editId&&<button style={S.btnC} onClick={cancelar}>Cancelar</button>}
+      </div>
+    </Card>
+    <Card title={`📋 Activos vigentes (${activos.length})`}>
+      {activos.length===0&&<div style={S.empty}>Aún no has registrado activos fijos.</div>}
+      {activos.map(a=>(
+        <div key={a.id} style={S.vcard}>
+          <div style={{display:"flex",justifyContent:"space-between"}}>
+            <div>
+              <div style={{fontWeight:700}}>{a.nombre}</div>
+              <div style={{fontSize:11,color:"#888"}}>{a.categoria} · Adquirido {fmtD(a.fechaAdquisicion)}{a.proveedor?` · ${a.proveedor}`:""}</div>
+              {a.notas&&<div style={{fontSize:11,color:"#888"}}>{a.notas}</div>}
+              {a.gastoIdOrigen&&<div style={{fontSize:10,color:"#7b1fa2"}}>🔗 Vinculado a un gasto registrado</div>}
+            </div>
+            <div style={{textAlign:"right"}}>
+              <div style={{fontWeight:800,color:"#2e7d32"}}>${(a.valorCompra||0).toFixed(2)}</div>
+              <div style={{display:"flex",gap:6,marginTop:6}}>
+                <button style={S.btnS} onClick={()=>editar(a)}>✏️</button>
+                <button style={{...S.btnR}} onClick={()=>darDeBaja(a)}>Dar de baja</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ))}
+    </Card>
+    {bajaDados.length>0&&(
+      <Card title={`🗑️ Dados de baja (${bajaDados.length})`}>
+        {bajaDados.map(a=>(
+          <div key={a.id} style={{...S.vcard,opacity:0.6}}>
+            <div style={{fontWeight:700}}>{a.nombre}</div>
+            <div style={{fontSize:11,color:"#888"}}>${(a.valorCompra||0).toFixed(2)} · Baja: {fmtD(a.fechaBaja)}{a.motivoBaja?` · ${a.motivoBaja}`:""}</div>
+          </div>
+        ))}
+      </Card>
+    )}
+  </div>);
+}
+
+// 💳 DEUDAS — pasivos del negocio (préstamos, crédito de proveedores, etc.), con pagos que se vinculan a Gastos
+function DeudasAdmin({deudas,setDeudas,upsertDeuda,setGastos,upsertGasto,sesion}){
+  const vacio={nombre:"",acreedor:"",montoTotal:"",fechaAdquisicion:fechaHoyLocal(),descripcion:""};
+  const [form,setForm]=useState(vacio);
+  const [pagoFor,setPagoFor]=useState(null); // id de la deuda a la que se le está registrando un pago
+  const [montoPago,setMontoPago]=useState("");
+  const [metodoPago,setMetodoPago]=useState("Efectivo");
+  const saldoDe=d=>parseFloat(((d.montoTotal||0)-(d.pagos||[]).reduce((a,p)=>a+p.monto,0)).toFixed(2));
+  const activas=(deudas||[]).filter(d=>saldoDe(d)>0.01);
+  const pagadas=(deudas||[]).filter(d=>saldoDe(d)<=0.01);
+  const crear=()=>{
+    if(!form.nombre.trim()||!form.montoTotal){alert("Escribe el nombre/acreedor y el monto total de la deuda");return;}
+    const nd={id:"deuda_"+Date.now(),nombre:form.nombre.trim(),acreedor:form.acreedor.trim()||null,montoTotal:parseFloat(form.montoTotal)||0,fechaAdquisicion:form.fechaAdquisicion,descripcion:form.descripcion.trim()||null,pagos:[],registradoPor:sesion?.nombre||null};
+    setDeudas(prev=>[nd,...prev]);
+    if(upsertDeuda)upsertDeuda({...nd,_updatedAt:new Date().toISOString()});
+    setForm(vacio);
+  };
+  const registrarPago=d=>{
+    const monto=parseFloat(montoPago);
+    const saldo=saldoDe(d);
+    if(!monto||monto<=0){alert("Escribe un monto válido");return;}
+    if(monto>saldo+0.01){alert(`El pago no puede ser mayor al saldo pendiente ($${saldo.toFixed(2)})`);return;}
+    const pago={id:"pago_"+Date.now(),fecha:new Date().toISOString(),monto,metodo:metodoPago,registradoPor:sesion?.nombre||null};
+    // 💳 El pago se suma a la deuda...
+    setDeudas(prev=>{
+      const next=prev.map(x=>x.id===d.id?{...x,pagos:[...(x.pagos||[]),pago]}:x);
+      const updated=next.find(x=>x.id===d.id);
+      if(updated&&upsertDeuda)upsertDeuda({...updated,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+    // ...y AL MISMO TIEMPO queda como un gasto categorizado "Pago de deuda", para que se refleje en el flujo de caja
+    if(setGastos){
+      const gasto={id:Date.now()+1,descripcion:`Pago de deuda: ${d.nombre}`,categoria:"Pago de deuda",proveedor:d.acreedor||"",numeroFactura:"",monto,fecha:fechaHoyLocal(),metodoPago,notas:`Abono a deuda · Saldo restante: $${(saldo-monto).toFixed(2)}`,registradoPor:sesion?.nombre||null,deudaIdOrigen:d.id};
+      setGastos(prev=>[gasto,...prev]);
+      if(upsertGasto)upsertGasto({...gasto,_updatedAt:new Date().toISOString()});
+    }
+    setPagoFor(null);setMontoPago("");
+  };
+  const totalDeuda=activas.reduce((a,d)=>a+saldoDe(d),0);
+  return(<div style={S.panel}>
+    <h2 style={S.ptitle}>💳 Deudas</h2>
+    <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ Cada pago que registres aquí también queda como un gasto (categoría "Pago de deuda"), para que se refleje en tu flujo de caja y reportes.</div>
+    <div style={S.kgrid}>
+      <div style={{...S.kpi,borderLeft:"4px solid #c62828"}}><div style={{fontSize:22}}>💳</div><div><div style={{fontWeight:800,fontSize:18,color:"#c62828"}}>${totalDeuda.toFixed(2)}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Deuda pendiente</div></div></div>
+      <div style={{...S.kpi,borderLeft:"4px solid #888"}}><div style={{fontSize:22}}>📋</div><div><div style={{fontWeight:800,fontSize:18,color:"#1a3c5e"}}>{activas.length}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Deuda(s) activa(s)</div></div></div>
+    </div>
+    <Card title="➕ Nueva deuda">
+      <div style={{marginBottom:8}}><label style={S.lbl}>Nombre / concepto</label><input style={S.inp} placeholder="ej. Préstamo para lavadora nueva" value={form.nombre} onChange={e=>setForm({...form,nombre:e.target.value})}/></div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+        <div><label style={S.lbl}>Acreedor (a quién se le debe)</label><input style={S.inp} value={form.acreedor} onChange={e=>setForm({...form,acreedor:e.target.value})}/></div>
+        <div><label style={S.lbl}>Monto total de la deuda</label><input type="number" style={S.inp} placeholder="$0.00" value={form.montoTotal} onChange={e=>setForm({...form,montoTotal:e.target.value})}/></div>
+      </div>
+      <div style={{marginBottom:8}}><label style={S.lbl}>Fecha en que se adquirió</label><input type="date" style={S.inp} value={form.fechaAdquisicion} onChange={e=>setForm({...form,fechaAdquisicion:e.target.value})}/></div>
+      <div style={{marginBottom:10}}><label style={S.lbl}>Descripción (opcional)</label><textarea style={{...S.inp,minHeight:56,resize:"vertical"}} value={form.descripcion} onChange={e=>setForm({...form,descripcion:e.target.value})}/></div>
+      <button style={{...S.btnP,width:"100%"}} onClick={crear}>➕ Registrar deuda</button>
+    </Card>
+    <Card title={`📋 Deudas activas (${activas.length})`}>
+      {activas.length===0&&<div style={S.empty}>Sin deudas activas.</div>}
+      {activas.map(d=>{
+        const saldo=saldoDe(d);
+        const pctPagado=d.montoTotal>0?Math.min(100,((d.montoTotal-saldo)/d.montoTotal)*100):0;
+        return(
+          <div key={d.id} style={S.vcard}>
+            <div style={{fontWeight:700}}>{d.nombre}</div>
+            <div style={{fontSize:11,color:"#888"}}>{d.acreedor?`Acreedor: ${d.acreedor} · `:""}Desde {fmtD(d.fechaAdquisicion)}</div>
+            {d.descripcion&&<div style={{fontSize:11,color:"#888"}}>{d.descripcion}</div>}
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginTop:8}}>
+              <span>Total: <strong>${(d.montoTotal||0).toFixed(2)}</strong></span>
+              <span style={{color:"#c62828",fontWeight:700}}>Saldo: ${saldo.toFixed(2)}</span>
+            </div>
+            <div style={{background:"#e8f0f7",borderRadius:6,height:8,marginTop:6}}><div style={{background:"#2e7d32",width:`${pctPagado}%`,height:"100%",borderRadius:6}}/></div>
+            {(d.pagos||[]).length>0&&<div style={{fontSize:11,color:"#2e7d32",marginTop:6}}>{d.pagos.length} pago(s) realizado(s) · ${(d.montoTotal-saldo).toFixed(2)} abonado</div>}
+            {pagoFor===d.id?(
+              <div style={{marginTop:10,background:"#f8fbfd",borderRadius:8,padding:10,border:"1px solid #e8f0f7"}}>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:8}}>
+                  <input type="number" style={S.inp} placeholder={`Máx $${saldo.toFixed(2)}`} value={montoPago} onChange={e=>setMontoPago(e.target.value)}/>
+                  <select style={S.inp} value={metodoPago} onChange={e=>setMetodoPago(e.target.value)}>{PAGOS.map(p=><option key={p}>{p}</option>)}</select>
+                </div>
+                <div style={{display:"flex",gap:6}}>
+                  <button style={{...S.btnS,flex:1,background:"#2e7d32",color:"#fff"}} onClick={()=>registrarPago(d)}>✓ Registrar pago</button>
+                  <button style={{...S.btnS,flex:1}} onClick={()=>{setPagoFor(null);setMontoPago("");}}>Cancelar</button>
+                </div>
+              </div>
+            ):(
+              <button style={{...S.btnP,width:"100%",marginTop:10,background:"linear-gradient(135deg,#2e7d32,#4caf50)"}} onClick={()=>setPagoFor(d.id)}>💰 Registrar pago</button>
+            )}
+          </div>
+        );
+      })}
+    </Card>
+    {pagadas.length>0&&(
+      <Card title={`✅ Deudas pagadas (${pagadas.length})`}>
+        {pagadas.map(d=>(
+          <div key={d.id} style={{...S.vcard,opacity:0.7,borderLeft:"4px solid #2e7d32"}}>
+            <div style={{fontWeight:700}}>{d.nombre}</div>
+            <div style={{fontSize:11,color:"#2e7d32"}}>✅ Pagada por completo — ${(d.montoTotal||0).toFixed(2)}</div>
+          </div>
+        ))}
+      </Card>
+    )}
   </div>);
 }
 
@@ -6166,7 +6633,11 @@ function DashboardBI({ventas,empleadas,gastos}){
   const topCli=Object.entries(cliMap).sort((a,b)=>b[1].v-a[1].v).slice(0,5);
   // Gastos y utilidad estimada del mes
   const gastosMes=(gastos||[]).filter(g=>!g.eliminada&&fechaLocal(g.fecha).startsWith(mesSel)).reduce((a,g)=>a+g.monto,0);
-  const utilidad=ventaMes-gastosMes;
+  // 🧺 Ingreso REAL del mes: el lavado en seco solo deja el 20% de ganancia (el resto se le paga a quien hace el servicio),
+  // así que no se puede contar el precio completo como ingreso propio — se usa calcGanancia() por cada venta.
+  const ingresoRealMes=vMes.reduce((a,v)=>a+calcGanancia(v.items||[]),0);
+  const descuentoLavadoSeco=parseFloat((ventaMes-ingresoRealMes).toFixed(2));
+  const utilidad=ingresoRealMes-gastosMes;
   // Bonos por empleada (mes seleccionado)
   const bonos=empleadas.filter(e=>e.activa||vMes.some(v=>v.empleadaId===e.id)).map(e=>{
     const mv=vMes.filter(v=>v.empleadaId===e.id);
@@ -6257,7 +6728,7 @@ function DashboardBI({ventas,empleadas,gastos}){
       <div style={{...S.kpi,borderLeft:"4px solid #4caf50"}}><div style={{fontSize:22}}>💚</div><div><div style={{fontWeight:800,fontSize:18,color:"#2e7d32"}}>${cobradoMes.toFixed(2)}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Cobrado en el mes</div></div></div>
       <div style={{...S.kpi,borderLeft:"4px solid #4db6e4"}}><div style={{fontSize:22}}>🧾</div><div><div style={{fontWeight:800,fontSize:18,color:"#1a3c5e"}}>{vMes.length}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Ventas · ticket ${vMes.length?(ventaMes/vMes.length).toFixed(2):"0.00"}</div></div></div>
       <div style={{...S.kpi,borderLeft:"4px solid #e53935"}}><div style={{fontSize:22}}>🛒</div><div><div style={{fontWeight:800,fontSize:18,color:"#e53935"}}>-${gastosMes.toFixed(2)}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Gastos del mes</div></div></div>
-      <div style={{...S.kpi,borderLeft:`4px solid ${utilidad>=0?"#4caf50":"#e53935"}`}}><div style={{fontSize:22}}>{utilidad>=0?"📈":"📉"}</div><div><div style={{fontWeight:800,fontSize:18,color:utilidad>=0?"#2e7d32":"#c62828"}}>${utilidad.toFixed(2)}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Utilidad estimada</div></div></div>
+      <div style={{...S.kpi,borderLeft:`4px solid ${utilidad>=0?"#4caf50":"#e53935"}`}}><div style={{fontSize:22}}>{utilidad>=0?"📈":"📉"}</div><div><div style={{fontWeight:800,fontSize:18,color:utilidad>=0?"#2e7d32":"#c62828"}}>${utilidad.toFixed(2)}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Utilidad estimada</div>{descuentoLavadoSeco>0.01&&<div style={{fontSize:10,color:"#e65100"}}>🧺 -${descuentoLavadoSeco.toFixed(2)} no es tuyo (lavado en seco, 80%)</div>}</div></div>
     </div>
 
     <Card title="📊 Evolución mensual vs meta">
@@ -6412,6 +6883,12 @@ const { data: clientes, setData: setClientes, upsert: upsertCliente } = useColle
 const { data: empleadas, setData: setEmpleadas, upsert: upsertEmpleada } = useCollection("empleadas", KEYS.empleadas, EMPLEADAS_DEFAULT);
 const { data: inventario, setData: setInventario, upsert: upsertInventario } = useCollection("inventario", KEYS.inventario, INSUMOS_DEFAULT);
 const { data: productos, setData: setProductos, upsert: upsertProducto } = useCollection("productos", "ll_productos", PRODUCTOS_DEFAULT);
+// 📒 KARDEX de productos e insumos
+const { data: kardexProductos, setData: setKardexProductos, upsert: upsertKardexProducto } = useCollection("kardexProductos", "ll_kardex_productos", KARDEX_PRODUCTOS_DEFAULT);
+const { data: kardexInsumos, setData: setKardexInsumos, upsert: upsertKardexInsumo } = useCollection("kardexInsumos", "ll_kardex_insumos", KARDEX_INSUMOS_DEFAULT);
+// 📦 ACTIVOS FIJOS y 💳 DEUDAS
+const { data: activosFijos, setData: setActivosFijos, upsert: upsertActivoFijo } = useCollection("activosFijos", "ll_activos_fijos", []);
+const { data: deudas, setData: setDeudas, upsert: upsertDeuda } = useCollection("deudas", "ll_deudas", []);
 // 🎟️ SORTEO POR BOLETOS
 const { data: sorteos, setData: setSorteos, upsert: upsertSorteo } = useCollection("sorteos", "ll_sorteos", SORTEOS_DEFAULT);
 const { data: boletosSorteo, setData: setBoletosSorteo, upsert: upsertBoletoSorteo } = useCollection("boletosSorteo", "ll_boletos_sorteo", BOLETOS_SORTEO_DEFAULT);
@@ -6592,14 +7069,14 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
     empleadas={empleadas}
     upsertCaja={upsertCaja}
   />;
-  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={serviciosActivos} sesion={sesion} addAbono={addAbono} onLogout={onLogout} onIrProduccion={()=>setVista("produccion")} onIrTareas={()=>setVista("tareas")} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} upsertVenta={upsertVenta} upsertSalida={upsertSalida} upsertCliente={upsertCliente} upsertCaja={upsertCaja} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos} cfgInc={cfgInc} maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga} pins={pins} eventosProduccion={eventosProduccion} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} sorteos={sorteos} setSorteos={setSorteos} upsertSorteo={upsertSorteo} setBoletosSorteo={setBoletosSorteo} upsertBoletoSorteo={upsertBoletoSorteo} boletosParaImprimir={boletosParaImprimir} setBoletosParaImprimir={setBoletosParaImprimir} depositos={depositos} setDepositos={setDepositos} upsertDeposito={upsertDeposito}/>;
+  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={serviciosActivos} sesion={sesion} addAbono={addAbono} onLogout={onLogout} onIrProduccion={()=>setVista("produccion")} onIrTareas={()=>setVista("tareas")} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} upsertVenta={upsertVenta} upsertSalida={upsertSalida} upsertCliente={upsertCliente} upsertCaja={upsertCaja} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos} cfgInc={cfgInc} maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga} pins={pins} eventosProduccion={eventosProduccion} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto} sorteos={sorteos} setSorteos={setSorteos} upsertSorteo={upsertSorteo} setBoletosSorteo={setBoletosSorteo} upsertBoletoSorteo={upsertBoletoSorteo} boletosParaImprimir={boletosParaImprimir} setBoletosParaImprimir={setBoletosParaImprimir} depositos={depositos} setDepositos={setDepositos} upsertDeposito={upsertDeposito}/>;
   const tabs=[
     {id:"ventas",icon:"🧾",l:"Venta"},{id:"historial",icon:"📋",l:"Historial"},
     {id:"pendientes",icon:"⏳",l:"Pendientes",b:pCount},{id:"bi",icon:"🚀",l:"Dashboard"},
     {id:"clientes",icon:"👥",l:"Clientes"},{id:"promosAdmin",icon:"🎁",l:"Promos"},{id:"cupones",icon:"🎟️",l:"Cupones"},{id:"resumen",icon:"📈",l:"Resumen día"},
     {id:"reportes",icon:"📊",l:"Reportes"},{id:"depositos",icon:"🏦",l:"Depósitos"},
     {id:"conciliacion",icon:"🏛️",l:"Conciliación"},
-    {id:"gastos",icon:"🛒",l:"Gastos"},{id:"inventario",icon:"📦",l:"Inventario"},{id:"productosAdmin",icon:"🛍️",l:"Productos"},{id:"sorteoAdmin",icon:"🎟️",l:"Sorteo"},
+    {id:"gastos",icon:"🛒",l:"Gastos"},{id:"inventario",icon:"📦",l:"Inventario"},{id:"productosAdmin",icon:"🛍️",l:"Productos"},{id:"activosFijosAdmin",icon:"📦",l:"Activos Fijos"},{id:"deudasAdmin",icon:"💳",l:"Deudas"},{id:"sorteoAdmin",icon:"🎟️",l:"Sorteo"},
     {id:"equipo",icon:"👩",l:"Equipo"},{id:"incentivosAdmin",icon:"🎯",l:"Incentivos"},{id:"maquinasAdmin",icon:"🏭",l:"Máquinas"},{id:"pinsAdmin",icon:"🔒",l:"PINs"},{id:"produccionAdmin",icon:"🧺",l:"Producción"},{id:"tareasAdmin",icon:"📋",l:"Tareas"},{id:"notasAdmin",icon:"📝",l:"Notas"},
     {id:"config",icon:"⚙️",l:"Config"},{id:"usuarios",icon:"🔑",l:"Usuarios"},
   ];
@@ -6607,7 +7084,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
   const CATEGORIAS=[
     {id:"ventas_caja",icon:"🧾",l:"Ventas",tabIds:["ventas","historial","pendientes","depositos","conciliacion","cupones","promosAdmin","reportes","resumen"]},
     {id:"personal",icon:"👥",l:"Personal",tabIds:["equipo","pinsAdmin","usuarios","tareasAdmin","notasAdmin","incentivosAdmin"]},
-    {id:"inventario_cat",icon:"📦",l:"Inventario",tabIds:["inventario","productosAdmin","gastos","maquinasAdmin"]},
+    {id:"inventario_cat",icon:"📦",l:"Inventario",tabIds:["inventario","productosAdmin","gastos","maquinasAdmin","activosFijosAdmin","deudasAdmin"]},
     {id:"negocio",icon:"📊",l:"Negocio",tabIds:["bi","clientes","sorteoAdmin","produccionAdmin","config"]},
   ];
   const categoriaDeTab=id=>CATEGORIAS.find(c=>c.tabIds.includes(id))?.id||CATEGORIAS[0].id;
@@ -6647,8 +7124,8 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
       </button>))}
     </div>
     <div style={S.content}>
-      {tab==="ventas"&&<NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={setTicketV} servicios={serviciosActivos} sesion={sesion} upsertVenta={upsertVenta} upsertCliente={upsertCliente} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} sorteos={sorteos} setSorteos={setSorteos} upsertSorteo={upsertSorteo} setBoletosSorteo={setBoletosSorteo} upsertBoletoSorteo={upsertBoletoSorteo} onBoletosGenerados={setBoletosParaImprimir}/>}
-      {tab==="historial"&&<Historial ventas={ventas} setVentas={setVentas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} esAdmin={esAdmin} upsertVenta={upsertVenta} sesion={sesion}/>}
+      {tab==="ventas"&&<NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={setTicketV} servicios={serviciosActivos} sesion={sesion} upsertVenta={upsertVenta} upsertCliente={upsertCliente} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto} sorteos={sorteos} setSorteos={setSorteos} upsertSorteo={upsertSorteo} setBoletosSorteo={setBoletosSorteo} upsertBoletoSorteo={upsertBoletoSorteo} onBoletosGenerados={setBoletosParaImprimir}/>}
+      {tab==="historial"&&<Historial ventas={ventas} setVentas={setVentas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} esAdmin={esAdmin} upsertVenta={upsertVenta} sesion={sesion} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto}/>}
       {tab==="pendientes"&&<Pendientes ventas={ventas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} setVentas={setVentas} upsertVenta={upsertVenta}/>}
       {tab==="bi"&&<DashboardBI ventas={ventas} empleadas={empleadas} gastos={gastos}/>}
       {tab==="clientes"&&<Clientes clientes={clientes} setClientes={setClientes} upsertCliente={upsertCliente} ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta}/>}
@@ -6658,9 +7135,11 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
       {tab==="reportes"&&<Reportes ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja}/>}
       {tab==="depositos"&&<Depositos depositos={depositos} setDepositos={setDepositos} ventas={ventas} salidasCaja={salidasCaja} upsertDeposito={upsertDeposito}/>}
       {tab==="conciliacion"&&<Conciliacion ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} depositos={depositos} setDepositos={setDepositos} upsertDeposito={upsertDeposito}/>}
-      {tab==="gastos"&&<Gastos gastos={gastos} setGastos={setGastos} sesion={sesion} upsertGasto={upsertGasto}/>}
-      {tab==="inventario"&&<Inventario inventario={inventario} setInventario={setInventario} upsertInventario={upsertInventario}/>}
-      {tab==="productosAdmin"&&<ProductosAdmin productos={productos} setProductos={setProductos} upsertProducto={upsertProducto}/>}
+      {tab==="gastos"&&<Gastos gastos={gastos} setGastos={setGastos} sesion={sesion} upsertGasto={upsertGasto} salidasCaja={salidasCaja} activosFijos={activosFijos} setActivosFijos={setActivosFijos} upsertActivoFijo={upsertActivoFijo}/>}
+      {tab==="inventario"&&<Inventario inventario={inventario} setInventario={setInventario} upsertInventario={upsertInventario} kardexInsumos={kardexInsumos} setKardexInsumos={setKardexInsumos} upsertKardexInsumo={upsertKardexInsumo} sesion={sesion}/>}
+      {tab==="productosAdmin"&&<ProductosAdmin productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} kardexProductos={kardexProductos} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto} sesion={sesion}/>}
+      {tab==="activosFijosAdmin"&&<ActivosFijosAdmin activosFijos={activosFijos} setActivosFijos={setActivosFijos} upsertActivoFijo={upsertActivoFijo} sesion={sesion}/>}
+      {tab==="deudasAdmin"&&<DeudasAdmin deudas={deudas} setDeudas={setDeudas} upsertDeuda={upsertDeuda} setGastos={setGastos} upsertGasto={upsertGasto} sesion={sesion}/>}
       {tab==="sorteoAdmin"&&<SorteosAdmin sorteos={sorteos} setSorteos={setSorteos} upsertSorteo={upsertSorteo} boletosSorteo={boletosSorteo} productos={productos}/>}
       {tab==="equipo"&&<Equipo empleadas={empleadas} setEmpleadas={setEmpleadas} ventas={ventas} esAdmin={esAdmin} upsertEmpleada={upsertEmpleada}/>}
       {tab==="incentivosAdmin"&&<IncentivosAdmin cfgInc={cfgInc} setIncentivosArr={setIncentivosArr} upsertIncentivo={upsertIncentivo} ventas={ventas} empleadas={empleadas}/>}
