@@ -48,6 +48,12 @@ const registrarKardex=({itemId,itemNombre,tipo,cantidad,folio,motivo,saldoResult
   return entry;
 };
 const TIPO_KARDEX_LBL={venta:{label:"Venta",icon:"🛍️",color:"#c62828"},nota_credito:{label:"Nota de crédito",icon:"↩️",color:"#2e7d32"},ajuste_manual:{label:"Ajuste manual",icon:"✏️",color:"#1565c0"},ingreso_inicial:{label:"Ingreso inicial",icon:"🆕",color:"#7b1fa2"},entrada_factura:{label:"Entrada por factura",icon:"🧾",color:"#2e7d32"},consumo:{label:"Consumo/uso",icon:"📉",color:"#c62828"}};
+// 🆕 Genera un código correlativo nuevo para un insumo (INS-0001, INS-0002...) buscando el mayor número ya usado
+const generarCodigoInsumo=inventario=>{
+  const nums=(inventario||[]).map(i=>{const m=(i.codigo||"").match(/INS-(\d+)/i);return m?parseInt(m[1]):0;});
+  const siguiente=(nums.length?Math.max(...nums):0)+1;
+  return "INS-"+String(siguiente).padStart(4,"0");
+};
 
 // 🎟️ SORTEO POR BOLETOS — datos semilla (vacío, se crea desde el panel admin)
 const SORTEOS_DEFAULT = [];
@@ -5167,11 +5173,29 @@ function MaquinasAdmin({maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upse
 }
 
 const CATS=["Insumos/Suministros","Servicios","Arriendo","Sueldos","Mantenimiento","Publicidad","Equipos","Pago de deuda","Otros"];
-function Gastos({gastos,setGastos,sesion,upsertGasto,salidasCaja,activosFijos,setActivosFijos,upsertActivoFijo}){
+function Gastos({gastos,setGastos,sesion,upsertGasto,salidasCaja,activosFijos,setActivosFijos,upsertActivoFijo,inventario,setInventario,upsertInventario,setKardexInsumos,upsertKardexInsumo}){
   const [nv,setNv]=useState({descripcion:"",categoria:"Insumos/Suministros",proveedor:"",numeroFactura:"",monto:"",fecha:fechaHoyLocal(),metodoPago:"Efectivo",notas:""});
   const [esActivoFijo,setEsActivoFijo]=useState(false);
+  const [itemsCompra,setItemsCompra]=useState([]); // [{codigo,nombre,insumoId,cantidad}] — detalle de insumos comprados en esta factura
+  const [buscarCod,setBuscarCod]=useState("");
+  const [cantCod,setCantCod]=useState("1");
   const [fMes,setFMes]=useState(mesK(new Date()));const [fCat,setFCat]=useState("Todas");const [err,setErr]=useState("");
   const [incluirSalidas,setIncluirSalidas]=useState(true); // 💸 combinar salidas de caja en este reporte
+  // 🔎 Busca el insumo por código o por nombre (coincidencia parcial)
+  const insumoEncontrado=(inventario||[]).find(i=>!i.eliminada&&buscarCod.trim()&&((i.codigo||"").toLowerCase()===buscarCod.trim().toLowerCase()||(i.codigo||"").toLowerCase().includes(buscarCod.trim().toLowerCase())||i.nombre.toLowerCase().includes(buscarCod.trim().toLowerCase())));
+  const agregarItemCompra=()=>{
+    if(!buscarCod.trim()){alert("Escribe el código o nombre del insumo");return;}
+    const cant=parseFloat(cantCod)||1;
+    if(insumoEncontrado){
+      setItemsCompra(prev=>[...prev,{codigo:insumoEncontrado.codigo,nombre:insumoEncontrado.nombre,insumoId:insumoEncontrado.id,cantidad:cant,esNuevo:false}]);
+    }else{
+      // 🆕 No existe todavía — se creará como insumo nuevo al registrar el gasto, con un código automático
+      const codigoNuevo=generarCodigoInsumo([...(inventario||[]),...itemsCompra.filter(it=>it.esNuevo).map(it=>({codigo:it.codigo}))]);
+      setItemsCompra(prev=>[...prev,{codigo:codigoNuevo,nombre:buscarCod.trim(),insumoId:null,cantidad:cant,esNuevo:true}]);
+    }
+    setBuscarCod("");setCantCod("1");
+  };
+  const quitarItemCompra=idx=>setItemsCompra(prev=>prev.filter((_,i)=>i!==idx));
   const add=()=>{
     if(!nv.descripcion.trim()||!nv.monto){setErr("Completa descripcion y monto");return;}
     const ng={...nv,id:Date.now(),monto:parseFloat(nv.monto),registradoPor:sesion.nombre};
@@ -5183,8 +5207,29 @@ function Gastos({gastos,setGastos,sesion,upsertGasto,salidasCaja,activosFijos,se
       setActivosFijos(prev=>[af,...prev]);
       if(upsertActivoFijo)upsertActivoFijo({...af,_updatedAt:new Date().toISOString()});
     }
+    // 📦 Cada insumo detallado por código suma su cantidad al inventario (o se crea si es nuevo), con el N° de factura como referencia en el kardex
+    if(itemsCompra.length>0&&setInventario){
+      setInventario(prev=>{
+        let next=[...prev];
+        itemsCompra.forEach(linea=>{
+          if(linea.esNuevo){
+            const ni={id:Date.now()+Math.floor(Math.random()*1000),nombre:linea.nombre,codigo:linea.codigo,stock:linea.cantidad,min:1,unidad:"pzas"};
+            next=[...next,ni];
+            if(upsertInventario)upsertInventario({...ni,_updatedAt:new Date().toISOString()});
+            registrarKardex({itemId:ni.id,itemNombre:ni.nombre,tipo:"entrada_factura",cantidad:linea.cantidad,folio:ng.numeroFactura||null,motivo:"Compra (insumo nuevo): "+ng.descripcion,saldoResultante:ni.stock,registradoPor:sesion?.nombre},{setKardex:setKardexInsumos,upsertKardex:upsertKardexInsumo});
+          }else{
+            next=next.map(i=>i.id===linea.insumoId?{...i,stock:(i.stock||0)+linea.cantidad}:i);
+            const updated=next.find(i=>i.id===linea.insumoId);
+            if(updated&&upsertInventario)upsertInventario({...updated,_updatedAt:new Date().toISOString()});
+            if(updated)registrarKardex({itemId:linea.insumoId,itemNombre:updated.nombre,tipo:"entrada_factura",cantidad:linea.cantidad,folio:ng.numeroFactura||null,motivo:"Compra: "+ng.descripcion,saldoResultante:updated.stock,registradoPor:sesion?.nombre},{setKardex:setKardexInsumos,upsertKardex:upsertKardexInsumo});
+          }
+        });
+        return next;
+      });
+    }
     setNv({descripcion:"",categoria:"Insumos/Suministros",proveedor:"",numeroFactura:"",monto:"",fecha:fechaHoyLocal(),metodoPago:"Efectivo",notas:""});
     setEsActivoFijo(false);
+    setItemsCompra([]);
     setErr("");
   };
   const del=id=>{if(!window.confirm("Eliminar?"))return;setGastos(prev=>{const next=prev.map(g=>g.id===id?{...g,eliminada:true}:g);const borrado=next.find(g=>g.id===id);if(borrado&&upsertGasto)upsertGasto({...borrado,_updatedAt:new Date().toISOString()});return next;});};
@@ -5237,6 +5282,22 @@ function Gastos({gastos,setGastos,sesion,upsertGasto,salidasCaja,activosFijos,se
         <div><label style={S.lbl}>N° Factura</label><input style={S.inp} value={nv.numeroFactura} onChange={e=>setNv({...nv,numeroFactura:e.target.value})}/></div>
         <div><label style={S.lbl}>Fecha</label><input type="date" style={S.inp} value={nv.fecha} onChange={e=>setNv({...nv,fecha:e.target.value})}/></div>
         <div><label style={S.lbl}>Metodo</label><select style={S.inp} value={nv.metodoPago} onChange={e=>setNv({...nv,metodoPago:e.target.value})}>{PAGOS.map(p=><option key={p}>{p}</option>)}</select></div>
+      </div>
+      <div style={{marginTop:14,background:"#f8fbfd",borderRadius:10,padding:12,border:"1px solid #e8f0f7"}}>
+        <div style={{fontSize:13,fontWeight:700,color:"#1a3c5e",marginBottom:6}}>📦 Detallar insumos comprados (opcional)</div>
+        <div style={{fontSize:11,color:"#888",marginBottom:8}}>Si esta factura trae insumos del inventario, agrégalos por código para que se sumen solos al stock.</div>
+        <div style={{display:"flex",gap:6,marginBottom:6}}>
+          <input style={{...S.inp,flex:2}} placeholder="Código o nombre del insumo" value={buscarCod} onChange={e=>setBuscarCod(e.target.value)}/>
+          <input type="number" style={{...S.inp,width:70}} placeholder="Cant." value={cantCod} onChange={e=>setCantCod(e.target.value)}/>
+          <button style={{...S.btnS,background:"#2e7d32",color:"#fff"}} onClick={agregarItemCompra}>➕</button>
+        </div>
+        {buscarCod.trim()&&(insumoEncontrado?<div style={{fontSize:11,color:"#2e7d32",marginBottom:6}}>✅ {insumoEncontrado.nombre}{insumoEncontrado.codigo?` (Cód: ${insumoEncontrado.codigo})`:""} · Stock actual: {insumoEncontrado.stock}</div>:<div style={{fontSize:11,color:"#1565c0",marginBottom:6}}>🆕 No existe todavía — al agregarlo se creará como insumo nuevo con código automático</div>)}
+        {itemsCompra.length>0&&itemsCompra.map((it,idx)=>(
+          <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 8px",background:it.esNuevo?"#e3f2fd":"#e8f5e9",borderRadius:6,marginBottom:4}}>
+            <span style={{fontSize:12,color:it.esNuevo?"#1565c0":"#2e7d32"}}>{it.esNuevo?"🆕 ":""}{it.nombre} ({it.codigo}) · +{it.cantidad}</span>
+            <button style={{...S.btnR,padding:"2px 8px"}} onClick={()=>quitarItemCompra(idx)}>✕</button>
+          </div>
+        ))}
       </div>
       <label style={{display:"flex",alignItems:"center",gap:8,marginTop:10,fontSize:13,cursor:"pointer"}}>
         <input type="checkbox" checked={esActivoFijo} onChange={e=>setEsActivoFijo(e.target.checked)}/>
@@ -5464,6 +5525,107 @@ function DeudasAdmin({deudas,setDeudas,upsertDeuda,setGastos,upsertGasto,sesion}
         ))}
       </Card>
     )}
+  </div>);
+}
+
+// 📒 KARDEX — pantalla dedicada para revisar TODOS los movimientos de productos e insumos, en formato de tabla con filtros
+// (Fecha inicio/fin + búsqueda por artículo), igual que un kardex de sistema de inventario tradicional.
+function KardexView({productos,kardexProductos,inventario,kardexInsumos}){
+  const [tipo,setTipo]=useState("productos"); // "productos" | "insumos"
+  const hoy=fechaHoyLocal();
+  const [desde,setDesde]=useState((()=>{const d=new Date();d.setDate(d.getDate()-30);return fechaLocal(d.toISOString());})());
+  const [hasta,setHasta]=useState(hoy);
+  const [buscar,setBuscar]=useState("");
+
+  const items=tipo==="productos"?(productos||[]):(inventario||[]);
+  const kardex=tipo==="productos"?(kardexProductos||[]):(kardexInsumos||[]);
+  const nombreDe=id=>items.find(i=>String(i.id)===String(id))?.nombre||"—";
+
+  const filtrado=kardex.filter(k=>{
+    const f=fechaLocal(k.fecha);
+    if(desde&&f<desde)return false;
+    if(hasta&&f>hasta)return false;
+    if(buscar.trim()){
+      const q=buscar.trim().toLowerCase();
+      const nombre=(k.itemNombre||nombreDe(k.itemId)||"").toLowerCase();
+      if(!nombre.includes(q))return false;
+    }
+    return true;
+  }).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha));
+
+  const totalEntradas=filtrado.filter(k=>k.cantidad>0).reduce((a,k)=>a+k.cantidad,0);
+  const totalSalidas=filtrado.filter(k=>k.cantidad<0).reduce((a,k)=>a+Math.abs(k.cantidad),0);
+
+  const exportar=()=>{
+    if(filtrado.length===0){alert("No hay movimientos con esos filtros.");return;}
+    const enc=["Fecha Ingreso","Artículo","Movimiento","Causa/Referencia","Entero (cantidad)","Saldo resultante","Registrado por"];
+    const filas=filtrado.map(k=>{
+      const t=TIPO_KARDEX_LBL[k.tipo]||{label:k.tipo};
+      return[fmt(k.fecha),k.itemNombre||nombreDe(k.itemId),t.label,[k.folio,k.motivo].filter(Boolean).join(" · "),k.cantidad,k.saldoResultante,k.registradoPor||""];
+    });
+    filas.push(["","","","","Total entradas:",totalEntradas,""]);
+    filas.push(["","","","","Total salidas:",-totalSalidas,""]);
+    const csv=[enc,...filas].map(f=>f.map(c=>'"'+String(c).replace(/"/g,'\\"')+'"').join(",")).join("\n");
+    const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
+    const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="kardex_"+tipo+"-"+desde+"_a_"+hasta+".csv";a.click();
+  };
+
+  return(<div style={S.panel}>
+    <h2 style={S.ptitle}>📒 Kardex</h2>
+    <div style={{display:"flex",gap:8,marginBottom:14}}>
+      {[["productos","🛍️ Productos"],["insumos","📦 Insumos"]].map(([val,l])=>(
+        <button key={val} onClick={()=>setTipo(val)} style={{flex:1,padding:"9px 6px",borderRadius:10,border:tipo===val?"2px solid #1a3c5e":"1.5px solid #e0e8f0",background:tipo===val?"#eaf3fb":"#fff",color:"#1a3c5e",fontWeight:700,fontSize:12,cursor:"pointer"}}>{l}</button>
+      ))}
+    </div>
+    <Card title="🔍 Filtros">
+      <div style={{marginBottom:8}}>
+        <label style={S.lbl}>Búsqueda de artículo</label>
+        <input style={S.inp} placeholder="Nombre del producto o insumo..." value={buscar} onChange={e=>setBuscar(e.target.value)}/>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <div><label style={S.lbl}>Fecha inicio</label><input type="date" style={S.inp} value={desde} onChange={e=>setDesde(e.target.value)}/></div>
+        <div><label style={S.lbl}>Fecha fin</label><input type="date" style={S.inp} value={hasta} onChange={e=>setHasta(e.target.value)}/></div>
+      </div>
+      <button style={{...S.btnP,width:"100%",marginTop:10}} onClick={exportar}>📥 Exportar ({filtrado.length})</button>
+    </Card>
+
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
+      <div style={{...S.kpi,borderLeft:"4px solid #2e7d32"}}><div style={{fontSize:20}}>⬆️</div><div><div style={{fontWeight:800,fontSize:16,color:"#2e7d32"}}>+{totalEntradas}</div><div style={{fontSize:11,fontWeight:600,color:"#1a3c5e"}}>Entradas</div></div></div>
+      <div style={{...S.kpi,borderLeft:"4px solid #c62828"}}><div style={{fontSize:20}}>⬇️</div><div><div style={{fontWeight:800,fontSize:16,color:"#c62828"}}>-{totalSalidas}</div><div style={{fontSize:11,fontWeight:600,color:"#1a3c5e"}}>Salidas</div></div></div>
+    </div>
+
+    <Card title={`📋 Movimientos (${filtrado.length})`}>
+      {filtrado.length===0&&<div style={S.empty}>Sin movimientos en este rango.</div>}
+      <div style={{overflowX:"auto"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:560}}>
+          <thead>
+            <tr style={{background:"#f0f4f8",textAlign:"left"}}>
+              <th style={{padding:"6px 8px",whiteSpace:"nowrap"}}>Fecha Ingreso</th>
+              <th style={{padding:"6px 8px"}}>Artículo</th>
+              <th style={{padding:"6px 8px"}}>Movimiento</th>
+              <th style={{padding:"6px 8px"}}>Causa</th>
+              <th style={{padding:"6px 8px",textAlign:"right"}}>Entero</th>
+              <th style={{padding:"6px 8px",textAlign:"right"}}>Saldo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtrado.map(k=>{
+              const t=TIPO_KARDEX_LBL[k.tipo]||{label:k.tipo,icon:"•",color:"#888"};
+              return(
+                <tr key={k.id} style={{borderBottom:"1px solid #f0f4f8"}}>
+                  <td style={{padding:"6px 8px",color:"#888",whiteSpace:"nowrap"}}>{fmt(k.fecha)}</td>
+                  <td style={{padding:"6px 8px",fontWeight:600,color:"#1a3c5e"}}>{k.itemNombre||nombreDe(k.itemId)}</td>
+                  <td style={{padding:"6px 8px",color:t.color,fontWeight:600,whiteSpace:"nowrap"}}>{t.icon} {t.label}</td>
+                  <td style={{padding:"6px 8px",color:"#888"}}>{[k.folio,k.motivo].filter(Boolean).join(" · ")||"—"}</td>
+                  <td style={{padding:"6px 8px",textAlign:"right",fontWeight:800,color:k.cantidad>=0?"#2e7d32":"#c62828"}}>{k.cantidad>=0?"+":""}{k.cantidad}</td>
+                  <td style={{padding:"6px 8px",textAlign:"right",color:"#1a3c5e"}}>{k.saldoResultante}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Card>
   </div>);
 }
 
@@ -7076,7 +7238,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
     {id:"clientes",icon:"👥",l:"Clientes"},{id:"promosAdmin",icon:"🎁",l:"Promos"},{id:"cupones",icon:"🎟️",l:"Cupones"},{id:"resumen",icon:"📈",l:"Resumen día"},
     {id:"reportes",icon:"📊",l:"Reportes"},{id:"depositos",icon:"🏦",l:"Depósitos"},
     {id:"conciliacion",icon:"🏛️",l:"Conciliación"},
-    {id:"gastos",icon:"🛒",l:"Gastos"},{id:"inventario",icon:"📦",l:"Inventario"},{id:"productosAdmin",icon:"🛍️",l:"Productos"},{id:"activosFijosAdmin",icon:"📦",l:"Activos Fijos"},{id:"deudasAdmin",icon:"💳",l:"Deudas"},{id:"sorteoAdmin",icon:"🎟️",l:"Sorteo"},
+    {id:"gastos",icon:"🛒",l:"Gastos"},{id:"inventario",icon:"📦",l:"Inventario"},{id:"productosAdmin",icon:"🛍️",l:"Productos"},{id:"kardexAdmin",icon:"📒",l:"Kardex"},{id:"activosFijosAdmin",icon:"📦",l:"Activos Fijos"},{id:"deudasAdmin",icon:"💳",l:"Deudas"},{id:"sorteoAdmin",icon:"🎟️",l:"Sorteo"},
     {id:"equipo",icon:"👩",l:"Equipo"},{id:"incentivosAdmin",icon:"🎯",l:"Incentivos"},{id:"maquinasAdmin",icon:"🏭",l:"Máquinas"},{id:"pinsAdmin",icon:"🔒",l:"PINs"},{id:"produccionAdmin",icon:"🧺",l:"Producción"},{id:"tareasAdmin",icon:"📋",l:"Tareas"},{id:"notasAdmin",icon:"📝",l:"Notas"},
     {id:"config",icon:"⚙️",l:"Config"},{id:"usuarios",icon:"🔑",l:"Usuarios"},
   ];
@@ -7084,7 +7246,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
   const CATEGORIAS=[
     {id:"ventas_caja",icon:"🧾",l:"Ventas",tabIds:["ventas","historial","pendientes","depositos","conciliacion","cupones","promosAdmin","reportes","resumen"]},
     {id:"personal",icon:"👥",l:"Personal",tabIds:["equipo","pinsAdmin","usuarios","tareasAdmin","notasAdmin","incentivosAdmin"]},
-    {id:"inventario_cat",icon:"📦",l:"Inventario",tabIds:["inventario","productosAdmin","gastos","maquinasAdmin","activosFijosAdmin","deudasAdmin"]},
+    {id:"inventario_cat",icon:"📦",l:"Inventario",tabIds:["inventario","productosAdmin","kardexAdmin","gastos","maquinasAdmin","activosFijosAdmin","deudasAdmin"]},
     {id:"negocio",icon:"📊",l:"Negocio",tabIds:["bi","clientes","sorteoAdmin","produccionAdmin","config"]},
   ];
   const categoriaDeTab=id=>CATEGORIAS.find(c=>c.tabIds.includes(id))?.id||CATEGORIAS[0].id;
@@ -7135,9 +7297,10 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
       {tab==="reportes"&&<Reportes ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja}/>}
       {tab==="depositos"&&<Depositos depositos={depositos} setDepositos={setDepositos} ventas={ventas} salidasCaja={salidasCaja} upsertDeposito={upsertDeposito}/>}
       {tab==="conciliacion"&&<Conciliacion ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} depositos={depositos} setDepositos={setDepositos} upsertDeposito={upsertDeposito}/>}
-      {tab==="gastos"&&<Gastos gastos={gastos} setGastos={setGastos} sesion={sesion} upsertGasto={upsertGasto} salidasCaja={salidasCaja} activosFijos={activosFijos} setActivosFijos={setActivosFijos} upsertActivoFijo={upsertActivoFijo}/>}
+      {tab==="gastos"&&<Gastos gastos={gastos} setGastos={setGastos} sesion={sesion} upsertGasto={upsertGasto} salidasCaja={salidasCaja} activosFijos={activosFijos} setActivosFijos={setActivosFijos} upsertActivoFijo={upsertActivoFijo} inventario={inventario} setInventario={setInventario} upsertInventario={upsertInventario} setKardexInsumos={setKardexInsumos} upsertKardexInsumo={upsertKardexInsumo}/>}
       {tab==="inventario"&&<Inventario inventario={inventario} setInventario={setInventario} upsertInventario={upsertInventario} kardexInsumos={kardexInsumos} setKardexInsumos={setKardexInsumos} upsertKardexInsumo={upsertKardexInsumo} sesion={sesion}/>}
       {tab==="productosAdmin"&&<ProductosAdmin productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} kardexProductos={kardexProductos} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto} sesion={sesion}/>}
+      {tab==="kardexAdmin"&&<KardexView productos={productos} kardexProductos={kardexProductos} inventario={inventario} kardexInsumos={kardexInsumos}/>}
       {tab==="activosFijosAdmin"&&<ActivosFijosAdmin activosFijos={activosFijos} setActivosFijos={setActivosFijos} upsertActivoFijo={upsertActivoFijo} sesion={sesion}/>}
       {tab==="deudasAdmin"&&<DeudasAdmin deudas={deudas} setDeudas={setDeudas} upsertDeuda={upsertDeuda} setGastos={setGastos} upsertGasto={upsertGasto} sesion={sesion}/>}
       {tab==="sorteoAdmin"&&<SorteosAdmin sorteos={sorteos} setSorteos={setSorteos} upsertSorteo={upsertSorteo} boletosSorteo={boletosSorteo} productos={productos}/>}
