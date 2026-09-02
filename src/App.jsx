@@ -1851,11 +1851,18 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
     if(v.prodGrupos)return v.prodGrupos.some(g=>g!=="zapatos");
     return (v.items||[]).some(it=>!esZapatoLbl(it.label));
   };
-  // 👟 Cuenta los pares de zapatos de una orden a partir de sus items (piezas de renglones marcados como zapato)
+  // 👟 Cuenta los pares de zapatos de una orden. Si el servicio es un combo/promo con el número en el nombre
+  // (ej. "MIERCOLES DE ZAPATOS (PROMO 4 PARES)"), se usa ESE número — el campo piezas no siempre refleja
+  // cuántos pares trae el combo, solo cuántas veces se compró ese combo.
+  const paresDeLabel=lbl=>{const m=(lbl||"").match(/(\d+)\s*PARES?\b/i);return m?parseInt(m[1]):null;};
   const paresDe=folio=>{
     const v=ventas.find(vv=>vv.folio===folio);
     if(!v)return 0;
-    return (v.items||[]).filter(it=>esZapatoLbl(it.label)).reduce((a,it)=>a+(it.piezas||1),0);
+    return (v.items||[]).filter(it=>esZapatoLbl(it.label)).reduce((a,it)=>{
+      const desdeLabel=paresDeLabel(it.label);
+      const cantidad=desdeLabel!=null?desdeLabel*(it.piezas||1):(it.piezas||1);
+      return a+cantidad;
+    },0);
   };
   // 👟 Flujos de zapatos entre las órdenes activas: el grupo "zapatos" de una orden dividida, o la orden completa si es solo zapatos
   const flujosZapatos=[];
@@ -1865,7 +1872,12 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
     if(v.prodGrupos&&v.prodGrupos.includes("zapatos"))flujosZapatos.push({folio:v.folio,grupo:"zapatos",cliente:v.clienteNombre,v});
     else if(!v.prodGrupos&&tieneZap&&!tieneOtro)flujosZapatos.push({folio:v.folio,grupo:"zapatos",cliente:v.clienteNombre,v});
   });
-  const colaLavadoZap=flujosZapatos.filter(f=>f.v.clasificacion&&!cargaDe(f.folio,"lavado",f.grupo));
+  // 👖 Las órdenes MIXTAS (con ropa) sí necesitan la revisión de bolsillos antes de lavar (por la parte de ropa).
+  // Las de SOLO zapatos no la necesitan — recepción ya revisó los zapatos, así que entran directo a la cola.
+  const colaLavadoZap=flujosZapatos.filter(f=>{
+    const necesitaClasificacion=!!f.v.prodGrupos; // si está dividida (mixta), sí requiere; si es pura, no
+    return(necesitaClasificacion?!!f.v.clasificacion:true)&&!cargaDe(f.folio,"lavado",f.grupo);
+  });
   // 🌀 Después del lavado, pasan a esperar centrifugado (en lavadora general L1-L3)
   const colaCentrifugadoZap=flujosZapatos.filter(f=>{const cl=cargaDe(f.folio,"lavado",f.grupo);return cl?.finReal&&!cargaDe(f.folio,"centrifugado",f.grupo);});
   // 🔥 Solo entran a la cola de secado una vez que el centrifugado terminó
@@ -2217,12 +2229,85 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
       </>
     )}
 
-    {tabProd==="zapatos"&&(
+    {tabProd==="zapatos"&&(()=>{
+      const hoyZ=fechaHoyLocal();
+      const entreganHoyZap=flujosZapatos.filter(f=>fechaLocal(f.v.entrega)===hoyZ&&(f.v.estado||"recibido")!=="entregado");
+      return(
       <>
-        <div style={{fontSize:12,color:"#888",marginBottom:8}}>Toca la lavadora o la secadora de zapatos para ver el detalle y gestionar cada etapa.</div>
+        {entreganHoyZap.length>0&&(
+          <div style={{background:"#ffebee",border:"1.5px solid #e53935",borderRadius:12,padding:12,marginBottom:16}}>
+            <div style={{fontSize:13,fontWeight:800,color:"#c62828",marginBottom:6}}>🔴 Zapatos que se entregan HOY — dar prioridad ({entreganHoyZap.length})</div>
+            {entreganHoyZap.map(f=>(
+              <div key={f.folio} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"4px 0",borderBottom:"1px solid #ffcdd2"}}>
+                <span style={{color:"#c62828",fontWeight:600}}>{f.cliente} <span style={{color:"#aaa",fontWeight:400,fontSize:11}}>({f.folio})</span></span>
+                <strong style={{color:"#c62828"}}>{paresDe(f.folio)} par{paresDe(f.folio)!==1?"es":""}</strong>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div style={{fontSize:12,color:"#888",marginBottom:8}}>Toca la lavadora o la secadora de zapatos para ver el detalle completo de cada máquina.</div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(90px,1fr))",gap:8,marginBottom:16}}>
           {maquinas.filter(m=>m.id==="1LZ"||m.id==="1SZ").map(m=><TarjetaMaquina key={m.id} m={m} cargas={cargas} ventas={ventas} onClick={m.id==="1LZ"?()=>setPanelLavadoraZap(true):()=>setPanelSecadoraZap(true)}/>)}
         </div>
+
+        {colaLavadoZap.length>0&&(
+          <div style={{background:"#e8eaf6",border:"1.5px solid #5c6bc0",borderRadius:12,padding:12,marginBottom:14}}>
+            <div style={{fontSize:13,fontWeight:800,color:"#3949ab",marginBottom:2}}>⬜ Pendientes por lavar ({totalesZapatos.porLavar} pares)</div>
+            {cargaLavadoActiva1LZ&&<div style={{fontSize:11,color:"#1565c0",background:"#e3f2fd",borderRadius:8,padding:"6px 8px",margin:"6px 0"}}>💡 La 1LZ ya está lavando — puedes seguir marcando más y sumarlos al mismo lote.</div>}
+            {colaLavadoZap.map(f=>(
+              <label key={f.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px",cursor:"pointer"}}>
+                <input type="checkbox" checked={!!selLavadoZap[f.folio]} onChange={e=>setSelLavadoZap({...selLavadoZap,[f.folio]:e.target.checked})}/>
+                <span style={{fontSize:13,color:"#1a237e",flex:1}}>{f.cliente} · {f.folio}</span>
+                <span style={{fontSize:11,color:"#3949ab",fontWeight:700}}>{paresDe(f.folio)} pares</span>
+              </label>
+            ))}
+            {cargaLavadoActiva1LZ?(
+              <button style={{...S.btnP,width:"100%",marginTop:8,background:"linear-gradient(135deg,#1565c0,#42a5f5)",opacity:Object.values(selLavadoZap).some(Boolean)?1:0.5}} disabled={!Object.values(selLavadoZap).some(Boolean)} onClick={iniciarAgregarALoteLavado}>➕ Agregar seleccionados al lavado en curso</button>
+            ):(
+              <div style={{display:"flex",gap:8,alignItems:"center",marginTop:8}}>
+                <input type="number" style={{...S.inp,width:80}} value={minLoteLav} onChange={e=>setMinLoteLav(e.target.value)} placeholder="min"/>
+                <button style={{...S.btnP,flex:1,background:"linear-gradient(135deg,#5c6bc0,#7986cb)",opacity:Object.values(selLavadoZap).some(Boolean)?1:0.5}} disabled={!Object.values(selLavadoZap).some(Boolean)} onClick={iniciarLoteLavado}>🧺 Iniciar lavado con lo seleccionado</button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {colaCentrifugadoZap.length>0&&(
+          <div style={{background:"#ede7f6",border:"1.5px solid #7986cb",borderRadius:12,padding:12,marginBottom:14}}>
+            <div style={{fontSize:13,fontWeight:800,color:"#5c6bc0",marginBottom:6}}>✅ Lavados — esperando centrifugado ({totalesZapatos.esperandoCentrifugado} pares)</div>
+            {colaCentrifugadoZap.map(f=>(
+              <div key={f.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px"}}>
+                <input type="checkbox" checked={selCentrifugadoZap[f.folio]!==undefined} onChange={e=>{const c={...selCentrifugadoZap};if(e.target.checked)c[f.folio]=String(paresDe(f.folio)||1);else delete c[f.folio];setSelCentrifugadoZap(c);}}/>
+                <span style={{fontSize:13,color:"#3730a3",flex:1}}>{f.cliente} · {f.folio}</span>
+                {selCentrifugadoZap[f.folio]!==undefined&&<input type="number" min="1" style={{...S.inp,width:60,padding:"4px 8px"}} value={selCentrifugadoZap[f.folio]} onChange={e=>setSelCentrifugadoZap({...selCentrifugadoZap,[f.folio]:e.target.value})}/>}
+              </div>
+            ))}
+            <div style={{fontSize:12,fontWeight:700,color:paresSeleccionadosCentrifugado>8?"#c62828":"#5c6bc0",marginTop:4}}>Seleccionado: {paresSeleccionadosCentrifugado} / 8 pares (máximo por tanda)</div>
+            <div style={{display:"flex",gap:8,alignItems:"center",marginTop:8}}>
+              <input type="number" style={{...S.inp,width:80}} value={minLoteCent} onChange={e=>setMinLoteCent(e.target.value)} placeholder="min"/>
+              <button style={{...S.btnP,flex:1,background:"linear-gradient(135deg,#7986cb,#5c6bc0)",opacity:(Object.keys(selCentrifugadoZap).length>0&&paresSeleccionadosCentrifugado<=8)?1:0.5}} disabled={Object.keys(selCentrifugadoZap).length===0||paresSeleccionadosCentrifugado>8} onClick={iniciarLoteCentrifugado}>🌀 Iniciar centrifugado (elige la máquina)</button>
+            </div>
+          </div>
+        )}
+
+        {colaSecadoZap.length>0&&(
+          <div style={{background:"#e0f7fa",border:"1.5px solid #00acc1",borderRadius:12,padding:12,marginBottom:14}}>
+            <div style={{fontSize:13,fontWeight:800,color:"#00838f",marginBottom:6}}>✅ Centrifugados — esperando secar, máx 20 pares ({totalesZapatos.esperandoSecado} pares)</div>
+            {colaSecadoZap.map(f=>(
+              <div key={f.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px"}}>
+                <input type="checkbox" checked={selSecadoZap[f.folio]!==undefined} onChange={e=>{const c={...selSecadoZap};if(e.target.checked)c[f.folio]=String(paresDe(f.folio)||1);else delete c[f.folio];setSelSecadoZap(c);}}/>
+                <span style={{fontSize:13,color:"#006064",flex:1}}>{f.cliente} · {f.folio}</span>
+                {selSecadoZap[f.folio]!==undefined&&<input type="number" min="1" style={{...S.inp,width:60,padding:"4px 8px"}} value={selSecadoZap[f.folio]} onChange={e=>setSelSecadoZap({...selSecadoZap,[f.folio]:e.target.value})}/>}
+              </div>
+            ))}
+            <div style={{fontSize:12,fontWeight:700,color:paresSeleccionados>20?"#c62828":"#00838f",marginTop:4}}>Seleccionado: {paresSeleccionados} / 20 pares</div>
+            <div style={{display:"flex",gap:8,alignItems:"center",marginTop:8}}>
+              <input type="number" style={{...S.inp,width:80}} value={minLoteSec} onChange={e=>setMinLoteSec(e.target.value)} placeholder="min"/>
+              <button style={{...S.btnP,flex:1,background:"linear-gradient(135deg,#00838f,#26c6da)",opacity:(Object.keys(selSecadoZap).length>0&&paresSeleccionados<=20)?1:0.5}} disabled={Object.keys(selSecadoZap).length===0||paresSeleccionados>20} onClick={iniciarLoteSecado}>🔥 Iniciar secado</button>
+            </div>
+          </div>
+        )}
 
         {(colaLavadoZap.length>0||colaCentrifugadoZap.length>0||colaSecadoZap.length>0||totalesZapatos.enLavado>0||totalesZapatos.enCentrifugado>0||totalesZapatos.enSecado>0)&&(
           <div style={{background:"#fdf6f0",border:"1.5px solid #8d6e63",borderRadius:12,padding:12,marginBottom:16}}>
@@ -2257,7 +2342,8 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
           </div>
         )}
       </>
-    )}
+      );
+    })()}
 
     {tabProd!=="maquinas"&&(<>
     <div style={{fontSize:12,fontWeight:700,color:"#888",marginBottom:6}}>📋 ÓRDENES EN PRODUCCIÓN</div>
@@ -2408,8 +2494,10 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
           <div style={{fontSize:12,color:todosListos?"#2e7d32":etapaResumen.startsWith("⏳")?"#e65100":"#4db6e4",fontWeight:700,marginTop:2}}>{etapaResumen}</div>
           <div style={{fontSize:12,color:"#666",marginTop:6}}>{(v.items||[]).map(it=>it.label).join(" · ")}</div>
 
-          {!v.clasificacion?(
+          {!v.clasificacion&&!soloZapatos?(
             <button style={{...S.btnP,marginTop:10,background:"linear-gradient(135deg,#e65100,#ff9800)"}} onClick={()=>setClasifFor({folio:v.folio})}>🔍 Revisar prendas antes de lavar</button>
+          ):!v.clasificacion&&soloZapatos?(
+            <div style={{fontSize:11,color:"#888",background:"#f0f4f8",borderRadius:8,padding:"6px 8px",marginTop:8}}>👟 Es una orden solo de zapatos — no necesita revisión de bolsillos, ya se revisó en recepción.</div>
           ):(
             <>
               <div style={{fontSize:11,color:"#2e7d32",background:"#e8f5e9",borderRadius:8,padding:"6px 8px",marginTop:8,fontWeight:600}}>
@@ -3345,7 +3433,7 @@ function PinsAdmin({empleadas,pins,setPins,upsertPin}){
   </div>);
 }
 
-function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,onIrProduccion,onIrTareas,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta,upsertSalida,upsertCliente,upsertCaja,cupones,setCupones,upsertCupon,promos,cfgInc,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga,pins,eventosProduccion,setEventosProduccion,upsertEvento,productos,setProductos,upsertProducto,setKardexProductos,upsertKardexProducto,sorteos,setSorteos,upsertSorteo,setBoletosSorteo,upsertBoletoSorteo,boletosParaImprimir,setBoletosParaImprimir,depositos,setDepositos,upsertDeposito}){
+function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,onIrProduccion,onIrTareas,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta,upsertSalida,upsertCliente,upsertCaja,cupones,setCupones,upsertCupon,promos,cfgInc,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga,pins,eventosProduccion,setEventosProduccion,upsertEvento,productos,setProductos,upsertProducto,setKardexProductos,upsertKardexProducto,sorteos,setSorteos,upsertSorteo,setBoletosSorteo,upsertBoletoSorteo,boletosParaImprimir,setBoletosParaImprimir,depositos,setDepositos,upsertDeposito,setConteosInventario,upsertConteoInventario}){
   const [tab,setTab]=useState("hoy");const [busq,setBusq]=useState("");
   const [showNueva,setShowNueva]=useState(false);
   const [filtroTile,setFiltroTile]=useState(null); // 🔎 filtro rápido al tocar un contador (recibido/proceso/listo/entregado_pend)
@@ -3418,7 +3506,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         </div>
       )}
       <div style={{background:"#fff",display:"flex",borderBottom:"2px solid #e8f0f7",position:"sticky",top:0,zIndex:10}}>
-        {[{id:"hoy",l:"📋 Ordenes",c:pendientesRaw.length},{id:"cobrar",l:"💸 Recibido",c:porCob.length},{id:"proceso",l:"🔄 En proceso",c:porProc.length},{id:"entregar",l:"📦 Listo para retirar",c:porEnt.length},{id:"clientes",l:"👥 Clientes"},...(puedeFacturarAqui?[{id:"resumen",l:"📊 Resumen"},{id:"depositosEmp",l:"🏦 Depósitos"}]:[]),{id:"bonos",l:"📈 Bonos"},{id:"nueva",l:"➕ Nuevo"}].map(t=>(
+        {[{id:"hoy",l:"📋 Ordenes",c:pendientesRaw.length},{id:"cobrar",l:"💸 Recibido",c:porCob.length},{id:"proceso",l:"🔄 En proceso",c:porProc.length},{id:"entregar",l:"📦 Listo para retirar",c:porEnt.length},{id:"clientes",l:"👥 Clientes"},...(puedeFacturarAqui?[{id:"resumen",l:"📊 Resumen"},{id:"depositosEmp",l:"🏦 Depósitos"},{id:"conteoEmp",l:"📋 Conteo inventario"}]:[]),{id:"bonos",l:"📈 Bonos"},{id:"nueva",l:"➕ Nuevo"}].map(t=>(
           <button key={t.id} style={{flex:1,padding:"12px 4px",border:"none",background:"transparent",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:tab===t.id?700:500,color:tab===t.id?"#1a3c5e":"#888",borderBottom:tab===t.id?"2px solid #4db6e4":"none",marginBottom:-2,fontSize:11,position:"relative"}}
             onClick={()=>t.id==="nueva"?setShowNueva(true):setTab(t.id)}>
             {t.l}{t.c>0&&<span style={{position:"absolute",top:5,right:3,background:"#e53935",color:"#fff",borderRadius:10,fontSize:9,fontWeight:800,padding:"1px 4px"}}>{t.c}</span>}
@@ -3426,7 +3514,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         ))}
       </div>
       <div style={{padding:12}}>
-        {tab!=="bonos"&&tab!=="resumen"&&tab!=="clientes"&&tab!=="depositosEmp"&&(<div style={{display:"flex",gap:8,marginBottom:12}}>
+        {tab!=="bonos"&&tab!=="resumen"&&tab!=="clientes"&&tab!=="depositosEmp"&&tab!=="conteoEmp"&&(<div style={{display:"flex",gap:8,marginBottom:12}}>
           <input style={{...S.inp,flex:1}} placeholder="🔍 Buscar cliente o folio..." value={busq} onChange={e=>setBusq(e.target.value)}/>
         </div>)}
         {tab==="hoy"&&(<>
@@ -3456,6 +3544,8 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
             ?<ResumenDia ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja}/>
           :tab==="depositosEmp"
             ?<Depositos depositos={depositos} setDepositos={setDepositos} ventas={ventas} salidasCaja={salidasCaja} upsertDeposito={upsertDeposito}/>
+          :tab==="conteoEmp"
+            ?<ConteoProductos productos={productos} setConteos={setConteosInventario} upsertConteo={upsertConteoInventario} sesion={sesion}/>
           :tab==="clientes"
             ?<Clientes clientes={clientes} setClientes={setClientes} upsertCliente={upsertCliente} ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} esAdmin={false}/>
           :filtrados.length===0
@@ -5530,6 +5620,114 @@ function DeudasAdmin({deudas,setDeudas,upsertDeuda,setGastos,upsertGasto,sesion}
 
 // 📒 KARDEX — pantalla dedicada para revisar TODOS los movimientos de productos e insumos, en formato de tabla con filtros
 // (Fecha inicio/fin + búsqueda por artículo), igual que un kardex de sistema de inventario tradicional.
+// 📋 CONTEO FÍSICO DE INVENTARIO — la colaboradora cuenta cada producto a mano y el sistema compara contra el stock esperado al final
+function ConteoProductos({productos,setConteos,upsertConteo,sesion}){
+  const activos=(productos||[]).filter(p=>!p.eliminada);
+  const [conteo,setConteo]=useState({}); // {productoId: "cantidad contada"}
+  const [resultado,setResultado]=useState(null); // conteo ya finalizado, para mostrar el resumen
+  const faltantes=activos.filter(p=>conteo[p.id]===undefined||conteo[p.id]==="");
+
+  const finalizar=()=>{
+    if(faltantes.length>0){
+      if(!window.confirm(`Te faltan ${faltantes.length} producto(s) por contar (${faltantes.map(p=>p.nombre).join(", ")}). ¿Terminar de todas formas? Los que falten se marcan como "no contado".`))return;
+    }
+    const items=activos.map(p=>{
+      const contadoStr=conteo[p.id];
+      const contado=contadoStr===undefined||contadoStr===""?null:parseInt(contadoStr)||0;
+      const esperado=p.stock||0;
+      return{productoId:p.id,nombre:p.nombre,esperado,contado,diferencia:contado===null?null:contado-esperado};
+    });
+    const conDiferencia=items.filter(it=>it.diferencia!==null&&it.diferencia!==0);
+    const registro={id:"cti_"+Date.now(),fecha:new Date().toISOString(),realizadoPor:sesion?.nombre||null,items,totalCoincide:conDiferencia.length===0&&items.every(it=>it.contado!==null),totalDiferencias:conDiferencia.length};
+    setConteos(prev=>[registro,...prev]);
+    if(upsertConteo)upsertConteo(registro);
+    setResultado(registro);
+  };
+
+  const nuevoConteo=()=>{setConteo({});setResultado(null);};
+
+  const descargarCSV=reg=>{
+    const enc=["Producto","Esperado (sistema)","Contado (físico)","Diferencia","¿Coincide?"];
+    const filas=reg.items.map(it=>[it.nombre,it.esperado,it.contado===null?"No contado":it.contado,it.contado===null?"—":it.diferencia,it.contado===null?"—":it.diferencia===0?"✅ Sí":"⚠️ No"]);
+    filas.push(["","","","",""]);
+    filas.push(["Realizado por:",reg.realizadoPor||"","Fecha:",fmt(reg.fecha),""]);
+    filas.push(["Coincidencias totales:",reg.totalCoincide?"✅ Todo coincidió":`⚠️ ${reg.totalDiferencias} con diferencia`,"","",""]);
+    const csv=[enc,...filas].map(f=>f.map(c=>'"'+String(c).replace(/"/g,'\\"')+'"').join(",")).join("\n");
+    const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
+    const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="conteo_inventario-"+fechaLocal(reg.fecha)+".csv";a.click();
+  };
+
+  if(resultado){
+    const conDif=resultado.items.filter(it=>it.diferencia!==null&&it.diferencia!==0);
+    const noContados=resultado.items.filter(it=>it.contado===null);
+    return(<div style={S.panel}>
+      <h2 style={S.ptitle}>📋 Resultado del conteo</h2>
+      <div style={{...S.alrt,background:resultado.totalCoincide?"#e8f5e9":"#fff3e0",color:resultado.totalCoincide?"#2e7d32":"#e65100",fontSize:14,fontWeight:700,textAlign:"center",padding:16}}>
+        {resultado.totalCoincide?"✅ ¡Todo coincidió con el sistema!":`⚠️ ${conDif.length} producto(s) con diferencia${noContados.length>0?` · ${noContados.length} sin contar`:""}`}
+      </div>
+      <Card title="📊 Detalle completo">
+        {resultado.items.map(it=>(
+          <div key={it.productoId} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid #f0f4f8"}}>
+            <div><div style={{fontWeight:600,fontSize:13}}>{it.nombre}</div><div style={{fontSize:11,color:"#888"}}>Sistema: {it.esperado} · Contado: {it.contado===null?"—":it.contado}</div></div>
+            <div style={{fontWeight:800,fontSize:13,color:it.contado===null?"#aaa":it.diferencia===0?"#2e7d32":"#c62828"}}>{it.contado===null?"Sin contar":it.diferencia===0?"✅ Coincide":(it.diferencia>0?"+":"")+it.diferencia}</div>
+          </div>
+        ))}
+      </Card>
+      <button style={{...S.btnP,width:"100%",marginBottom:8}} onClick={()=>descargarCSV(resultado)}>📥 Descargar Excel de este conteo</button>
+      <button style={{...S.btnS,width:"100%"}} onClick={nuevoConteo}>🔄 Hacer otro conteo</button>
+    </div>);
+  }
+
+  return(<div style={S.panel}>
+    <h2 style={S.ptitle}>📋 Conteo físico de inventario</h2>
+    <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ Cuenta a mano cuántas unidades hay realmente de cada producto y escríbelo aquí. Al final, el sistema te dice si coincide con lo que dice el stock — hazlo 2 veces por semana.</div>
+    <Card title={`📦 Productos (${activos.length - faltantes.length}/${activos.length} contados)`}>
+      {activos.length===0&&<div style={S.empty}>No hay productos en el catálogo todavía.</div>}
+      {activos.map(p=>(
+        <div key={p.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:"1px solid #f0f4f8"}}>
+          <div style={{flex:1}}><div style={{fontWeight:600,fontSize:13}}>{p.nombre}</div></div>
+          <input type="number" min="0" style={{...S.inp,width:80,padding:"6px 8px",textAlign:"center"}} placeholder="Cant." value={conteo[p.id]??""} onChange={e=>setConteo({...conteo,[p.id]:e.target.value})}/>
+        </div>
+      ))}
+    </Card>
+    <button style={{...S.btnP,width:"100%"}} onClick={finalizar}>✅ Finalizar conteo y comparar</button>
+  </div>);
+}
+
+// 📋 Historial de conteos para el admin
+function ConteosAdmin({conteos}){
+  const [verId,setVerId]=useState(null);
+  const lista=[...(conteos||[])].sort((a,b)=>new Date(b.fecha)-new Date(a.fecha));
+  return(<div style={S.panel}>
+    <h2 style={S.ptitle}>📋 Conteos de inventario realizados</h2>
+    {lista.length===0&&<div style={S.empty}>Todavía no se ha hecho ningún conteo.</div>}
+    {lista.map(reg=>{
+      const conDif=reg.items.filter(it=>it.diferencia!==null&&it.diferencia!==0);
+      return(
+        <Card key={reg.id} title={fmt(reg.fecha)}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div>
+              <div style={{fontSize:12,color:"#888"}}>Realizado por: {reg.realizadoPor||"—"}</div>
+              <div style={{fontSize:13,fontWeight:700,color:reg.totalCoincide?"#2e7d32":"#e65100"}}>{reg.totalCoincide?"✅ Todo coincidió":`⚠️ ${conDif.length} con diferencia`}</div>
+            </div>
+            <button style={S.btnS} onClick={()=>setVerId(verId===reg.id?null:reg.id)}>{verId===reg.id?"Ocultar":"Ver detalle"}</button>
+          </div>
+          {verId===reg.id&&(
+            <div style={{marginTop:10}}>
+              {reg.items.map(it=>(
+                <div key={it.productoId} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f0f4f8",fontSize:12}}>
+                  <span>{it.nombre} <span style={{color:"#888"}}>(sist: {it.esperado} / cont: {it.contado===null?"—":it.contado})</span></span>
+                  <strong style={{color:it.contado===null?"#aaa":it.diferencia===0?"#2e7d32":"#c62828"}}>{it.contado===null?"—":it.diferencia===0?"✅":(it.diferencia>0?"+":"")+it.diferencia}</strong>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      );
+    })}
+  </div>);
+}
+
 function KardexView({productos,kardexProductos,inventario,kardexInsumos}){
   const [tipo,setTipo]=useState("productos"); // "productos" | "insumos"
   const hoy=fechaHoyLocal();
@@ -7050,6 +7248,8 @@ const { data: kardexProductos, setData: setKardexProductos, upsert: upsertKardex
 const { data: kardexInsumos, setData: setKardexInsumos, upsert: upsertKardexInsumo } = useCollection("kardexInsumos", "ll_kardex_insumos", KARDEX_INSUMOS_DEFAULT);
 // 📦 ACTIVOS FIJOS y 💳 DEUDAS
 const { data: activosFijos, setData: setActivosFijos, upsert: upsertActivoFijo } = useCollection("activosFijos", "ll_activos_fijos", []);
+// 📋 Conteos físicos de inventario (Nohelia, 2 veces por semana)
+const { data: conteosInventario, setData: setConteosInventario, upsert: upsertConteoInventario } = useCollection("conteosInventario", "ll_conteos_inventario", []);
 const { data: deudas, setData: setDeudas, upsert: upsertDeuda } = useCollection("deudas", "ll_deudas", []);
 // 🎟️ SORTEO POR BOLETOS
 const { data: sorteos, setData: setSorteos, upsert: upsertSorteo } = useCollection("sorteos", "ll_sorteos", SORTEOS_DEFAULT);
@@ -7231,14 +7431,14 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
     empleadas={empleadas}
     upsertCaja={upsertCaja}
   />;
-  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={serviciosActivos} sesion={sesion} addAbono={addAbono} onLogout={onLogout} onIrProduccion={()=>setVista("produccion")} onIrTareas={()=>setVista("tareas")} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} upsertVenta={upsertVenta} upsertSalida={upsertSalida} upsertCliente={upsertCliente} upsertCaja={upsertCaja} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos} cfgInc={cfgInc} maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga} pins={pins} eventosProduccion={eventosProduccion} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto} sorteos={sorteos} setSorteos={setSorteos} upsertSorteo={upsertSorteo} setBoletosSorteo={setBoletosSorteo} upsertBoletoSorteo={upsertBoletoSorteo} boletosParaImprimir={boletosParaImprimir} setBoletosParaImprimir={setBoletosParaImprimir} depositos={depositos} setDepositos={setDepositos} upsertDeposito={upsertDeposito}/>;
+  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={serviciosActivos} sesion={sesion} addAbono={addAbono} onLogout={onLogout} onIrProduccion={()=>setVista("produccion")} onIrTareas={()=>setVista("tareas")} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} upsertVenta={upsertVenta} upsertSalida={upsertSalida} upsertCliente={upsertCliente} upsertCaja={upsertCaja} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos} cfgInc={cfgInc} maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga} pins={pins} eventosProduccion={eventosProduccion} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto} sorteos={sorteos} setSorteos={setSorteos} upsertSorteo={upsertSorteo} setBoletosSorteo={setBoletosSorteo} upsertBoletoSorteo={upsertBoletoSorteo} boletosParaImprimir={boletosParaImprimir} setBoletosParaImprimir={setBoletosParaImprimir} depositos={depositos} setDepositos={setDepositos} upsertDeposito={upsertDeposito} setConteosInventario={setConteosInventario} upsertConteoInventario={upsertConteoInventario}/>;
   const tabs=[
     {id:"ventas",icon:"🧾",l:"Venta"},{id:"historial",icon:"📋",l:"Historial"},
     {id:"pendientes",icon:"⏳",l:"Pendientes",b:pCount},{id:"bi",icon:"🚀",l:"Dashboard"},
     {id:"clientes",icon:"👥",l:"Clientes"},{id:"promosAdmin",icon:"🎁",l:"Promos"},{id:"cupones",icon:"🎟️",l:"Cupones"},{id:"resumen",icon:"📈",l:"Resumen día"},
     {id:"reportes",icon:"📊",l:"Reportes"},{id:"depositos",icon:"🏦",l:"Depósitos"},
     {id:"conciliacion",icon:"🏛️",l:"Conciliación"},
-    {id:"gastos",icon:"🛒",l:"Gastos"},{id:"inventario",icon:"📦",l:"Inventario"},{id:"productosAdmin",icon:"🛍️",l:"Productos"},{id:"kardexAdmin",icon:"📒",l:"Kardex"},{id:"activosFijosAdmin",icon:"📦",l:"Activos Fijos"},{id:"deudasAdmin",icon:"💳",l:"Deudas"},{id:"sorteoAdmin",icon:"🎟️",l:"Sorteo"},
+    {id:"gastos",icon:"🛒",l:"Gastos"},{id:"inventario",icon:"📦",l:"Inventario"},{id:"productosAdmin",icon:"🛍️",l:"Productos"},{id:"kardexAdmin",icon:"📒",l:"Kardex"},{id:"conteosAdmin",icon:"📋",l:"Conteos"},{id:"activosFijosAdmin",icon:"📦",l:"Activos Fijos"},{id:"deudasAdmin",icon:"💳",l:"Deudas"},{id:"sorteoAdmin",icon:"🎟️",l:"Sorteo"},
     {id:"equipo",icon:"👩",l:"Equipo"},{id:"incentivosAdmin",icon:"🎯",l:"Incentivos"},{id:"maquinasAdmin",icon:"🏭",l:"Máquinas"},{id:"pinsAdmin",icon:"🔒",l:"PINs"},{id:"produccionAdmin",icon:"🧺",l:"Producción"},{id:"tareasAdmin",icon:"📋",l:"Tareas"},{id:"notasAdmin",icon:"📝",l:"Notas"},
     {id:"config",icon:"⚙️",l:"Config"},{id:"usuarios",icon:"🔑",l:"Usuarios"},
   ];
@@ -7246,7 +7446,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
   const CATEGORIAS=[
     {id:"ventas_caja",icon:"🧾",l:"Ventas",tabIds:["ventas","historial","pendientes","depositos","conciliacion","cupones","promosAdmin","reportes","resumen"]},
     {id:"personal",icon:"👥",l:"Personal",tabIds:["equipo","pinsAdmin","usuarios","tareasAdmin","notasAdmin","incentivosAdmin"]},
-    {id:"inventario_cat",icon:"📦",l:"Inventario",tabIds:["inventario","productosAdmin","kardexAdmin","gastos","maquinasAdmin","activosFijosAdmin","deudasAdmin"]},
+    {id:"inventario_cat",icon:"📦",l:"Inventario",tabIds:["inventario","productosAdmin","kardexAdmin","conteosAdmin","gastos","maquinasAdmin","activosFijosAdmin","deudasAdmin"]},
     {id:"negocio",icon:"📊",l:"Negocio",tabIds:["bi","clientes","sorteoAdmin","produccionAdmin","config"]},
   ];
   const categoriaDeTab=id=>CATEGORIAS.find(c=>c.tabIds.includes(id))?.id||CATEGORIAS[0].id;
@@ -7301,6 +7501,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
       {tab==="inventario"&&<Inventario inventario={inventario} setInventario={setInventario} upsertInventario={upsertInventario} kardexInsumos={kardexInsumos} setKardexInsumos={setKardexInsumos} upsertKardexInsumo={upsertKardexInsumo} sesion={sesion}/>}
       {tab==="productosAdmin"&&<ProductosAdmin productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} kardexProductos={kardexProductos} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto} sesion={sesion}/>}
       {tab==="kardexAdmin"&&<KardexView productos={productos} kardexProductos={kardexProductos} inventario={inventario} kardexInsumos={kardexInsumos}/>}
+      {tab==="conteosAdmin"&&<ConteosAdmin conteos={conteosInventario}/>}
       {tab==="activosFijosAdmin"&&<ActivosFijosAdmin activosFijos={activosFijos} setActivosFijos={setActivosFijos} upsertActivoFijo={upsertActivoFijo} sesion={sesion}/>}
       {tab==="deudasAdmin"&&<DeudasAdmin deudas={deudas} setDeudas={setDeudas} upsertDeuda={upsertDeuda} setGastos={setGastos} upsertGasto={upsertGasto} sesion={sesion}/>}
       {tab==="sorteoAdmin"&&<SorteosAdmin sorteos={sorteos} setSorteos={setSorteos} upsertSorteo={upsertSorteo} boletosSorteo={boletosSorteo} productos={productos}/>}
