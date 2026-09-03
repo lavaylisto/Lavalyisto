@@ -1832,6 +1832,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
   const [notifOn,setNotifOn]=useState(typeof Notification!=="undefined"&&Notification.permission==="granted");
   const [panelLavadoraZap,setPanelLavadoraZap]=useState(false); // panel al tocar la máquina 1LZ: pendientes/lavados/centrifugando
   const [panelSecadoraZap,setPanelSecadoraZap]=useState(false); // panel al tocar la máquina 1SZ: esperando secar/secando
+  const [panelEmpaquetadoZap,setPanelEmpaquetadoZap]=useState(false); // panel al tocar el ícono de empaquetado: quién está empaquetando ahora
   const [tabProd,setTabProd]=useState("maquinas"); // "maquinas" | "ropa" | "zapatos" — separa la pantalla de producción en secciones
   const [detalleEstadoZap,setDetalleEstadoZap]=useState(null); // qué categoría del resumen de zapatos está expandida (ej. "enLavado")
 
@@ -1890,6 +1891,13 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
     const yaEmpezado=eventosDe(f.folio).some(ev=>ev.etapa==="doblado_inicio"&&gruposEquivalentes(f.grupo).includes(ev.grupo||null));
     return !yaEmpezado;
   });
+  // 📦 Las que YA están siendo empaquetadas ahora mismo (se marcó inicio, todavía no fin)
+  const empaquetandoZap=flujosZapatos.map(f=>{
+    const evsG=eventosDe(f.folio).filter(ev=>gruposEquivalentes(f.grupo).includes(ev.grupo||null));
+    const inicio=evsG.filter(ev=>ev.etapa==="doblado_inicio").sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp))[0];
+    const fin=evsG.filter(ev=>ev.etapa==="doblado_fin").sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp))[0];
+    return{...f,inicio,fin};
+  }).filter(f=>f.inicio&&(!f.fin||new Date(f.fin.timestamp)<new Date(f.inicio.timestamp)));
   const paresSeleccionados=Object.values(selSecadoZap).reduce((a,p)=>a+(parseInt(p)||0),0);
   const paresSeleccionadosCentrifugado=Object.values(selCentrifugadoZap).reduce((a,p)=>a+(parseInt(p)||0),0);
   // 📊 Totales de pares en cada etapa, para tener claro cuántos van por lavar, en lavado, esperando/en centrifugado, y esperando/en secado
@@ -2265,6 +2273,12 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
         <div style={{fontSize:12,color:"#888",marginBottom:8}}>Toca la lavadora o la secadora de zapatos para ver el detalle completo de cada máquina.</div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(90px,1fr))",gap:8,marginBottom:16}}>
           {maquinas.filter(m=>m.id==="1LZ"||m.id==="1SZ").map(m=><TarjetaMaquina key={m.id} m={m} cargas={cargas} ventas={ventas} onClick={m.id==="1LZ"?()=>setPanelLavadoraZap(true):()=>setPanelSecadoraZap(true)}/>)}
+          <div onClick={()=>setPanelEmpaquetadoZap(true)} style={{background:empaquetandoZap.length>0?"#f3e5f5":"#f8fbfd",border:`2px solid ${empaquetandoZap.length>0?"#ab47bc":"#e0e8f0"}`,borderRadius:10,padding:"8px 6px",textAlign:"center",cursor:"pointer"}}>
+            <div style={{fontSize:18}}>📦</div>
+            <div style={{fontSize:11,fontWeight:700,color:"#1a3c5e",lineHeight:1.1}}>Empaquetado</div>
+            <div style={{fontSize:9,color:empaquetandoZap.length>0?"#7b1fa2":"#888",fontWeight:700}}>{empaquetandoZap.length>0?`${empaquetandoZap.length} en curso`:"Libre"}</div>
+            <div style={{fontSize:8,color:"#8d6e63",marginTop:2,fontWeight:700}}>👆 Ver detalle</div>
+          </div>
         </div>
 
         {colaLavadoZap.length>0&&(
@@ -2375,7 +2389,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
       );
     })()}
 
-    {tabProd!=="maquinas"&&(<>
+    {tabProd==="ropa"&&(<>
     <div style={{fontSize:12,fontWeight:700,color:"#888",marginBottom:6}}>📋 ÓRDENES EN PRODUCCIÓN</div>
     {activos.filter(v=>tabProd==="zapatos"?perteneceZapatos(v):perteneceRopa(v)).length===0&&<div style={{textAlign:"center",padding:"40px 20px",color:"#aaa"}}><div style={{fontSize:48,marginBottom:8}}>🏭</div><div>No hay órdenes en producción ahora mismo</div></div>}
     {activos.filter(v=>tabProd==="zapatos"?perteneceZapatos(v):perteneceRopa(v)).map(v=>{
@@ -2712,6 +2726,40 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
         </div>
       );
     })()}
+
+    {panelEmpaquetadoZap&&(
+      <div style={S.ov}>
+        <div style={{background:"#fff",borderRadius:18,width:"100%",maxWidth:420,maxHeight:"88vh",overflowY:"auto",padding:18}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:17,fontWeight:700,color:"#1a3c5e"}}>👟📦 Empaquetado de zapatos</div>
+            <button onClick={()=>setPanelEmpaquetadoZap(false)} style={{background:"#f0f4f8",border:"none",borderRadius:8,padding:"6px 10px",cursor:"pointer",fontSize:13}}>✕</button>
+          </div>
+
+          <div style={{fontSize:12,fontWeight:800,color:"#7b1fa2",marginBottom:6}}>📦 Empaquetando ahora ({empaquetandoZap.length})</div>
+          {empaquetandoZap.length===0&&<div style={{fontSize:12,color:"#aaa",marginBottom:10}}>Nadie empaquetando en este momento.</div>}
+          {empaquetandoZap.map(f=>(
+            <div key={f.folio} style={{...S.vcard,padding:"8px 10px",marginBottom:6,borderLeft:"4px solid #ab47bc"}}>
+              <div style={{fontSize:13,fontWeight:700,color:"#4a148c"}}>{f.cliente} · {f.folio}</div>
+              <div style={{fontSize:11,color:"#888"}}>{paresDe(f.folio)} pares · Desde las {new Date(f.inicio.timestamp).toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"})} · {nombreDe(f.inicio.empleadaId)}</div>
+              <button style={{...S.btnS,width:"100%",marginTop:6,background:"#f3e5f5",color:"#7b1fa2"}} onClick={()=>setPinFor({folio:f.folio,accion:"doblado_fin",label:"¿Quién termina el empaquetado?",extra:{grupo:f.grupo}})}>✅ Terminar empaquetado</button>
+            </div>
+          ))}
+
+          <div style={{fontSize:12,fontWeight:800,color:"#5d4037",marginTop:10,marginBottom:6}}>⬜ Esperando empaquetar ({colaEmpaquetarZap.reduce((a,f)=>a+paresDe(f.folio),0)} pares)</div>
+          {colaEmpaquetarZap.length===0&&<div style={{fontSize:12,color:"#aaa"}}>Nada esperando.</div>}
+          {colaEmpaquetarZap.map(f=>(
+            <label key={f.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px",cursor:"pointer"}}>
+              <input type="checkbox" checked={!!selEmpaquetarZap[f.folio]} onChange={e=>setSelEmpaquetarZap({...selEmpaquetarZap,[f.folio]:e.target.checked})}/>
+              <span style={{fontSize:13,color:"#3e2723",flex:1}}>{f.cliente} · {f.folio}</span>
+              <span style={{fontSize:11,color:"#7b1fa2",fontWeight:700}}>{paresDe(f.folio)} pares</span>
+            </label>
+          ))}
+          {colaEmpaquetarZap.length>0&&(
+            <button style={{...S.btnP,width:"100%",marginTop:8,background:"linear-gradient(135deg,#7b1fa2,#ab47bc)",opacity:Object.values(selEmpaquetarZap).some(Boolean)?1:0.5}} disabled={!Object.values(selEmpaquetarZap).some(Boolean)} onClick={()=>{iniciarEmpaquetarSeleccionados();setPanelEmpaquetadoZap(false);}}>📦 Iniciar empaquetado con lo seleccionado</button>
+          )}
+        </div>
+      </div>
+    )}
   </div>);
 }
 
