@@ -1824,6 +1824,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
   const [selLavadoZap,setSelLavadoZap]=useState({}); // {folio:true} seleccionados para lote de lavado
   const [selCentrifugadoZap,setSelCentrifugadoZap]=useState({}); // {folio:true} seleccionados para lote de centrifugado
   const [selSecadoZap,setSelSecadoZap]=useState({}); // {folio:"pares"} seleccionados para lote de secado (máx 20 pares)
+  const [selEmpaquetarZap,setSelEmpaquetarZap]=useState({}); // {folio:true} seleccionados para iniciar empaquetado
   const [minLoteLav,setMinLoteLav]=useState("45");
   const [minLoteCent,setMinLoteCent]=useState("15");
   const [minLoteSec,setMinLoteSec]=useState("45");
@@ -1882,6 +1883,13 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
   const colaCentrifugadoZap=flujosZapatos.filter(f=>{const cl=cargaDe(f.folio,"lavado",f.grupo);return cl?.finReal&&!cargaDe(f.folio,"centrifugado",f.grupo);});
   // 🔥 Solo entran a la cola de secado una vez que el centrifugado terminó
   const colaSecadoZap=flujosZapatos.filter(f=>{const cc=cargaDe(f.folio,"centrifugado",f.grupo);return cc?.finReal&&!cargaDe(f.folio,"secado",f.grupo);});
+  // 📦 Ya se secaron — esperan a que se seleccione quién las empaqueta (sin necesitar entrar a cada orden individual)
+  const colaEmpaquetarZap=flujosZapatos.filter(f=>{
+    const cs=cargaDe(f.folio,"secado",f.grupo);
+    if(!cs?.finReal)return false;
+    const yaEmpezado=eventosDe(f.folio).some(ev=>ev.etapa==="doblado_inicio"&&gruposEquivalentes(f.grupo).includes(ev.grupo||null));
+    return !yaEmpezado;
+  });
   const paresSeleccionados=Object.values(selSecadoZap).reduce((a,p)=>a+(parseInt(p)||0),0);
   const paresSeleccionadosCentrifugado=Object.values(selCentrifugadoZap).reduce((a,p)=>a+(parseInt(p)||0),0);
   // 📊 Totales de pares en cada etapa, para tener claro cuántos van por lavar, en lavado, esperando/en centrifugado, y esperando/en secado
@@ -2170,6 +2178,13 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
     setSelSecadoZap({});
     setPickerFor({tipoMaquina:"secadora",grupo:"zapatos",lote:{folios,tipo:"secado",pares:paresSeleccionados}});
   };
+  // 📦 Inicia el empaquetado de varias órdenes de zapatos a la vez — un solo PIN confirma quién empaqueta todas las seleccionadas
+  const iniciarEmpaquetarSeleccionados=()=>{
+    const folios=Object.keys(selEmpaquetarZap).filter(f=>selEmpaquetarZap[f]);
+    if(folios.length===0)return;
+    setSelEmpaquetarZap({});
+    setPinFor({folio:null,accion:"iniciar_empaquetado_lote",label:"¿Quién empaqueta estos zapatos?",extra:{folios}});
+  };
   const onPickerConfirm=(maquinaId,minutos,comentario)=>{
     const{folio,tipoMaquina,repetir,centrifugado,grupo,lote,ciclo}=pickerFor;
     setPickerFor(null);
@@ -2188,6 +2203,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
     if(accion==="clasificacion")guardarClasificacion(folio,extra.datos,emp?.id);
     else if(accion==="iniciar_lote")iniciarCargaLote(extra.lote.folios,extra.lote.tipo,extra.maquinaId,extra.minutos,emp?.id,extra.lote.pares);
     else if(accion==="agregar_lote_lavado")agregarALoteLavadoActivo(extra.carga,extra.folios,emp?.id);
+    else if(accion==="iniciar_empaquetado_lote")extra.folios.forEach(folio=>registrar(folio,"doblado_inicio",emp?.id,null,"zapatos"));
     else if(accion==="iniciar_lavado")iniciarCarga(folio,"lavado",extra.maquinaId,extra.minutos,emp?.id,extra.comentario,extra.repetir,extra.grupo,extra.ciclo);
     else if(accion==="retirar_lavado")retirarCarga(extra.carga,emp?.id);
     else if(accion==="iniciar_secado")iniciarCarga(folio,"secado",extra.maquinaId,extra.minutos,emp?.id,extra.comentario,extra.repetir,extra.grupo,extra.ciclo);
@@ -2309,6 +2325,20 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
           </div>
         )}
 
+        {colaEmpaquetarZap.length>0&&(
+          <div style={{background:"#f3e5f5",border:"1.5px solid #ab47bc",borderRadius:12,padding:12,marginBottom:14}}>
+            <div style={{fontSize:13,fontWeight:800,color:"#7b1fa2",marginBottom:6}}>📦 Ya se secaron — esperando empaquetar ({colaEmpaquetarZap.reduce((a,f)=>a+paresDe(f.folio),0)} pares)</div>
+            {colaEmpaquetarZap.map(f=>(
+              <label key={f.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px",cursor:"pointer"}}>
+                <input type="checkbox" checked={!!selEmpaquetarZap[f.folio]} onChange={e=>setSelEmpaquetarZap({...selEmpaquetarZap,[f.folio]:e.target.checked})}/>
+                <span style={{fontSize:13,color:"#4a148c",flex:1}}>{f.cliente} · {f.folio}</span>
+                <span style={{fontSize:11,color:"#7b1fa2",fontWeight:700}}>{paresDe(f.folio)} pares</span>
+              </label>
+            ))}
+            <button style={{...S.btnP,width:"100%",marginTop:8,background:"linear-gradient(135deg,#7b1fa2,#ab47bc)",opacity:Object.values(selEmpaquetarZap).some(Boolean)?1:0.5}} disabled={!Object.values(selEmpaquetarZap).some(Boolean)} onClick={iniciarEmpaquetarSeleccionados}>📦 Iniciar empaquetado con lo seleccionado</button>
+          </div>
+        )}
+
         {(colaLavadoZap.length>0||colaCentrifugadoZap.length>0||colaSecadoZap.length>0||totalesZapatos.enLavado>0||totalesZapatos.enCentrifugado>0||totalesZapatos.enSecado>0)&&(
           <div style={{background:"#fdf6f0",border:"1.5px solid #8d6e63",borderRadius:12,padding:12,marginBottom:16}}>
             <div style={{fontSize:13,fontWeight:800,color:"#5d4037",marginBottom:2}}>👟 Producción de zapatos</div>
@@ -2401,9 +2431,6 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
             {lavCiclo.length===0&&!esZap&&(
               <button style={{...S.btnP,marginTop:8}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"lavadora",grupo})}>🧺 Iniciar lavado</button>
             )}
-            {lavCiclo.length===0&&esZap&&(
-              <div style={{marginTop:8,background:"#fff3e0",borderRadius:8,padding:"8px 10px",fontSize:12,color:"#e65100",fontWeight:600}}>👟 Ve a la pestaña Zapatos → toca la Lavadora de zapatos para lavarla (se lava en lote junto con las demás).</div>
-            )}
 
             {lavActivas.map(c=>(
               <div key={c.id} style={{marginTop:8,paddingTop:8,borderTop:lavActivas.indexOf(c)>0?"1px dashed #e0e8f0":"none"}}>
@@ -2417,7 +2444,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
               <button style={{...S.btnS,marginTop:8,width:"100%",background:"#e3f2fd",color:"#1565c0"}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"lavadora",grupo,ciclo:cicloLav})}>➕ Agregar otra lavadora (carga grande)</button>
             )}
 
-            {lavTerminadoCiclo&&!cCen&&secCiclo.length===0&&(
+            {lavTerminadoCiclo&&!cCen&&secCiclo.length===0&&!esZap&&(
               <div style={{display:"flex",gap:8,marginTop:8}}>
                 <button style={{...S.btnP,flex:1,background:"linear-gradient(135deg,#00838f,#26c6da)"}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"secadora",grupo})}>🔥 Iniciar secado</button>
                 <button style={{...S.btnP,flex:1,background:"linear-gradient(135deg,#5c6bc0,#7986cb)"}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"lavadora",centrifugado:true,grupo})}>🌀 Centrifugar</button>
@@ -2431,7 +2458,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
                 <button style={{...S.btnP,background:"linear-gradient(135deg,#5c6bc0,#7986cb)"}} onClick={()=>setPinFor({folio:v.folio,accion:"retirar_centrifugado",label:"¿Quién retira del centrifugado?",extra:{carga:cCen}})}>📤 Retirar de centrifugado</button>
               </>
             )}
-            {cCen?.finReal&&secCiclo.length===0&&(
+            {cCen?.finReal&&secCiclo.length===0&&!esZap&&(
               <button style={{...S.btnP,marginTop:8,background:"linear-gradient(135deg,#00838f,#26c6da)"}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"secadora",grupo})}>🔥 Iniciar secado</button>
             )}
 
@@ -2447,8 +2474,8 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
               <button style={{...S.btnS,marginTop:8,width:"100%",background:"#e0f7fa",color:"#00838f"}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"secadora",grupo,ciclo:cicloSec})}>➕ Agregar otra secadora (carga grande)</button>
             )}
 
-            {secTerminadoCiclo&&!evDobInicio&&(
-              <button style={{...S.btnP,marginTop:8,background:"linear-gradient(135deg,#7b1fa2,#9c27b0)"}} onClick={()=>setPinFor({folio:v.folio,accion:"doblado_inicio",label:esZap?"¿Quién inicia el empaquetado?":"¿Quién inicia el doblado?",extra:{grupo}})}>{esZap?"📦 Iniciar empaquetado":"🪄 Iniciar doblado"}</button>
+            {secTerminadoCiclo&&!evDobInicio&&!esZap&&(
+              <button style={{...S.btnP,marginTop:8,background:"linear-gradient(135deg,#7b1fa2,#9c27b0)"}} onClick={()=>setPinFor({folio:v.folio,accion:"doblado_inicio",label:"¿Quién inicia el doblado?",extra:{grupo}})}>🪄 Iniciar doblado</button>
             )}
             {evDobInicio&&!evDobFin&&(
               <>
