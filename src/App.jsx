@@ -1898,6 +1898,15 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
     const fin=evsG.filter(ev=>ev.etapa==="doblado_fin").sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp))[0];
     return{...f,inicio,fin};
   }).filter(f=>f.inicio&&(!f.fin||new Date(f.fin.timestamp)<new Date(f.inicio.timestamp)));
+  // ✅ Ya terminaron de empaquetarse — falta confirmar "Listo para retirar" (esto es lo que dispara el aviso al cliente)
+  const listoParaConfirmarZap=flujosZapatos.filter(f=>{
+    if(["listo","entregado"].includes(f.v.estado||"recibido"))return false;
+    const finEmpaquetadoDeEsteGrupo=eventosDe(f.folio).some(ev=>ev.etapa==="doblado_fin"&&gruposEquivalentes(f.grupo).includes(ev.grupo||null));
+    if(!finEmpaquetadoDeEsteGrupo)return false;
+    // Si la orden está dividida (mixta con ropa), hay que esperar que TODOS sus grupos también hayan terminado
+    if(f.v.prodGrupos)return f.v.prodGrupos.every(g=>eventosDe(f.folio).some(ev=>ev.etapa==="doblado_fin"&&gruposEquivalentes(g).includes(ev.grupo||null)));
+    return true;
+  });
   const paresSeleccionados=Object.values(selSecadoZap).reduce((a,p)=>a+(parseInt(p)||0),0);
   const paresSeleccionadosCentrifugado=Object.values(selCentrifugadoZap).reduce((a,p)=>a+(parseInt(p)||0),0);
   // 📊 Totales de pares en cada etapa, para tener claro cuántos van por lavar, en lavado, esperando/en centrifugado, y esperando/en secado
@@ -2734,6 +2743,19 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
             <div style={{fontFamily:"'Playfair Display',serif",fontSize:17,fontWeight:700,color:"#1a3c5e"}}>👟📦 Empaquetado de zapatos</div>
             <button onClick={()=>setPanelEmpaquetadoZap(false)} style={{background:"#f0f4f8",border:"none",borderRadius:8,padding:"6px 10px",cursor:"pointer",fontSize:13}}>✕</button>
           </div>
+
+          {listoParaConfirmarZap.length>0&&(
+            <div style={{background:"#e8f5e9",border:"1.5px solid #2e7d32",borderRadius:10,padding:10,marginBottom:14}}>
+              <div style={{fontSize:12,fontWeight:800,color:"#2e7d32",marginBottom:6}}>🔔 Empaquetadas — falta confirmar Listo para retirar ({listoParaConfirmarZap.length})</div>
+              {listoParaConfirmarZap.map(f=>(
+                <div key={f.folio} style={{...S.vcard,padding:"8px 10px",marginBottom:6,borderLeft:"4px solid #2e7d32"}}>
+                  <div style={{fontSize:13,fontWeight:700,color:"#1b5e20"}}>{f.cliente} · {f.folio}</div>
+                  <div style={{fontSize:11,color:"#888"}}>{paresDe(f.folio)} pares</div>
+                  <button style={{...S.btnP,width:"100%",marginTop:6,background:"linear-gradient(135deg,#2e7d32,#66bb6a)"}} onClick={()=>setPinFor({folio:f.folio,accion:"confirmar_listo",label:"¿Quién confirma que ya está Listo para retirar?"})}>🔔 Confirmar Listo para retirar</button>
+                </div>
+              ))}
+            </div>
+          )}
 
           <div style={{fontSize:12,fontWeight:800,color:"#7b1fa2",marginBottom:6}}>📦 Empaquetando ahora ({empaquetandoZap.length})</div>
           {empaquetandoZap.length===0&&<div style={{fontSize:12,color:"#aaa",marginBottom:10}}>Nadie empaquetando en este momento.</div>}
