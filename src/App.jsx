@@ -383,6 +383,25 @@ const esCumpleHoy=nac=>{
   const hoy=new Date();
   return parseInt(p[1])===hoy.getMonth()+1&&parseInt(p[2])===hoy.getDate();
 };
+// 🎂 Devuelve la fecha exacta (YYYY-MM-DD) del cumpleaños más reciente si HOY cae dentro de los 7 días posteriores a esa fecha
+// (incluyendo el mismo día 0). Esa fecha sirve como "clave de ciclo": mientras no cambie, es la misma ventana de descuento,
+// así se puede controlar que el descuento se use una sola vez por cumpleaños, sin importar cuántos días falten para volver a usarlo.
+const cicloCumpleVigente=nac=>{
+  if(!nac)return null;
+  const p=String(nac).split("-");if(p.length<3)return null;
+  const hoy=new Date();hoy.setHours(0,0,0,0);
+  let ultimo=new Date(hoy.getFullYear(),parseInt(p[1])-1,parseInt(p[2]));
+  if(ultimo>hoy)ultimo=new Date(hoy.getFullYear()-1,parseInt(p[1])-1,parseInt(p[2]));
+  const dias=Math.round((hoy-ultimo)/86400000);
+  if(dias<0||dias>7)return null;
+  return ultimo.getFullYear()+"-"+String(ultimo.getMonth()+1).padStart(2,"0")+"-"+String(ultimo.getDate()).padStart(2,"0");
+};
+// 🎂 ¿Puede este cliente usar el descuento de cumpleaños ahora mismo? Sí, si está dentro de los 7 días Y no lo ha usado ya en este ciclo.
+const puedeUsarDescCumple=c=>{
+  const ciclo=cicloCumpleVigente(c?.nacimiento);
+  if(!ciclo)return false;
+  return c.descCumpleUsadoCiclo!==ciclo;
+};
 // Días que faltan para el cumpleaños (0 = hoy). null si no tiene fecha.
 const diasParaCumple=nac=>{
   if(!nac)return null;
@@ -516,7 +535,8 @@ const expCSVProduccion=(desde,hasta,{cargas,eventosProduccion,ventas,empleadas},
   eventosProduccion.filter(ev=>ev.etapa==="doblado_inicio"&&enRango(ev.timestamp)).forEach(ini=>{
     const fin=eventosProduccion.find(ev=>ev.etapa==="doblado_fin"&&ev.ventaFolio===ini.ventaFolio&&(ev.grupo||null)===(ini.grupo||null)&&new Date(ev.timestamp)>=new Date(ini.timestamp));
     const dur=fin?Math.round((new Date(fin.timestamp)-new Date(ini.timestamp))/60000):"";
-    filasRaw.push([ini.timestamp,ini.ventaFolio,clienteDe(ini.ventaFolio),"Doblado","-","-",dur,nombreDe(ini.empleadaId),fin?nombreDe(fin.empleadaId):"",ini.grupo?`Grupo: ${ini.grupo}`:"",ini.ventaFolio]);
+    const etiquetaEtapa=ini.grupo==="zapatos"?"Empaquetado":"Doblado";
+    filasRaw.push([ini.timestamp,ini.ventaFolio,clienteDe(ini.ventaFolio),etiquetaEtapa,"-","-",dur,nombreDe(ini.empleadaId),fin?nombreDe(fin.empleadaId):"",ini.grupo?`Grupo: ${ini.grupo}`:"",ini.ventaFolio]);
   });
 
   filasRaw.sort((a,b)=>new Date(a[0])-new Date(b[0]));
@@ -535,7 +555,7 @@ const expCSVProduccionPorOrden=(desde,hasta,{cargas,eventosProduccion,ventas,emp
   const enRango=iso=>{if(!iso)return false;const d=fechaLocal(iso);return d>=desde&&d<=hasta;};
   const foliosEnRango=[...new Set(ventas.filter(v=>enRango(v.fecha)).map(v=>v.folio))];
   if(foliosEnRango.length===0)return 0;
-  const enc=["Folio","Cliente","Fecha/hora ingreso","Revisión (hora)","Lavado inicio","Lavado fin","Centrifugado inicio","Centrifugado fin","Secado inicio","Secado fin","Doblado inicio","Doblado fin","Entregado (hora)","Duración total (hh:mm desde ingreso hasta entregado)"];
+  const enc=["Folio","Cliente","Fecha/hora ingreso","Revisión (hora)","Lavado inicio","Lavado fin","Centrifugado inicio","Centrifugado fin","Secado inicio","Secado fin","Doblado/Empaquetado inicio","Doblado/Empaquetado fin","Entregado (hora)","Duración total (hh:mm desde ingreso hasta entregado)"];
   const filas=foliosEnRango.map(folio=>{
     const v=ventas.find(vv=>vv.folio===folio);
     const cargasDe=tipo=>cargas.filter(c=>(c.ventaFolio===folio||(c.ventaFolios||[]).includes(folio))&&c.tipo===tipo).sort((a,b)=>new Date(a.inicio)-new Date(b.inicio));
@@ -4065,7 +4085,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
     if(tienePrendaMancha===null){setErr("Falta indicar si hay alguna prenda que pueda manchar o destiñir el resto de la carga (Sí/No)");return;}
     if(tienePrendaMancha&&!obsPrendaMancha.trim()){setErr("Describe cuál es la prenda que puede manchar antes de continuar");return;}
     const bruto=calcT();
-    const cumpleOk=(mC==="buscar"&&clientes.find(c=>c.id===cId&&esCumpleHoy(c.nacimiento)))||(mC==="nuevo"&&esCumpleHoy(nC.nacimiento));
+    const cumpleOk=(mC==="buscar"&&clientes.find(c=>c.id===cId&&puedeUsarDescCumple(c)))||(mC==="nuevo"&&!!cicloCumpleVigente(nC.nacimiento));
     const descC=cumpleOk&&descCumple?+(bruto*DESC_CUMPLE).toFixed(2):0;
     const total=+(bruto-descC).toFixed(2);
     if(tPago==="abono"){const m=parseFloat(abono);if(!m||m<=0||m>=total){setErr("El abono debe ser mayor a 0 y menor al total");return;}}
@@ -4078,6 +4098,18 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
     }
     let cid=cId,cNom=selC?.nombre,cTel=selC?.tel,cDir=selC?.direccion||"";
     if(mC==="nuevo"){const nc={...nC,id:Date.now()};setClientes(prev=>[...prev,nc]);if(upsertCliente)upsertCliente({...nc,_updatedAt:new Date().toISOString()});cid=nc.id;cNom=nc.nombre;cTel=nc.tel;cDir=nc.direccion||"";}
+    // 🎂 Si se aplicó el descuento de cumpleaños, se marca en el cliente para que no lo pueda volver a usar en este mismo ciclo (7 días)
+    if(descC>0){
+      const cicloUsado=cicloCumpleVigente(mC==="nuevo"?nC.nacimiento:selC?.nacimiento);
+      if(cicloUsado){
+        setClientes(prev=>{
+          const next=prev.map(c=>c.id===cid?{...c,descCumpleUsadoCiclo:cicloUsado}:c);
+          const updated=next.find(c=>c.id===cid);
+          if(updated&&upsertCliente)upsertCliente({...updated,_updatedAt:new Date().toISOString()});
+          return next;
+        });
+      }
+    }
     let abs=[];
     if(tPago==="completo")abs=[{monto:total,metodo,fecha:new Date().toISOString(),cobradoPorId:sesion?.id,cobradoPorNombre:sesion?.nombre}];
     else if(tPago==="abono")abs=[{monto:parseFloat(abono),metodo,fecha:new Date().toISOString(),cobradoPorId:sesion?.id,cobradoPorNombre:sesion?.nombre}];
@@ -4143,7 +4175,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
     setWaVenta(null);setTicket(v2);
     setPromoOfrecida(false); // 🎁 la siguiente venta volverá a recordar las promos al guardar
   };
-  const clienteCumple=(mC==="buscar"&&selC&&esCumpleHoy(selC.nacimiento))||(mC==="nuevo"&&esCumpleHoy(nC.nacimiento));
+  const clienteCumple=(mC==="buscar"&&selC&&puedeUsarDescCumple(selC))||(mC==="nuevo"&&!!cicloCumpleVigente(nC.nacimiento));
   const cuponClienteVig=(mC==="buscar"&&selC)?(cupones||[]).find(c=>String(c.clienteId)===String(selC.id)&&cuponVigente(c)&&(!cupApl||c.id!==cupApl.id)):null;
   const promosHoy=promosDeHoy(promos,servicios);
   const nombreCumple=mC==="buscar"?selC?.nombre:nC.nombre||"el cliente";
@@ -4186,8 +4218,8 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
             <div style={{display:"flex",alignItems:"center",gap:10}}>
               <div style={{fontSize:28}}>🎂</div>
               <div style={{flex:1}}>
-                <div style={{fontWeight:800,color:"#b45309",fontSize:14}}>¡Hoy es el cumpleaños de {nombreCumple}!</div>
-                <div style={{fontSize:12,color:"#92600a"}}>Felicítale y aplícale su 10% de descuento 🎉</div>
+                <div style={{fontWeight:800,color:"#b45309",fontSize:14}}>🎂 {nombreCumple} tiene su descuento de cumpleaños disponible</div>
+                <div style={{fontSize:12,color:"#92600a"}}>Válido hasta 7 días después de su cumpleaños, una sola vez — aplícale su 10% de descuento 🎉</div>
               </div>
               {descCumple
                 ?<div style={{...S.badge,background:"#e8f5e9",color:"#2e7d32",fontSize:12}}>✓ 10% aplicado</div>
@@ -4308,7 +4340,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
         <div style={{background:"#E6FFFA",borderRadius:14,padding:"14px 16px",boxShadow:"0 4px 14px rgba(0,0,0,.08)",border:"1.5px solid #00E5B8"}}>
           <div style={{fontSize:13,fontWeight:800,color:"#00695C",textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>🔔 Recordatorios para el cliente</div>
           {clienteCumple&&!descCumple&&(
-            <div style={{background:"#fff",borderRadius:8,padding:"9px 11px",fontSize:13,marginBottom:7,color:"#00695C",fontWeight:600}}>🎂 <strong>{nombreCumple}</strong> cumple hoy — ¡ofrécele el 10% de descuento!</div>
+            <div style={{background:"#fff",borderRadius:8,padding:"9px 11px",fontSize:13,marginBottom:7,color:"#00695C",fontWeight:600}}>🎂 <strong>{nombreCumple}</strong> está dentro de sus 7 días de cumpleaños (y no lo ha usado todavía) — ¡ofrécele el 10% de descuento!</div>
           )}
           {cuponClienteVig&&(
             <div style={{background:"#fff",borderRadius:8,padding:"9px 11px",fontSize:13,marginBottom:7,color:"#00695C",fontWeight:600}}>🎟️ Tiene el cupón <strong>{cuponClienteVig.id}</strong> vigente (vence {fmtD(cuponClienteVig.caduca)}) — recuérdaselo</div>
