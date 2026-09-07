@@ -41,8 +41,8 @@ const PRODUCTOS_DEFAULT = [];
 // 📒 KARDEX — ficha de movimientos de cada producto/insumo: fecha/hora, tipo, cantidad, folio de referencia y saldo resultante
 const KARDEX_PRODUCTOS_DEFAULT = [];
 const KARDEX_INSUMOS_DEFAULT = [];
-const registrarKardex=({itemId,itemNombre,tipo,cantidad,folio,motivo,saldoResultante,registradoPor},{setKardex,upsertKardex}) => {
-  const entry={id:"kx_"+Date.now()+"_"+Math.random().toString(36).slice(2,7),itemId,itemNombre:itemNombre||"",tipo,cantidad,folio:folio||null,motivo:motivo||null,saldoResultante,registradoPor:registradoPor||null,fecha:new Date().toISOString()};
+const registrarKardex=({itemId,itemNombre,tipo,cantidad,folio,motivo,saldoResultante,registradoPor,precioUnitario,proveedor},{setKardex,upsertKardex}) => {
+  const entry={id:"kx_"+Date.now()+"_"+Math.random().toString(36).slice(2,7),itemId,itemNombre:itemNombre||"",tipo,cantidad,folio:folio||null,motivo:motivo||null,saldoResultante,registradoPor:registradoPor||null,precioUnitario:precioUnitario!=null?precioUnitario:null,proveedor:proveedor||null,fecha:new Date().toISOString()};
   if(setKardex)setKardex(prev=>[entry,...prev]);
   if(upsertKardex)upsertKardex(entry);
   return entry;
@@ -278,7 +278,7 @@ const PLANTILLAS_TAREAS_DEFAULT=[
   {id:"rec08",titulo:"Sacar la basura",descripcion:null,area:"adelante",bloque:"cierre",diasSemana:["lun","mie","vie"],horaLimite:"18:00",orden:8,activa:true,requiereFoto:false,rolRequerido:"recepcionista"},
 ];
 // 🎯 INCENTIVOS: comisión por impulsación de promo + bonos por meta grupal (editable desde el panel admin)
-const INCENTIVOS_DEFAULT = [{id:"config",comisionImpulso:0.40,bonoMetaPct:1,bonoExcedentePct:10}];
+const INCENTIVOS_DEFAULT = [{id:"config",comisionImpulso:0.40,bonoMetaPct:1,bonoExcedentePct:10,comisionPerfume:0.50}];
 // Calcula la meta $ del mes (mismo criterio que el Dashboard BI: promedio ponderado de últimos 3 meses +10%)
 function calcMetaMes(ventas,mesSel){
   const vOk=ventas.filter(v=>!v.anulada);
@@ -340,6 +340,26 @@ const calcGanancia = (items) => items.reduce((acc, it) => {
 
 // ===== WhatsApp obligatorio =====
 // Normaliza teléfonos de Ecuador al formato internacional para wa.me (593...)
+// 🚦 Clasifica a un cliente según su historial de compras: "nuevo" (1 sola compra), "habitual" (volvió en ≤21 días),
+// "poco" (más de 21 días sin venir), o null si nunca ha comprado. Se usa tanto en el dashboard de admin como en
+// las pantallas de las colaboradoras, para que cualquiera vea de un vistazo qué tipo de cliente es.
+const VENTANA_HABITUAL_CLIENTE=21;
+const clasificarCliente=(clienteId,ventas)=>{
+  const vs=(ventas||[]).filter(v=>!v.anulada&&String(v.clienteId)===String(clienteId)).sort((a,b)=>new Date(a.fecha)-new Date(b.fecha));
+  if(vs.length===0)return null;
+  const ultima=vs[vs.length-1].fecha;
+  const diasDesdeUltima=Math.floor((new Date()-new Date(ultima))/86400000);
+  if(vs.length===1)return diasDesdeUltima<=VENTANA_HABITUAL_CLIENTE?"nuevo":"poco";
+  return diasDesdeUltima<=VENTANA_HABITUAL_CLIENTE?"habitual":"poco";
+};
+const SEMAFORO_CLIENTE_INFO={nuevo:{icon:"🆕",label:"Nuevo",color:"#7b1fa2"},habitual:{icon:"🟢",label:"Habitual",color:"#2e7d32"},poco:{icon:"🟡",label:"Poco frecuente",color:"#e65100"}};
+// 🚦 Insignia pequeña para mostrar junto al nombre del cliente en cualquier pantalla
+const SemaforoCliente=({clienteId,ventas})=>{
+  const tipo=clasificarCliente(clienteId,ventas);
+  if(!tipo)return null;
+  const info=SEMAFORO_CLIENTE_INFO[tipo];
+  return<span title={info.label} style={{fontSize:11}}>{info.icon}</span>;
+};
 const telWa = t => {
   if(!t) return null;
   let d = String(t).replace(/\D/g,"");
@@ -1841,6 +1861,7 @@ function MachinePicker({maquinas,tipoMaquina,tiempoSugerido,repetir,grupo,centri
 function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProduccion,setEventosProduccion,upsertEvento,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga}){
   const [pickerFor,setPickerFor]=useState(null); // {folio, tipoMaquina}
   const [clasifFor,setClasifFor]=useState(null); // {folio} — orden esperando revisión de prendas
+  const [clasifExtraFor,setClasifExtraFor]=useState(null); // {folio,siguientePicker} — revisión de bolsillos para una carga ADICIONAL (2da/3ra lavadora)
   const [selLavadoZap,setSelLavadoZap]=useState({}); // {folio:true} seleccionados para lote de lavado
   const [selCentrifugadoZap,setSelCentrifugadoZap]=useState({}); // {folio:true} seleccionados para lote de centrifugado
   const [selSecadoZap,setSelSecadoZap]=useState({}); // {folio:"pares"} seleccionados para lote de secado (máx 20 pares)
@@ -1854,6 +1875,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
   const [panelSecadoraZap,setPanelSecadoraZap]=useState(false); // panel al tocar la máquina 1SZ: esperando secar/secando
   const [panelEmpaquetadoZap,setPanelEmpaquetadoZap]=useState(false); // panel al tocar el ícono de empaquetado: quién está empaquetando ahora
   const [tabProd,setTabProd]=useState("maquinas"); // "maquinas" | "ropa" | "zapatos" — separa la pantalla de producción en secciones
+  const [buscarClienteProd,setBuscarClienteProd]=useState(""); // 🔍 buscador rápido por nombre en Ropa/Zapatos
   const [detalleEstadoZap,setDetalleEstadoZap]=useState(null); // qué categoría del resumen de zapatos está expandida (ej. "enLavado")
 
   const activos=ventas.filter(v=>!v.anulada&&["recibido","proceso"].includes(v.estado||"recibido")).sort((a,b)=>new Date(a.fecha)-new Date(b.fecha));
@@ -1863,7 +1885,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
   // 🔧 "zapatos" y "sin grupo" cuentan como la misma orden — evita cargas huérfanas si una orden de puros zapatos empezó antes de dividirse en grupos
   const gruposEquivalentes=g=>g==="zapatos"?[null,"zapatos"]:[g||null];
   const cargaDe=(folio,tipo,grupo)=>cargas.filter(c=>(c.ventaFolio===folio||(c.ventaFolios||[]).includes(folio))&&c.tipo===tipo&&gruposEquivalentes(grupo).includes(c.grupo||null)).sort((a,b)=>new Date(b.inicio)-new Date(a.inicio))[0];
-  const esZapatoLbl=lbl=>/ZAPATO|PARES?\b/i.test(lbl||"");
+  const esZapatoLbl=lbl=>/ZAPATO|PARES?\b|TENIS|CALZADO|BOTAS?\b|SANDALIA|ZAPATILLA|MOCAS[IÍ]N|SNEAKER|TAC[OÓ]N/i.test(lbl||"");
   // 🗂️ Para las pestañas Ropa/Zapatos: a qué sección(es) pertenece cada orden
   const perteneceZapatos=v=>{
     if(v.prodGrupos)return v.prodGrupos.includes("zapatos");
@@ -2094,6 +2116,18 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
     const extraTxt=(datos.serviciosAdicionales||[]).length>0?` · Servicios adicionales: ${datos.serviciosAdicionales.map(s=>`${s.descripcion} $${s.costo.toFixed(2)}`).join(", ")}`:"";
     registrar(folio,"clasificacion",empleadaId,(datos.requiereRestregado?`Requiere restregado extra ($${datos.restregadoCosto?.toFixed(2)})`:datos.manchasDetectadas?"Tiene manchas":"")+extraTxt||null);
   };
+  // 🔍 Revisión de bolsillos para una carga ADICIONAL (2da/3ra lavadora de la misma orden) — queda registrada aparte,
+  // sin pisar la revisión principal, porque cada carga física se revisa por separado.
+  const guardarClasificacionExtra=(folio,datos,empleadaId)=>{
+    const revision={...datos,empleadaId:empleadaId||null,timestamp:new Date().toISOString()};
+    setVentas(prev=>{
+      const next=prev.map(v=>v.folio===folio?{...v,revisionesExtra:[...(v.revisionesExtra||[]),revision]}:v);
+      const updated=next.find(v=>v.folio===folio);
+      if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+    registrar(folio,"clasificacion",empleadaId,"Revisión de carga adicional"+(datos.manchasDetectadas?" · Tiene manchas":""));
+  };
   const setMaquinaEstado=(maquinaId,cambios)=>{
     setMaquinas(prev=>{
       const next=prev.map(m=>m.id===maquinaId?{...m,...cambios}:m);
@@ -2168,6 +2202,12 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
   },[cargas]);
 
   const onClasifConfirm=datos=>{
+    if(clasifExtraFor){
+      const{folio,siguientePicker}=clasifExtraFor;
+      setClasifExtraFor(null);
+      setPinFor({folio,accion:"clasificacion_extra",label:"¿Quién hizo la revisión de esta carga?",extra:{datos,siguientePicker}});
+      return;
+    }
     const folio=clasifFor.folio;
     setClasifFor(null);
     setPinFor({folio,accion:"clasificacion",label:"¿Quién hizo la revisión?",extra:{datos}});
@@ -2238,6 +2278,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
     if(!pinFor)return;
     const{folio,accion,extra}=pinFor;
     if(accion==="clasificacion")guardarClasificacion(folio,extra.datos,emp?.id);
+    else if(accion==="clasificacion_extra"){guardarClasificacionExtra(folio,extra.datos,emp?.id);setPickerFor(extra.siguientePicker);}
     else if(accion==="iniciar_lote")iniciarCargaLote(extra.lote.folios,extra.lote.tipo,extra.maquinaId,extra.minutos,emp?.id,extra.lote.pares);
     else if(accion==="agregar_lote_lavado")agregarALoteLavadoActivo(extra.carga,extra.folios,emp?.id);
     else if(accion==="iniciar_empaquetado_lote")extra.folios.forEach(folio=>registrar(folio,"doblado_inicio",emp?.id,null,"zapatos"));
@@ -2285,6 +2326,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
     {tabProd==="zapatos"&&(()=>{
       const hoyZ=fechaHoyLocal();
       const entreganHoyZap=flujosZapatos.filter(f=>fechaLocal(f.v.entrega)===hoyZ&&(f.v.estado||"recibido")!=="entregado");
+      const coincideBusquedaProd=f=>!buscarClienteProd.trim()||(f.cliente||"").toLowerCase().includes(buscarClienteProd.trim().toLowerCase());
       return(
       <>
         {entreganHoyZap.length>0&&(
@@ -2299,6 +2341,9 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
           </div>
         )}
 
+        <div style={{marginBottom:12}}>
+          <input style={S.inp} placeholder="🔍 Buscar cliente por nombre..." value={buscarClienteProd} onChange={e=>setBuscarClienteProd(e.target.value)}/>
+        </div>
         <div style={{fontSize:12,color:"#888",marginBottom:8}}>Toca la lavadora o la secadora de zapatos para ver el detalle completo de cada máquina.</div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(90px,1fr))",gap:8,marginBottom:16}}>
           {maquinas.filter(m=>m.id==="1LZ"||m.id==="1SZ").map(m=><TarjetaMaquina key={m.id} m={m} cargas={cargas} ventas={ventas} onClick={m.id==="1LZ"?()=>setPanelLavadoraZap(true):()=>setPanelSecadoraZap(true)}/>)}
@@ -2314,7 +2359,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
           <div style={{background:"#e8eaf6",border:"1.5px solid #5c6bc0",borderRadius:12,padding:12,marginBottom:14}}>
             <div style={{fontSize:13,fontWeight:800,color:"#3949ab",marginBottom:2}}>⬜ Pendientes por lavar ({totalesZapatos.porLavar} pares)</div>
             {cargaLavadoActiva1LZ&&<div style={{fontSize:11,color:"#1565c0",background:"#e3f2fd",borderRadius:8,padding:"6px 8px",margin:"6px 0"}}>💡 La 1LZ ya está lavando — puedes seguir marcando más y sumarlos al mismo lote.</div>}
-            {colaLavadoZap.map(f=>(
+            {colaLavadoZap.filter(coincideBusquedaProd).map(f=>(
               <label key={f.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px",cursor:"pointer"}}>
                 <input type="checkbox" checked={!!selLavadoZap[f.folio]} onChange={e=>setSelLavadoZap({...selLavadoZap,[f.folio]:e.target.checked})}/>
                 <span style={{fontSize:13,color:"#1a237e",flex:1}}>{f.cliente} · {f.folio}</span>
@@ -2335,7 +2380,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
         {colaCentrifugadoZap.length>0&&(
           <div style={{background:"#ede7f6",border:"1.5px solid #7986cb",borderRadius:12,padding:12,marginBottom:14}}>
             <div style={{fontSize:13,fontWeight:800,color:"#5c6bc0",marginBottom:6}}>✅ Lavados — esperando centrifugado ({totalesZapatos.esperandoCentrifugado} pares)</div>
-            {colaCentrifugadoZap.map(f=>(
+            {colaCentrifugadoZap.filter(coincideBusquedaProd).map(f=>(
               <div key={f.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px"}}>
                 <input type="checkbox" checked={selCentrifugadoZap[f.folio]!==undefined} onChange={e=>{const c={...selCentrifugadoZap};if(e.target.checked)c[f.folio]=String(paresDe(f.folio)||1);else delete c[f.folio];setSelCentrifugadoZap(c);}}/>
                 <span style={{fontSize:13,color:"#3730a3",flex:1}}>{f.cliente} · {f.folio}</span>
@@ -2353,7 +2398,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
         {colaSecadoZap.length>0&&(
           <div style={{background:"#e0f7fa",border:"1.5px solid #00acc1",borderRadius:12,padding:12,marginBottom:14}}>
             <div style={{fontSize:13,fontWeight:800,color:"#00838f",marginBottom:6}}>✅ Centrifugados — esperando secar, máx 20 pares ({totalesZapatos.esperandoSecado} pares)</div>
-            {colaSecadoZap.map(f=>(
+            {colaSecadoZap.filter(coincideBusquedaProd).map(f=>(
               <div key={f.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px"}}>
                 <input type="checkbox" checked={selSecadoZap[f.folio]!==undefined} onChange={e=>{const c={...selSecadoZap};if(e.target.checked)c[f.folio]=String(paresDe(f.folio)||1);else delete c[f.folio];setSelSecadoZap(c);}}/>
                 <span style={{fontSize:13,color:"#006064",flex:1}}>{f.cliente} · {f.folio}</span>
@@ -2371,7 +2416,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
         {colaEmpaquetarZap.length>0&&(
           <div style={{background:"#f3e5f5",border:"1.5px solid #ab47bc",borderRadius:12,padding:12,marginBottom:14}}>
             <div style={{fontSize:13,fontWeight:800,color:"#7b1fa2",marginBottom:6}}>📦 Ya se secaron — esperando empaquetar ({colaEmpaquetarZap.reduce((a,f)=>a+paresDe(f.folio),0)} pares)</div>
-            {colaEmpaquetarZap.map(f=>(
+            {colaEmpaquetarZap.filter(coincideBusquedaProd).map(f=>(
               <label key={f.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px",cursor:"pointer"}}>
                 <input type="checkbox" checked={!!selEmpaquetarZap[f.folio]} onChange={e=>setSelEmpaquetarZap({...selEmpaquetarZap,[f.folio]:e.target.checked})}/>
                 <span style={{fontSize:13,color:"#4a148c",flex:1}}>{f.cliente} · {f.folio}</span>
@@ -2419,12 +2464,15 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
     })()}
 
     {tabProd==="ropa"&&(<>
+    <div style={{marginBottom:10}}>
+      <input style={S.inp} placeholder="🔍 Buscar cliente por nombre..." value={buscarClienteProd} onChange={e=>setBuscarClienteProd(e.target.value)}/>
+    </div>
     <div style={{fontSize:12,fontWeight:700,color:"#888",marginBottom:6}}>📋 ÓRDENES EN PRODUCCIÓN</div>
-    {activos.filter(v=>tabProd==="zapatos"?perteneceZapatos(v):perteneceRopa(v)).length===0&&<div style={{textAlign:"center",padding:"40px 20px",color:"#aaa"}}><div style={{fontSize:48,marginBottom:8}}>🏭</div><div>No hay órdenes en producción ahora mismo</div></div>}
-    {activos.filter(v=>tabProd==="zapatos"?perteneceZapatos(v):perteneceRopa(v)).map(v=>{
+    {activos.filter(v=>perteneceRopa(v)&&(v.clienteNombre||"").toLowerCase().includes(buscarClienteProd.trim().toLowerCase())).length===0&&<div style={{textAlign:"center",padding:"40px 20px",color:"#aaa"}}><div style={{fontSize:48,marginBottom:8}}>🏭</div><div>{buscarClienteProd.trim()?`Ningún cliente coincide con "${buscarClienteProd}"`:"No hay órdenes en producción ahora mismo"}</div></div>}
+    {activos.filter(v=>perteneceRopa(v)&&(v.clienteNombre||"").toLowerCase().includes(buscarClienteProd.trim().toLowerCase())).map(v=>{
       const maquinaDe=id=>maquinas.find(m=>m.id===id);
       const buscarEventoG=(folio,etapa,grupo)=>eventosDe(folio).filter(ev=>ev.etapa===etapa&&gruposEquivalentes(grupo).includes(ev.grupo||null)).sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp))[0];
-      const esZapato=lbl=>/ZAPATO|PARES?\b/i.test(lbl||"");
+      const esZapato=lbl=>/ZAPATO|PARES?\b|TENIS|CALZADO|BOTAS?\b|SANDALIA|ZAPATILLA|MOCAS[IÍ]N|SNEAKER|TAC[OÓ]N/i.test(lbl||"");
       const tieneZapato=(v.items||[]).some(it=>esZapato(it.label));
       const tieneOtro=(v.items||[]).some(it=>!esZapato(it.label));
       const puedeDividir=!v.prodGrupos&&tieneZapato&&tieneOtro;
@@ -2484,7 +2532,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
             ))}
 
             {lavCiclo.length>0&&!cCen&&secCiclo.length===0&&(
-              <button style={{...S.btnS,marginTop:8,width:"100%",background:"#e3f2fd",color:"#1565c0"}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"lavadora",grupo,ciclo:cicloLav})}>➕ Agregar otra lavadora (carga grande)</button>
+              <button style={{...S.btnS,marginTop:8,width:"100%",background:"#e3f2fd",color:"#1565c0"}} onClick={()=>setClasifExtraFor({folio:v.folio,siguientePicker:{folio:v.folio,tipoMaquina:"lavadora",grupo,ciclo:cicloLav}})}>➕ Agregar otra lavadora (carga grande) — revisar bolsillos</button>
             )}
 
             {lavTerminadoCiclo&&!cCen&&secCiclo.length===0&&!esZap&&(
@@ -2540,8 +2588,8 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
             {lavTerminadoCiclo&&secActivas.length===0&&(
               <button style={{...S.btnS,marginTop:8,width:"100%",background:"#fff3e0",color:"#e65100",fontSize:12}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"lavadora",repetir:true,grupo})}>🔁 Lavar de nuevo</button>
             )}
-            {secTerminadoCiclo&&!(evDobInicio&&!evDobFin)&&(
-              <button style={{...S.btnS,marginTop:8,width:"100%",background:"#fff3e0",color:"#e65100",fontSize:12}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"secadora",repetir:true,grupo})}>🔁 Secar de nuevo</button>
+            {secTerminadoCiclo&&(v.estado||"recibido")!=="listo"&&(v.estado||"recibido")!=="entregado"&&(
+              <button style={{...S.btnS,marginTop:8,width:"100%",background:"#fff3e0",color:"#e65100",fontSize:12}} onClick={()=>setPickerFor({folio:v.folio,tipoMaquina:"secadora",repetir:true,grupo})}>🔁 Secar de nuevo{evDobInicio?" (algo salió húmedo)":""}</button>
             )}
           </div>
         );
@@ -2572,6 +2620,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
             <>
               <div style={{fontSize:11,color:"#2e7d32",background:"#e8f5e9",borderRadius:8,padding:"6px 8px",marginTop:8,fontWeight:600}}>
                 ✅ Revisado por {nombreDe(v.clasificacion.empleadaId)}
+                {(v.revisionesExtra||[]).length>0&&<div style={{color:"#1565c0",fontWeight:600}}>🔍 +{v.revisionesExtra.length} revisión(es) de carga adicional{v.revisionesExtra.some(r=>r.manchasDetectadas||r.objetosEncontrados)?" (con hallazgos)":""}</div>}
                 {v.clasificacion.objetosEncontrados&&<div>🔑 Se encontró: {v.clasificacion.objetosEncontrados}</div>}
                 {v.clasificacion.manchasDetectadas&&<div>🟤 Tiene manchas</div>}
                 {v.clasificacion.requiereRestregado&&(()=>{
@@ -2634,6 +2683,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
     </>)}
 
     {clasifFor&&<ClasificacionModal onConfirmar={onClasifConfirm} onCancelar={()=>setClasifFor(null)}/>}
+    {clasifExtraFor&&<ClasificacionModal onConfirmar={onClasifConfirm} onCancelar={()=>setClasifExtraFor(null)}/>}
     {pickerFor&&<MachinePicker maquinas={maquinas} tipoMaquina={pickerFor.tipoMaquina} tiempoSugerido={pickerFor.lote?(pickerFor.lote.tipo==="lavado"?parseInt(minLoteLav)||45:pickerFor.lote.tipo==="centrifugado"?parseInt(minLoteCent)||15:parseInt(minLoteSec)||45):45} repetir={!!pickerFor.repetir} grupo={pickerFor.grupo} centrifugado={!!pickerFor.centrifugado} onConfirmar={onPickerConfirm} onCancelar={()=>setPickerFor(null)}/>}
     {pinFor&&<PinModal pins={pins} empleadas={empleadas} titulo={pinFor.label} onConfirm={onPinOk} onCancelar={()=>setPinFor(null)}/>}
 
@@ -2805,7 +2855,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
   </div>);
 }
 
-function MisIncentivos({ventas,empleadas,sesion,cfgInc}){
+function MisIncentivos({ventas,empleadas,sesion,cfgInc,ventasPerfumeReg,setVentasPerfumeReg,upsertVentaPerfume}){
   const mesAct=mesK(new Date());
   const {meta,ventaMes,vMes}=calcMetaMes(ventas,mesAct);
   const pct=meta>0?(ventaMes/meta)*100:0;
@@ -2827,6 +2877,16 @@ function MisIncentivos({ventas,empleadas,sesion,cfgInc}){
         return enom&&snom&&enom===snom;
       });
   const miId=miEmpleada?miEmpleada.id:null; // 🔒 sin match seguro, no atribuir impulsaciones a la persona equivocada
+  // 🧴 Mis ventas de perfume registradas manualmente este mes (solo cuentan las que YO registro con el botón, no automático)
+  const misPerfumesMes=(ventasPerfumeReg||[]).filter(r=>String(r.empleadaId)===String(miId)&&mesK(new Date(r.fecha))===mesAct);
+  const comisionPerfume=cfgInc.comisionPerfume||0;
+  const miGananciaPerfumes=misPerfumesMes.length*comisionPerfume;
+  const registrarVentaPerfume=()=>{
+    if(!miId){alert("No se pudo identificar tu perfil de empleada — avísale a la administradora.");return;}
+    const reg={id:"pf_"+Date.now(),empleadaId:miId,empleadaNombre:miEmpleada?.nombre||sesion?.nombre,fecha:new Date().toISOString()};
+    setVentasPerfumeReg(prev=>[reg,...prev]);
+    if(upsertVentaPerfume)upsertVentaPerfume(reg);
+  };
   // Mis impulsaciones del mes (ventas donde YO impulsé una promo)
   const misVentasConImp=vMes.filter(v=>v.empleadaId===miId&&(v.impulsos||[]).length>0);
   const misImpulsos=misVentasConImp.reduce((a,v)=>a+(v.impulsos||[]).length,0);
@@ -2875,14 +2935,29 @@ function MisIncentivos({ventas,empleadas,sesion,cfgInc}){
       </div>
       <div style={{fontSize:11,color:"#aaa",textAlign:"center"}}>${comisionImpulso.toFixed(2)} por cada promo que impulsas y se concreta en una venta 🎯</div>
     </Card>
+
+    <Card title="🧴 Mis ventas de aromatizador/perfume este mes">
+      <div style={{display:"flex",gap:10,marginBottom:10}}>
+        <div style={{flex:1,background:"#f8fbfd",borderRadius:10,padding:"10px",textAlign:"center"}}>
+          <div style={{fontWeight:800,fontSize:20,color:"#1a3c5e"}}>{misPerfumesMes.length}</div>
+          <div style={{fontSize:11,color:"#888"}}>Registradas</div>
+        </div>
+        <div style={{flex:1,background:"#f8fbfd",borderRadius:10,padding:"10px",textAlign:"center"}}>
+          <div style={{fontWeight:800,fontSize:20,color:"#2e7d32"}}>${miGananciaPerfumes.toFixed(2)}</div>
+          <div style={{fontSize:11,color:"#888"}}>Ganado por perfumes</div>
+        </div>
+      </div>
+      <button style={{...S.btnP,width:"100%",background:"linear-gradient(135deg,#7b1fa2,#ab47bc)"}} onClick={registrarVentaPerfume}>🧴 Registrar venta de perfume</button>
+      <div style={{fontSize:11,color:"#aaa",textAlign:"center",marginTop:8}}>Tócalo justo después de vender un aromatizador — ${comisionPerfume.toFixed(2)} por cada uno registrado aquí (no se cuenta solo, hay que tocarlo).</div>
+    </Card>
   </div>);
 }
 
-function IncentivosAdmin({cfgInc,setIncentivosArr,upsertIncentivo,ventas,empleadas}){
-  const [ed,setEd]=useState({comisionImpulso:cfgInc.comisionImpulso,bonoMetaPct:cfgInc.bonoMetaPct,bonoExcedentePct:cfgInc.bonoExcedentePct});
+function IncentivosAdmin({cfgInc,setIncentivosArr,upsertIncentivo,ventas,empleadas,ventasPerfumeReg}){
+  const [ed,setEd]=useState({comisionImpulso:cfgInc.comisionImpulso,bonoMetaPct:cfgInc.bonoMetaPct,bonoExcedentePct:cfgInc.bonoExcedentePct,comisionPerfume:cfgInc.comisionPerfume||0.50});
   const [guardado,setGuardado]=useState(false);
   const guardar=()=>{
-    const nuevo={id:"config",comisionImpulso:parseFloat(ed.comisionImpulso)||0,bonoMetaPct:parseFloat(ed.bonoMetaPct)||0,bonoExcedentePct:parseFloat(ed.bonoExcedentePct)||0};
+    const nuevo={id:"config",comisionImpulso:parseFloat(ed.comisionImpulso)||0,bonoMetaPct:parseFloat(ed.bonoMetaPct)||0,bonoExcedentePct:parseFloat(ed.bonoExcedentePct)||0,comisionPerfume:parseFloat(ed.comisionPerfume)||0};
     setIncentivosArr([nuevo]);
     if(upsertIncentivo)upsertIncentivo({...nuevo,_updatedAt:new Date().toISOString()});
     setGuardado(true);setTimeout(()=>setGuardado(false),2000);
@@ -2899,6 +2974,7 @@ function IncentivosAdmin({cfgInc,setIncentivosArr,upsertIncentivo,ventas,emplead
     <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ Esto define lo que ven en su pestaña "📈 Bonos" las colaboradoras con usuario. La meta $ es la misma del Dashboard BI (automática). El bono grupal se reparte solo entre quienes tengan marcado "🎯 Participa en el bono grupal" en la pestaña Equipo.</div>
     <Card title="⚙️ Configuración">
       <div><label style={S.lbl}>Comisión por impulsación concretada ($) — aplica a todas las que facturan</label><input type="number" step="0.01" style={S.inp} value={ed.comisionImpulso} onChange={e=>setEd({...ed,comisionImpulso:e.target.value})}/></div>
+      <div style={{marginTop:10}}><label style={S.lbl}>Comisión por venta de aromatizador/perfume ($) — se registra a mano en su pestaña de Bonos</label><input type="number" step="0.01" style={S.inp} value={ed.comisionPerfume} onChange={e=>setEd({...ed,comisionPerfume:e.target.value})}/></div>
       <div style={{marginTop:10}}><label style={S.lbl}>Bono grupal por llegar al 100% de la meta (% de la meta)</label><input type="number" step="0.1" style={S.inp} value={ed.bonoMetaPct} onChange={e=>setEd({...ed,bonoMetaPct:e.target.value})}/></div>
       <div style={{marginTop:10}}><label style={S.lbl}>Bono grupal por superar la meta (% del excedente)</label><input type="number" step="0.1" style={S.inp} value={ed.bonoExcedentePct} onChange={e=>setEd({...ed,bonoExcedentePct:e.target.value})}/></div>
       <button style={{...S.btnP,marginTop:14}} onClick={guardar}>{guardado?"✅ Guardado":"💾 Guardar configuración"}</button>
@@ -2908,6 +2984,21 @@ function IncentivosAdmin({cfgInc,setIncentivosArr,upsertIncentivo,ventas,emplead
       <div style={{fontSize:12,color:"#888",marginBottom:6}}>Reparten el bono grupal: {grupoBono.length?grupoBono.map(e=>e.nombre).join(", "):"nadie marcado todavía — ve a Equipo y marca a Karen y Nicol"}</div>
       <div style={{fontSize:13,marginBottom:6}}>Bono por meta (si se cumple, entre {nActivas}): <strong>${bonoMetaTotal.toFixed(2)}</strong> total → <strong>${(bonoMetaTotal/nActivas).toFixed(2)}</strong> c/u</div>
       <div style={{fontSize:13}}>Bono por excedente actual (${excedente.toFixed(2)} sobre la meta): <strong>${bonoExcedenteTotal.toFixed(2)}</strong> total → <strong>${(bonoExcedenteTotal/nActivas).toFixed(2)}</strong> c/u</div>
+    </Card>
+    <Card title="🧴 Ventas de perfume registradas este mes">
+      {(()=>{
+        const delMes=(ventasPerfumeReg||[]).filter(r=>mesK(new Date(r.fecha))===mesAct);
+        const porEmpleada={};
+        delMes.forEach(r=>{const n=r.empleadaNombre||"—";porEmpleada[n]=(porEmpleada[n]||0)+1;});
+        const filas=Object.entries(porEmpleada).sort((a,b)=>b[1]-a[1]);
+        if(filas.length===0)return<div style={S.empty}>Nadie ha registrado ventas de perfume este mes todavía.</div>;
+        return filas.map(([nombre,cant])=>(
+          <div key={nombre} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f0f4f8"}}>
+            <span style={{fontSize:13}}>{nombre}</span>
+            <strong style={{fontSize:13,color:"#7b1fa2"}}>{cant} · ${(cant*(cfgInc.comisionPerfume||0)).toFixed(2)}</strong>
+          </div>
+        ));
+      })()}
     </Card>
   </div>);
 }
@@ -3550,7 +3641,7 @@ function PinsAdmin({empleadas,pins,setPins,upsertPin}){
   </div>);
 }
 
-function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,onIrProduccion,onIrTareas,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta,upsertSalida,upsertCliente,upsertCaja,cupones,setCupones,upsertCupon,promos,cfgInc,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga,pins,eventosProduccion,setEventosProduccion,upsertEvento,productos,setProductos,upsertProducto,setKardexProductos,upsertKardexProducto,sorteos,setSorteos,upsertSorteo,setBoletosSorteo,upsertBoletoSorteo,boletosParaImprimir,setBoletosParaImprimir,depositos,setDepositos,upsertDeposito,setConteosInventario,upsertConteoInventario}){
+function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,onIrProduccion,onIrTareas,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta,upsertSalida,upsertCliente,upsertCaja,cupones,setCupones,upsertCupon,promos,cfgInc,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga,pins,eventosProduccion,setEventosProduccion,upsertEvento,productos,setProductos,upsertProducto,setKardexProductos,upsertKardexProducto,sorteos,setSorteos,upsertSorteo,setBoletosSorteo,upsertBoletoSorteo,boletosParaImprimir,setBoletosParaImprimir,depositos,setDepositos,upsertDeposito,setConteosInventario,upsertConteoInventario,ventasPerfumeReg,setVentasPerfumeReg,upsertVentaPerfume}){
   const [tab,setTab]=useState("hoy");const [busq,setBusq]=useState("");
   const [showNueva,setShowNueva]=useState(false);
   const [filtroTile,setFiltroTile]=useState(null); // 🔎 filtro rápido al tocar un contador (recibido/proceso/listo/entregado_pend)
@@ -3656,7 +3747,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
           {filtroTile&&<div style={{marginBottom:10}}><button onClick={()=>setFiltroTile(null)} style={{background:"none",border:"none",color:"#4db6e4",fontSize:12,fontWeight:700,cursor:"pointer",padding:0}}>✕ Quitar filtro · ver todas</button></div>}
         </>)}
         {tab==="bonos"
-          ?<MisIncentivos ventas={ventas} empleadas={empleadas} sesion={sesion} cfgInc={cfgInc||INCENTIVOS_DEFAULT[0]}/>
+          ?<MisIncentivos ventas={ventas} empleadas={empleadas} sesion={sesion} cfgInc={cfgInc||INCENTIVOS_DEFAULT[0]} ventasPerfumeReg={ventasPerfumeReg} setVentasPerfumeReg={setVentasPerfumeReg} upsertVentaPerfume={upsertVentaPerfume}/>
           :tab==="resumen"
             ?<ResumenDia ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja}/>
           :tab==="depositosEmp"
@@ -4203,8 +4294,8 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
         {mC==="buscar"?(
           <div>
             <input style={S.inp} placeholder="Nombre o telefono..." value={cQ} onChange={e=>{setCQ(e.target.value);setCId(null);}}/>
-            {cQ&&cFilt.length>0&&!cId&&<div style={S.drop}>{cFilt.map(c=><div key={c.id} style={S.dropI} onClick={()=>{setCId(c.id);setCQ(c.nombre);}}><strong>{c.nombre}</strong> <span style={{color:"#888",fontSize:12}}>{c.tel}</span></div>)}</div>}
-            {cId&&selC&&<div style={S.ctag}>✓ {selC.nombre}{selC.tel?` · ${selC.tel}`:""}<button style={{background:"none",border:"none",color:"#2e7d32",cursor:"pointer",fontWeight:700}} onClick={()=>{setCId(null);setCQ("");}}>✕</button></div>}
+            {cQ&&cFilt.length>0&&!cId&&<div style={S.drop}>{cFilt.map(c=><div key={c.id} style={S.dropI} onClick={()=>{setCId(c.id);setCQ(c.nombre);}}><strong>{c.nombre}</strong> <SemaforoCliente clienteId={c.id} ventas={ventas}/> <span style={{color:"#888",fontSize:12}}>{c.tel}</span></div>)}</div>}
+            {cId&&selC&&<div style={S.ctag}>✓ {selC.nombre} <SemaforoCliente clienteId={selC.id} ventas={ventas}/>{selC.tel?` · ${selC.tel}`:""}<button style={{background:"none",border:"none",color:"#2e7d32",cursor:"pointer",fontWeight:700}} onClick={()=>{setCId(null);setCQ("");}}>✕</button></div>}
           </div>
         ):(
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
@@ -5392,12 +5483,21 @@ function MaquinasAdmin({maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upse
 }
 
 const CATS=["Insumos/Suministros","Servicios","Arriendo","Sueldos","Mantenimiento","Publicidad","Equipos","Pago de deuda","Otros"];
-function Gastos({gastos,setGastos,sesion,upsertGasto,salidasCaja,activosFijos,setActivosFijos,upsertActivoFijo,inventario,setInventario,upsertInventario,setKardexInsumos,upsertKardexInsumo}){
+function Gastos({gastos,setGastos,sesion,upsertGasto,salidasCaja,activosFijos,setActivosFijos,upsertActivoFijo,inventario,setInventario,upsertInventario,kardexInsumos,setKardexInsumos,upsertKardexInsumo}){
   const [nv,setNv]=useState({descripcion:"",categoria:"Insumos/Suministros",proveedor:"",numeroFactura:"",monto:"",fecha:fechaHoyLocal(),metodoPago:"Efectivo",notas:""});
+  const [modoMonto,setModoMonto]=useState("subtotal"); // "subtotal" (calculamos el IVA) | "total" (ya viene con IVA incluido)
+  const [subtotalFactura,setSubtotalFactura]=useState(""); // subtotal que SÍ lleva IVA (15%)
+  const [subtotal0,setSubtotal0]=useState(""); // subtotal 0% — no lleva IVA, solo se suma al total tal cual
+  const IVA_PCT=0.15; // 🇪🇨 tasa de IVA vigente en Ecuador
+  const ivaCalculado=modoMonto==="subtotal"?parseFloat(((parseFloat(subtotalFactura)||0)*IVA_PCT).toFixed(2)):0;
+  const totalConIva=modoMonto==="subtotal"?parseFloat(((parseFloat(subtotalFactura)||0)+(parseFloat(subtotal0)||0)+ivaCalculado).toFixed(2)):(parseFloat(nv.monto)||0);
+  const [tipoFactura,setTipoFactura]=useState("gasto"); // "gasto" | "insumos" | "activo" — guía qué campos mostrar
   const [esActivoFijo,setEsActivoFijo]=useState(false);
-  const [itemsCompra,setItemsCompra]=useState([]); // [{codigo,nombre,insumoId,cantidad}] — detalle de insumos comprados en esta factura
+  const [catActivoFijo,setCatActivoFijo]=useState("General");
+  const [itemsCompra,setItemsCompra]=useState([]); // [{codigo,nombre,insumoId,cantidad,precioUnitario}] — detalle de insumos comprados en esta factura
   const [buscarCod,setBuscarCod]=useState("");
   const [cantCod,setCantCod]=useState("1");
+  const [precioCod,setPrecioCod]=useState(""); // precio unitario pagado por este insumo en ESTA factura (para análisis de costos)
   const [fMes,setFMes]=useState(mesK(new Date()));const [fCat,setFCat]=useState("Todas");const [err,setErr]=useState("");
   const [incluirSalidas,setIncluirSalidas]=useState(true); // 💸 combinar salidas de caja en este reporte
   // 🔎 Busca el insumo por código o por nombre (coincidencia parcial)
@@ -5405,24 +5505,28 @@ function Gastos({gastos,setGastos,sesion,upsertGasto,salidasCaja,activosFijos,se
   const agregarItemCompra=()=>{
     if(!buscarCod.trim()){alert("Escribe el código o nombre del insumo");return;}
     const cant=parseFloat(cantCod)||1;
+    const precio=parseFloat(precioCod)||0;
     if(insumoEncontrado){
-      setItemsCompra(prev=>[...prev,{codigo:insumoEncontrado.codigo,nombre:insumoEncontrado.nombre,insumoId:insumoEncontrado.id,cantidad:cant,esNuevo:false}]);
+      setItemsCompra(prev=>[...prev,{codigo:insumoEncontrado.codigo,nombre:insumoEncontrado.nombre,insumoId:insumoEncontrado.id,cantidad:cant,precioUnitario:precio,esNuevo:false}]);
     }else{
       // 🆕 No existe todavía — se creará como insumo nuevo al registrar el gasto, con un código automático
       const codigoNuevo=generarCodigoInsumo([...(inventario||[]),...itemsCompra.filter(it=>it.esNuevo).map(it=>({codigo:it.codigo}))]);
-      setItemsCompra(prev=>[...prev,{codigo:codigoNuevo,nombre:buscarCod.trim(),insumoId:null,cantidad:cant,esNuevo:true}]);
+      setItemsCompra(prev=>[...prev,{codigo:codigoNuevo,nombre:buscarCod.trim(),insumoId:null,cantidad:cant,precioUnitario:precio,esNuevo:true}]);
     }
-    setBuscarCod("");setCantCod("1");
+    setBuscarCod("");setCantCod("1");setPrecioCod("");
   };
   const quitarItemCompra=idx=>setItemsCompra(prev=>prev.filter((_,i)=>i!==idx));
   const add=()=>{
-    if(!nv.descripcion.trim()||!nv.monto){setErr("Completa descripcion y monto");return;}
-    const ng={...nv,id:Date.now(),monto:parseFloat(nv.monto),registradoPor:sesion.nombre};
+    if(!nv.descripcion.trim()){setErr("Completa la descripción");return;}
+    if(modoMonto==="subtotal"&&!subtotalFactura){setErr("Escribe el subtotal de la factura (sin IVA)");return;}
+    if(modoMonto==="total"&&!nv.monto){setErr("Escribe el monto total de la factura");return;}
+    const montoFinal=modoMonto==="subtotal"?totalConIva:parseFloat(nv.monto);
+    const ng={...nv,id:Date.now(),monto:montoFinal,subtotal:modoMonto==="subtotal"?parseFloat(subtotalFactura):null,subtotal0:modoMonto==="subtotal"?(parseFloat(subtotal0)||0):null,iva:modoMonto==="subtotal"?ivaCalculado:null,registradoPor:sesion.nombre};
     setGastos(prev=>[ng,...prev]);
     if(upsertGasto)upsertGasto({...ng,_updatedAt:new Date().toISOString()});
-    // 📦 Si se marcó como activo fijo, se registra también en Activos Fijos automáticamente
-    if(esActivoFijo&&setActivosFijos){
-      const af={id:"af_"+ng.id,nombre:ng.descripcion,categoria:"General",fechaAdquisicion:ng.fecha,valorCompra:ng.monto,proveedor:ng.proveedor||null,estado:"activo",notas:"Registrado automáticamente desde Gastos",gastoIdOrigen:ng.id};
+    // 📦 Si el tipo de factura es "Activo Fijo", se registra también en Activos Fijos automáticamente
+    if(tipoFactura==="activo"&&setActivosFijos){
+      const af={id:"af_"+ng.id,nombre:ng.descripcion,categoria:catActivoFijo,fechaAdquisicion:ng.fecha,valorCompra:ng.monto,proveedor:ng.proveedor||null,estado:"activo",notas:"Registrado automáticamente desde Gastos",gastoIdOrigen:ng.id};
       setActivosFijos(prev=>[af,...prev]);
       if(upsertActivoFijo)upsertActivoFijo({...af,_updatedAt:new Date().toISOString()});
     }
@@ -5435,19 +5539,23 @@ function Gastos({gastos,setGastos,sesion,upsertGasto,salidasCaja,activosFijos,se
             const ni={id:Date.now()+Math.floor(Math.random()*1000),nombre:linea.nombre,codigo:linea.codigo,stock:linea.cantidad,min:1,unidad:"pzas"};
             next=[...next,ni];
             if(upsertInventario)upsertInventario({...ni,_updatedAt:new Date().toISOString()});
-            registrarKardex({itemId:ni.id,itemNombre:ni.nombre,tipo:"entrada_factura",cantidad:linea.cantidad,folio:ng.numeroFactura||null,motivo:"Compra (insumo nuevo): "+ng.descripcion,saldoResultante:ni.stock,registradoPor:sesion?.nombre},{setKardex:setKardexInsumos,upsertKardex:upsertKardexInsumo});
+            registrarKardex({itemId:ni.id,itemNombre:ni.nombre,tipo:"entrada_factura",cantidad:linea.cantidad,folio:ng.numeroFactura||null,motivo:"Compra (insumo nuevo): "+ng.descripcion,saldoResultante:ni.stock,registradoPor:sesion?.nombre,precioUnitario:linea.precioUnitario||null,proveedor:ng.proveedor||null},{setKardex:setKardexInsumos,upsertKardex:upsertKardexInsumo});
           }else{
             next=next.map(i=>i.id===linea.insumoId?{...i,stock:(i.stock||0)+linea.cantidad}:i);
             const updated=next.find(i=>i.id===linea.insumoId);
             if(updated&&upsertInventario)upsertInventario({...updated,_updatedAt:new Date().toISOString()});
-            if(updated)registrarKardex({itemId:linea.insumoId,itemNombre:updated.nombre,tipo:"entrada_factura",cantidad:linea.cantidad,folio:ng.numeroFactura||null,motivo:"Compra: "+ng.descripcion,saldoResultante:updated.stock,registradoPor:sesion?.nombre},{setKardex:setKardexInsumos,upsertKardex:upsertKardexInsumo});
+            if(updated)registrarKardex({itemId:linea.insumoId,itemNombre:updated.nombre,tipo:"entrada_factura",cantidad:linea.cantidad,folio:ng.numeroFactura||null,motivo:"Compra: "+ng.descripcion,saldoResultante:updated.stock,registradoPor:sesion?.nombre,precioUnitario:linea.precioUnitario||null,proveedor:ng.proveedor||null},{setKardex:setKardexInsumos,upsertKardex:upsertKardexInsumo});
           }
         });
         return next;
       });
     }
     setNv({descripcion:"",categoria:"Insumos/Suministros",proveedor:"",numeroFactura:"",monto:"",fecha:fechaHoyLocal(),metodoPago:"Efectivo",notas:""});
+    setSubtotalFactura("");
+    setSubtotal0("");
     setEsActivoFijo(false);
+    setTipoFactura("gasto");
+    setCatActivoFijo("General");
     setItemsCompra([]);
     setErr("");
   };
@@ -5491,38 +5599,93 @@ function Gastos({gastos,setGastos,sesion,upsertGasto,salidasCaja,activosFijos,se
       {incluirSalidas&&salidasFil.length>0&&<div style={{fontSize:12,color:"#888",marginTop:6}}>Gastos: ${totGastos.toFixed(2)} + Salidas de caja: ${totSalidas.toFixed(2)} = <strong>${tot.toFixed(2)}</strong></div>}
       <button style={{...S.btnP,marginTop:10}} onClick={descargarGastosCSV}>📥 Descargar CSV ({fil.length+salidasFil.length} movimiento{(fil.length+salidasFil.length)!==1?"s":""})</button>
     </Card>
-    <Card title="➕ Registrar gasto">
+    <Card title="🧾 Registrar factura de compra">
       {err&&<div style={S.err}>{err}</div>}
+      <label style={S.lbl}>¿Qué tipo de factura es?</label>
+      <div style={{display:"flex",gap:6,marginBottom:12}}>
+        {[["gasto","📋 Gasto general"],["insumos","📦 Compra de insumos"],["activo","🏭 Activo fijo"]].map(([val,l])=>(
+          <button key={val} onClick={()=>setTipoFactura(val)} style={{flex:1,padding:"9px 4px",borderRadius:10,border:tipoFactura===val?"2px solid #1a3c5e":"1.5px solid #e0e8f0",background:tipoFactura===val?"#eaf3fb":"#fff",color:"#1a3c5e",fontWeight:700,fontSize:11,cursor:"pointer"}}>{l}</button>
+        ))}
+      </div>
+
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-        <div style={{gridColumn:"1/-1"}}><label style={S.lbl}>Descripcion *</label><input style={S.inp} placeholder="Ej: Detergente..." value={nv.descripcion} onChange={e=>setNv({...nv,descripcion:e.target.value})}/></div>
-        <div><label style={S.lbl}>Categoria</label><select style={S.inp} value={nv.categoria} onChange={e=>setNv({...nv,categoria:e.target.value})}>{CATS.map(c=><option key={c}>{c}</option>)}</select></div>
-        <div><label style={S.lbl}>Monto *</label><input type="number" style={S.inp} placeholder="$0.00" value={nv.monto} onChange={e=>setNv({...nv,monto:e.target.value})}/></div>
+        <div style={{gridColumn:"1/-1"}}><label style={S.lbl}>{tipoFactura==="activo"?"Nombre del activo (ej. Lavadora industrial 25lb) *":"Descripcion *"}</label><input style={S.inp} placeholder={tipoFactura==="activo"?"ej. Lavadora industrial 25lb":"Ej: Detergente..."} value={nv.descripcion} onChange={e=>setNv({...nv,descripcion:e.target.value})}/></div>
+        {tipoFactura==="activo"?(
+          <div><label style={S.lbl}>Categoría del activo</label><select style={S.inp} value={catActivoFijo} onChange={e=>setCatActivoFijo(e.target.value)}>{["Maquinaria","Muebles y enseres","Equipo de oficina","Vehículos","Herramientas","General"].map(c=><option key={c}>{c}</option>)}</select></div>
+        ):(
+          <div><label style={S.lbl}>Categoria</label><select style={S.inp} value={nv.categoria} onChange={e=>setNv({...nv,categoria:e.target.value})}>{CATS.map(c=><option key={c}>{c}</option>)}</select></div>
+        )}
         <div><label style={S.lbl}>Proveedor</label><input style={S.inp} value={nv.proveedor} onChange={e=>setNv({...nv,proveedor:e.target.value})}/></div>
         <div><label style={S.lbl}>N° Factura</label><input style={S.inp} value={nv.numeroFactura} onChange={e=>setNv({...nv,numeroFactura:e.target.value})}/></div>
         <div><label style={S.lbl}>Fecha</label><input type="date" style={S.inp} value={nv.fecha} onChange={e=>setNv({...nv,fecha:e.target.value})}/></div>
         <div><label style={S.lbl}>Metodo</label><select style={S.inp} value={nv.metodoPago} onChange={e=>setNv({...nv,metodoPago:e.target.value})}>{PAGOS.map(p=><option key={p}>{p}</option>)}</select></div>
       </div>
-      <div style={{marginTop:14,background:"#f8fbfd",borderRadius:10,padding:12,border:"1px solid #e8f0f7"}}>
-        <div style={{fontSize:13,fontWeight:700,color:"#1a3c5e",marginBottom:6}}>📦 Detallar insumos comprados (opcional)</div>
-        <div style={{fontSize:11,color:"#888",marginBottom:8}}>Si esta factura trae insumos del inventario, agrégalos por código para que se sumen solos al stock.</div>
-        <div style={{display:"flex",gap:6,marginBottom:6}}>
-          <input style={{...S.inp,flex:2}} placeholder="Código o nombre del insumo" value={buscarCod} onChange={e=>setBuscarCod(e.target.value)}/>
-          <input type="number" style={{...S.inp,width:70}} placeholder="Cant." value={cantCod} onChange={e=>setCantCod(e.target.value)}/>
-          <button style={{...S.btnS,background:"#2e7d32",color:"#fff"}} onClick={agregarItemCompra}>➕</button>
+
+      <div style={{marginTop:12,background:"#f8fbfd",borderRadius:10,padding:12,border:"1px solid #e8f0f7"}}>
+        <label style={S.lbl}>¿Cómo tienes el monto de la factura?</label>
+        <div style={{display:"flex",gap:6,marginBottom:10}}>
+          <button onClick={()=>setModoMonto("subtotal")} style={{flex:1,padding:"8px 4px",borderRadius:8,border:modoMonto==="subtotal"?"2px solid #1a3c5e":"1.5px solid #e0e8f0",background:modoMonto==="subtotal"?"#eaf3fb":"#fff",color:"#1a3c5e",fontWeight:700,fontSize:11,cursor:"pointer"}}>🧮 Tengo el subtotal (calcula el IVA)</button>
+          <button onClick={()=>setModoMonto("total")} style={{flex:1,padding:"8px 4px",borderRadius:8,border:modoMonto==="total"?"2px solid #1a3c5e":"1.5px solid #e0e8f0",background:modoMonto==="total"?"#eaf3fb":"#fff",color:"#1a3c5e",fontWeight:700,fontSize:11,cursor:"pointer"}}>💰 Ya tengo el total con IVA</button>
         </div>
-        {buscarCod.trim()&&(insumoEncontrado?<div style={{fontSize:11,color:"#2e7d32",marginBottom:6}}>✅ {insumoEncontrado.nombre}{insumoEncontrado.codigo?` (Cód: ${insumoEncontrado.codigo})`:""} · Stock actual: {insumoEncontrado.stock}</div>:<div style={{fontSize:11,color:"#1565c0",marginBottom:6}}>🆕 No existe todavía — al agregarlo se creará como insumo nuevo con código automático</div>)}
-        {itemsCompra.length>0&&itemsCompra.map((it,idx)=>(
-          <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 8px",background:it.esNuevo?"#e3f2fd":"#e8f5e9",borderRadius:6,marginBottom:4}}>
-            <span style={{fontSize:12,color:it.esNuevo?"#1565c0":"#2e7d32"}}>{it.esNuevo?"🆕 ":""}{it.nombre} ({it.codigo}) · +{it.cantidad}</span>
-            <button style={{...S.btnR,padding:"2px 8px"}} onClick={()=>quitarItemCompra(idx)}>✕</button>
-          </div>
-        ))}
+        {modoMonto==="subtotal"?(
+          <>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              <div>
+                <label style={S.lbl}>Subtotal 15% (con IVA) *</label>
+                <input type="number" style={S.inp} placeholder="ej. 90.49" value={subtotalFactura} onChange={e=>setSubtotalFactura(e.target.value)}/>
+              </div>
+              <div>
+                <label style={S.lbl}>Subtotal 0% (sin IVA)</label>
+                <input type="number" style={S.inp} placeholder="ej. 3.59" value={subtotal0} onChange={e=>setSubtotal0(e.target.value)}/>
+              </div>
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginTop:8,padding:"8px 10px",background:"#fff",borderRadius:8,border:"1px solid #e0e8f0"}}>
+              <span style={{color:"#888"}}>IVA (15%): <strong style={{color:"#1a3c5e"}}>${ivaCalculado.toFixed(2)}</strong></span>
+              <span style={{color:"#888"}}>Total: <strong style={{color:"#2e7d32",fontSize:15}}>${totalConIva.toFixed(2)}</strong></span>
+            </div>
+            <div style={{fontSize:10,color:"#aaa",marginTop:4}}>El IVA solo se calcula sobre el "Subtotal 15%". Si la factura trae productos exentos (0%, como golosinas o fundas), ponlos aparte en "Subtotal 0%" para que el total cuadre exacto.</div>
+          </>
+        ):(
+          <div><label style={S.lbl}>Monto total (con IVA incluido) *</label><input type="number" style={S.inp} placeholder="$0.00" value={nv.monto} onChange={e=>setNv({...nv,monto:e.target.value})}/></div>
+        )}
       </div>
-      <label style={{display:"flex",alignItems:"center",gap:8,marginTop:10,fontSize:13,cursor:"pointer"}}>
-        <input type="checkbox" checked={esActivoFijo} onChange={e=>setEsActivoFijo(e.target.checked)}/>
-        📦 Esto es un activo fijo (máquina, mueble, equipo) — regístralo también en Activos Fijos
-      </label>
-      <button style={{...S.btnP,marginTop:10}} onClick={add}>💾 Registrar gasto</button>
+
+      {tipoFactura==="insumos"&&(
+        <div style={{marginTop:14,background:"#f8fbfd",borderRadius:10,padding:12,border:"1px solid #e8f0f7"}}>
+          <div style={{fontSize:13,fontWeight:700,color:"#1a3c5e",marginBottom:6}}>📦 Detalla cada insumo por código</div>
+          <div style={{fontSize:11,color:"#888",marginBottom:8}}>Se suman solos al stock de Inventario, y con el precio unitario y proveedor quedan guardados para comparar costos en el tiempo.</div>
+          <div style={{display:"flex",gap:6,marginBottom:6}}>
+            <input style={{...S.inp,flex:2}} placeholder="Código o nombre del insumo" value={buscarCod} onChange={e=>setBuscarCod(e.target.value)}/>
+            <input type="number" style={{...S.inp,width:60}} placeholder="Cant." value={cantCod} onChange={e=>setCantCod(e.target.value)}/>
+            <input type="number" style={{...S.inp,width:75}} placeholder="P. unit." value={precioCod} onChange={e=>setPrecioCod(e.target.value)}/>
+            <button style={{...S.btnS,background:"#2e7d32",color:"#fff"}} onClick={agregarItemCompra}>➕</button>
+          </div>
+          {buscarCod.trim()&&(insumoEncontrado?(()=>{
+            const historial=(kardexInsumos||[]).filter(k=>k.itemId===insumoEncontrado.id&&k.tipo==="entrada_factura"&&k.precioUnitario!=null).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha));
+            const ultimo=historial[0];
+            return(<div style={{fontSize:11,color:"#2e7d32",marginBottom:6}}>
+              ✅ {insumoEncontrado.nombre}{insumoEncontrado.codigo?` (Cód: ${insumoEncontrado.codigo})`:""} · Stock actual: {insumoEncontrado.stock}
+              {ultimo&&<div style={{color:"#1565c0"}}>💡 Última compra: ${ultimo.precioUnitario.toFixed(2)} c/u {ultimo.proveedor?`en ${ultimo.proveedor}`:""} ({fmtD(ultimo.fecha)})
+                {precioCod&&parseFloat(precioCod)!==ultimo.precioUnitario&&(parseFloat(precioCod)>ultimo.precioUnitario?<span style={{color:"#c62828",fontWeight:700}}> · Subió ${(parseFloat(precioCod)-ultimo.precioUnitario).toFixed(2)}</span>:<span style={{color:"#2e7d32",fontWeight:700}}> · Bajó ${(ultimo.precioUnitario-parseFloat(precioCod)).toFixed(2)}</span>)}
+              </div>}
+            </div>);
+          })():<div style={{fontSize:11,color:"#1565c0",marginBottom:6}}>🆕 No existe todavía — al agregarlo se creará como insumo nuevo con código automático</div>)}
+          {itemsCompra.length>0&&itemsCompra.map((it,idx)=>(
+            <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 8px",background:it.esNuevo?"#e3f2fd":"#e8f5e9",borderRadius:6,marginBottom:4}}>
+              <span style={{fontSize:12,color:it.esNuevo?"#1565c0":"#2e7d32"}}>{it.esNuevo?"🆕 ":""}{it.nombre} ({it.codigo}) · +{it.cantidad}{it.precioUnitario>0?` · $${it.precioUnitario.toFixed(2)} c/u`:""}</span>
+              <button style={{...S.btnR,padding:"2px 8px"}} onClick={()=>quitarItemCompra(idx)}>✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tipoFactura==="activo"&&(
+        <div style={{marginTop:14,background:"#f3e8fd",borderRadius:10,padding:12,border:"1px solid #d1b3f0"}}>
+          <div style={{fontSize:12,color:"#7b1fa2",fontWeight:600}}>🏭 Esta compra se va a registrar automáticamente en 📦 Activos Fijos, con el nombre, categoría, valor y proveedor de arriba.</div>
+        </div>
+      )}
+
+      <button style={{...S.btnP,marginTop:14,width:"100%"}} onClick={add}>💾 Registrar factura</button>
     </Card>
     <Card title={`🧾 Facturas (${fil.length})`}>
       {fil.length===0?<div style={S.empty}>Sin gastos</div>:fil.map(g=>(
@@ -5884,14 +6047,14 @@ function KardexView({productos,kardexProductos,inventario,kardexInsumos}){
   const totalSalidas=filtrado.filter(k=>k.cantidad<0).reduce((a,k)=>a+Math.abs(k.cantidad),0);
 
   const exportar=()=>{
-    if(filtrado.length===0){alert("No hay movimientos con esos filtros.");return;}
-    const enc=["Fecha Ingreso","Artículo","Movimiento","Causa/Referencia","Entero (cantidad)","Saldo resultante","Registrado por"];
+    if(filtrado.length===0){alert("No hay movimientos para descargar con estos filtros.");return;}
+    const enc=["Fecha Ingreso","Artículo","Movimiento","Causa/Referencia","Entero (cantidad)","Precio unitario","Proveedor","Saldo resultante","Registrado por"];
     const filas=filtrado.map(k=>{
       const t=TIPO_KARDEX_LBL[k.tipo]||{label:k.tipo};
-      return[fmt(k.fecha),k.itemNombre||nombreDe(k.itemId),t.label,[k.folio,k.motivo].filter(Boolean).join(" · "),k.cantidad,k.saldoResultante,k.registradoPor||""];
+      return[fmt(k.fecha),k.itemNombre||nombreDe(k.itemId),t.label,[k.folio,k.motivo].filter(Boolean).join(" · "),k.cantidad,k.precioUnitario!=null?"$"+k.precioUnitario.toFixed(2):"",k.proveedor||"",k.saldoResultante,k.registradoPor||""];
     });
-    filas.push(["","","","","Total entradas:",totalEntradas,""]);
-    filas.push(["","","","","Total salidas:",-totalSalidas,""]);
+    filas.push(["","","","","Total entradas:",totalEntradas,"","",""]);
+    filas.push(["","","","","Total salidas:",-totalSalidas,"","",""]);
     const csv=[enc,...filas].map(f=>f.map(c=>'"'+String(c).replace(/"/g,'\\"')+'"').join(",")).join("\n");
     const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
     const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="kardex_"+tipo+"-"+desde+"_a_"+hasta+".csv";a.click();
@@ -5908,6 +6071,7 @@ function KardexView({productos,kardexProductos,inventario,kardexInsumos}){
       <div style={{marginBottom:8}}>
         <label style={S.lbl}>Búsqueda de artículo</label>
         <input style={S.inp} placeholder="Nombre del producto o insumo..." value={buscar} onChange={e=>setBuscar(e.target.value)}/>
+        <div style={{fontSize:10,color:"#888",marginTop:4}}>💡 Escribe el nombre de un insumo y amplía el rango de fechas para ver cómo ha subido o bajado su precio, y qué proveedor te lo vendió cada vez.</div>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
         <div><label style={S.lbl}>Fecha inicio</label><input type="date" style={S.inp} value={desde} onChange={e=>setDesde(e.target.value)}/></div>
@@ -5932,6 +6096,8 @@ function KardexView({productos,kardexProductos,inventario,kardexInsumos}){
               <th style={{padding:"6px 8px"}}>Movimiento</th>
               <th style={{padding:"6px 8px"}}>Causa</th>
               <th style={{padding:"6px 8px",textAlign:"right"}}>Entero</th>
+              <th style={{padding:"6px 8px",textAlign:"right"}}>P. unitario</th>
+              <th style={{padding:"6px 8px"}}>Proveedor</th>
               <th style={{padding:"6px 8px",textAlign:"right"}}>Saldo</th>
             </tr>
           </thead>
@@ -5945,6 +6111,8 @@ function KardexView({productos,kardexProductos,inventario,kardexInsumos}){
                   <td style={{padding:"6px 8px",color:t.color,fontWeight:600,whiteSpace:"nowrap"}}>{t.icon} {t.label}</td>
                   <td style={{padding:"6px 8px",color:"#888"}}>{[k.folio,k.motivo].filter(Boolean).join(" · ")||"—"}</td>
                   <td style={{padding:"6px 8px",textAlign:"right",fontWeight:800,color:k.cantidad>=0?"#2e7d32":"#c62828"}}>{k.cantidad>=0?"+":""}{k.cantidad}</td>
+                  <td style={{padding:"6px 8px",textAlign:"right",color:"#1a3c5e",fontWeight:600}}>{k.precioUnitario!=null?"$"+k.precioUnitario.toFixed(2):"—"}</td>
+                  <td style={{padding:"6px 8px",color:"#888"}}>{k.proveedor||"—"}</td>
                   <td style={{padding:"6px 8px",textAlign:"right",color:"#1a3c5e"}}>{k.saldoResultante}</td>
                 </tr>
               );
@@ -5953,6 +6121,170 @@ function KardexView({productos,kardexProductos,inventario,kardexInsumos}){
         </table>
       </div>
     </Card>
+  </div>);
+}
+
+// 📊 ANÁLISIS DE CLIENTES — segmenta por frecuencia de regreso y muestra cuántos clientes nuevos llegan por día/semana/mes
+function AnalisisClientes({clientes,ventas}){
+  const VENTANA_HABITUAL=21; // días — "hasta 3 semanas" para considerarse habitual
+  const [periodo,setPeriodo]=useState("semana"); // "dia" | "semana" | "mes" — granularidad del gráfico de nuevos clientes
+
+  // 📋 Para cada cliente: fecha de su primera y última compra (según el historial real de ventas, no la ficha)
+  const clientesConDatos=(clientes||[]).map(c=>{
+    const ventasCliente=(ventas||[]).filter(v=>!v.anulada&&String(v.clienteId)===String(c.id)).sort((a,b)=>new Date(a.fecha)-new Date(b.fecha));
+    const primera=ventasCliente[0]?.fecha||null;
+    const ultima=ventasCliente[ventasCliente.length-1]?.fecha||null;
+    const diasDesdeUltima=ultima?Math.floor((new Date()-new Date(ultima))/86400000):null;
+    return{...c,totalVentas:ventasCliente.length,primera,ultima,diasDesdeUltima};
+  }).filter(c=>c.primera); // solo clientes que sí tienen al menos 1 compra registrada
+
+  // 🟢 Habitual: ya volvió al menos una vez, y su última visita fue hace 21 días o menos
+  const habituales=clientesConDatos.filter(c=>c.totalVentas>=2&&c.diasDesdeUltima<=VENTANA_HABITUAL);
+  // 🆕 Nuevo: todavía solo tiene 1 compra, y fue reciente (dentro de la ventana) — aún no se sabe si va a repetir
+  const nuevosSinRepetir=clientesConDatos.filter(c=>c.totalVentas===1&&c.diasDesdeUltima<=VENTANA_HABITUAL);
+  // 🟡 Poco frecuente: pasaron más de 21 días desde su última compra — en riesgo de perderse
+  const pocoFrecuentes=clientesConDatos.filter(c=>c.diasDesdeUltima>VENTANA_HABITUAL);
+
+  // 📈 Nuevos clientes por período (agrupando por la fecha de su PRIMERA compra)
+  const hoy=new Date();hoy.setHours(0,0,0,0);
+  const claveBucket=fecha=>{
+    const d=new Date(fecha);
+    if(periodo==="dia")return fechaLocal(fecha);
+    if(periodo==="mes")return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
+    // semana: lunes de esa semana como clave
+    const dia=d.getDay()||7;const lunes=new Date(d);lunes.setDate(d.getDate()-dia+1);
+    return fechaLocal(lunes.toISOString());
+  };
+  const nBuckets=periodo==="dia"?14:periodo==="semana"?12:6;
+  const buckets=[];
+  for(let i=nBuckets-1;i>=0;i--){
+    const d=new Date(hoy);
+    if(periodo==="dia")d.setDate(d.getDate()-i);
+    else if(periodo==="semana")d.setDate(d.getDate()-i*7);
+    else d.setMonth(d.getMonth()-i);
+    buckets.push({clave:claveBucket(d.toISOString()),fechaRef:new Date(d)});
+  }
+  const conteoPorBucket=buckets.map(b=>({
+    ...b,
+    cantidad:clientesConDatos.filter(c=>claveBucket(c.primera)===b.clave).length,
+  }));
+  const maxConteo=Math.max(1,...conteoPorBucket.map(b=>b.cantidad));
+  const lblBucket=b=>{
+    if(periodo==="dia")return b.fechaRef.toLocaleDateString("es-EC",{day:"2-digit",month:"2-digit"});
+    if(periodo==="mes")return b.fechaRef.toLocaleDateString("es-EC",{month:"short",year:"2-digit"});
+    return b.fechaRef.toLocaleDateString("es-EC",{day:"2-digit",month:"2-digit"});
+  };
+  const [verSegmento,setVerSegmento]=useState(null); // "habituales" | "nuevos" | "poco" | null
+  const [fechaVerDesde,setFechaVerDesde]=useState(fechaHoyLocal());
+  const [fechaVerHasta,setFechaVerHasta]=useState(fechaHoyLocal());
+  // 📅 Para el rango elegido: qué clientes vinieron, y qué tipo eran EN ESE MOMENTO (según su historial hasta esa fecha)
+  const clientesEnRango=(()=>{
+    const ventasRango=(ventas||[]).filter(v=>!v.anulada&&fechaLocal(v.fecha)>=fechaVerDesde&&fechaLocal(v.fecha)<=fechaVerHasta);
+    const idsUnicos=[...new Set(ventasRango.map(v=>v.clienteId))];
+    return idsUnicos.map(cid=>{
+      const cliente=(clientes||[]).find(c=>String(c.id)===String(cid));
+      if(!cliente)return null;
+      const todasOrdenadas=(ventas||[]).filter(v=>!v.anulada&&String(v.clienteId)===String(cid)).sort((a,b)=>new Date(a.fecha)-new Date(b.fecha));
+      const idxPrimeraEnRango=todasOrdenadas.findIndex(v=>fechaLocal(v.fecha)>=fechaVerDesde&&fechaLocal(v.fecha)<=fechaVerHasta);
+      const anteriores=todasOrdenadas.slice(0,idxPrimeraEnRango);
+      let tipo;
+      if(anteriores.length===0)tipo="nuevo";
+      else{
+        const gap=Math.floor((new Date(todasOrdenadas[idxPrimeraEnRango].fecha)-new Date(anteriores[anteriores.length-1].fecha))/86400000);
+        tipo=gap<=VENTANA_HABITUAL?"habitual":"poco";
+      }
+      return{cliente,tipo,cantidadVentasEnRango:ventasRango.filter(v=>String(v.clienteId)===String(cid)).length};
+    }).filter(Boolean);
+  })();
+
+  return(<div style={S.panel}>
+    <h2 style={S.ptitle}>📊 Análisis de Clientes</h2>
+
+    <div style={{fontSize:13,fontWeight:700,color:"#1a3c5e",marginBottom:8}}>📈 Clientes nuevos por período</div>
+    <div style={{display:"flex",gap:6,marginBottom:10}}>
+      {[["dia","Por día"],["semana","Por semana"],["mes","Por mes"]].map(([val,l])=>(
+        <button key={val} onClick={()=>setPeriodo(val)} style={{flex:1,padding:"8px 4px",borderRadius:8,border:periodo===val?"2px solid #1a3c5e":"1.5px solid #e0e8f0",background:periodo===val?"#eaf3fb":"#fff",color:"#1a3c5e",fontWeight:700,fontSize:12,cursor:"pointer"}}>{l}</button>
+      ))}
+    </div>
+    <Card title={`Nuevos clientes — últimos ${nBuckets} ${periodo==="dia"?"días":periodo==="semana"?"semanas":"meses"}`}>
+      <div style={{display:"flex",alignItems:"flex-end",gap:4,height:140,padding:"0 4px"}}>
+        {conteoPorBucket.map((b,i)=>(
+          <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-end",height:"100%"}}>
+            <div style={{fontSize:10,fontWeight:800,color:"#1a3c5e",marginBottom:2}}>{b.cantidad>0?b.cantidad:""}</div>
+            <div style={{width:"100%",background:b.cantidad>0?"linear-gradient(180deg,#4db6e4,#1a3c5e)":"#f0f4f8",borderRadius:"4px 4px 0 0",height:`${Math.max(3,(b.cantidad/maxConteo)*100)}%`}}/>
+            <div style={{fontSize:8,color:"#888",marginTop:4,whiteSpace:"nowrap",transform:"rotate(0deg)"}}>{lblBucket(b)}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{fontSize:11,color:"#888",marginTop:10,textAlign:"center"}}>Total en el período: <strong style={{color:"#1a3c5e"}}>{conteoPorBucket.reduce((a,b)=>a+b.cantidad,0)}</strong> clientes nuevos</div>
+    </Card>
+
+    <div style={{fontSize:13,fontWeight:700,color:"#1a3c5e",margin:"16px 0 8px"}}>📅 Quiénes vinieron en una fecha específica</div>
+    <Card title="Elige el rango a revisar">
+      <div style={{display:"flex",gap:6,marginBottom:10}}>
+        <button style={{...S.btnS,flex:1}} onClick={()=>{setFechaVerDesde(fechaHoyLocal());setFechaVerHasta(fechaHoyLocal());}}>Hoy</button>
+        <button style={{...S.btnS,flex:1}} onClick={()=>{const d=new Date();const dia=d.getDay()||7;const lunes=new Date(d);lunes.setDate(d.getDate()-dia+1);setFechaVerDesde(fechaLocal(lunes.toISOString()));setFechaVerHasta(fechaHoyLocal());}}>Esta semana</button>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <div><label style={S.lbl}>Desde</label><input type="date" style={S.inp} value={fechaVerDesde} onChange={e=>setFechaVerDesde(e.target.value)}/></div>
+        <div><label style={S.lbl}>Hasta</label><input type="date" style={S.inp} value={fechaVerHasta} onChange={e=>setFechaVerHasta(e.target.value)}/></div>
+      </div>
+    </Card>
+    <Card title={`👥 Clientes que vinieron (${clientesEnRango.length})`}>
+      {clientesEnRango.length===0&&<div style={S.empty}>Nadie vino en ese rango de fechas.</div>}
+      {["nuevo","habitual","poco"].map(tipo=>{
+        const deEsteTipo=clientesEnRango.filter(c=>c.tipo===tipo);
+        if(deEsteTipo.length===0)return null;
+        const info=SEMAFORO_CLIENTE_INFO[tipo];
+        return(
+          <div key={tipo} style={{marginBottom:10}}>
+            <div style={{fontSize:12,fontWeight:800,color:info.color,marginBottom:4}}>{info.icon} {info.label} ({deEsteTipo.length})</div>
+            {deEsteTipo.map(c=>(
+              <div key={c.cliente.id} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f0f4f8"}}>
+                <span style={{fontSize:13,color:"#1a3c5e"}}>{c.cliente.nombre}</span>
+                <span style={{fontSize:11,color:"#888"}}>{c.cantidadVentasEnRango} compra{c.cantidadVentasEnRango!==1?"s":""} en el rango</span>
+              </div>
+            ))}
+          </div>
+        );
+      })}
+    </Card>
+
+    <div style={{fontSize:13,fontWeight:700,color:"#1a3c5e",margin:"16px 0 8px"}}>👥 Segmentación por frecuencia (ventana de {VENTANA_HABITUAL} días)</div>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:14}}>
+      {[
+        ["nuevos","🆕",nuevosSinRepetir.length,"Nuevos",'"#7b1fa2"'],
+        ["habituales","🟢",habituales.length,"Habituales",'"#2e7d32"'],
+        ["poco","🟡",pocoFrecuentes.length,"Poco frecuentes",'"#e65100"'],
+      ].map(([key,icon,val,lbl,color])=>(
+        <button key={key} onClick={()=>setVerSegmento(verSegmento===key?null:key)} style={{background:verSegmento===key?"#eaf3fb":"#fff",border:`1.5px solid ${key==="nuevos"?"#7b1fa2":key==="habituales"?"#2e7d32":"#e65100"}`,borderRadius:10,padding:"10px 4px",textAlign:"center",cursor:"pointer"}}>
+          <div style={{fontSize:18}}>{icon}</div>
+          <div style={{fontWeight:800,fontSize:18,color:key==="nuevos"?"#7b1fa2":key==="habituales"?"#2e7d32":"#e65100"}}>{val}</div>
+          <div style={{fontSize:9,color:"#5d4037"}}>{lbl}</div>
+        </button>
+      ))}
+    </div>
+
+    {verSegmento&&(
+      <Card title={
+        verSegmento==="nuevos"?`🆕 Nuevos sin repetir todavía (${nuevosSinRepetir.length})`:
+        verSegmento==="habituales"?`🟢 Habituales — vuelven dentro de ${VENTANA_HABITUAL} días (${habituales.length})`:
+        `🟡 Poco frecuentes — más de ${VENTANA_HABITUAL} días sin venir (${pocoFrecuentes.length})`
+      }>
+        {(verSegmento==="nuevos"?nuevosSinRepetir:verSegmento==="habituales"?habituales:pocoFrecuentes).length===0&&<div style={S.empty}>Nadie en este grupo por ahora.</div>}
+        {(verSegmento==="nuevos"?nuevosSinRepetir:verSegmento==="habituales"?habituales:pocoFrecuentes)
+          .sort((a,b)=>a.diasDesdeUltima-b.diasDesdeUltima)
+          .map(c=>(
+            <div key={c.id} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid #f0f4f8"}}>
+              <div>
+                <div style={{fontSize:13,fontWeight:600,color:"#1a3c5e"}}>{c.nombre}</div>
+                <div style={{fontSize:11,color:"#888"}}>{c.totalVentas} compra{c.totalVentas!==1?"s":""} · última hace {c.diasDesdeUltima} día{c.diasDesdeUltima!==1?"s":""}</div>
+              </div>
+              {c.tel&&<a href={`https://wa.me/${telWa(c.tel)}`} target="_blank" rel="noreferrer" style={{...S.btnS,alignSelf:"center",background:"#25D366",color:"#fff",fontSize:11}}>💬</a>}
+            </div>
+          ))}
+      </Card>
+    )}
   </div>);
 }
 
@@ -6910,7 +7242,7 @@ function Clientes({clientes,setClientes,upsertCliente,ventas,setVentas,upsertVen
     <h2 style={S.ptitle}>👥 Clientes</h2>
     <div style={S.kgrid}>
       <div style={{...S.kpi,borderLeft:"4px solid #1a3c5e"}}><div style={{fontSize:22}}>👥</div><div><div style={{fontWeight:800,fontSize:18,color:"#1a3c5e"}}>{activos.length}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Clientes activos</div></div></div>
-      <div style={{...S.kpi,borderLeft:"4px solid #4caf50"}}><div style={{fontSize:22}}>💚</div><div><div style={{fontWeight:800,fontSize:18,color:"#2e7d32"}}>${totalCartera.toFixed(2)}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Ventas históricas</div>{totalPend>0&&<div style={{fontSize:11,color:"#e65100"}}>⏳ ${totalPend.toFixed(2)} por cobrar</div>}</div></div>
+      {esAdmin&&<div style={{...S.kpi,borderLeft:"4px solid #4caf50"}}><div style={{fontSize:22}}>💚</div><div><div style={{fontWeight:800,fontSize:18,color:"#2e7d32"}}>${totalCartera.toFixed(2)}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Ventas históricas</div>{totalPend>0&&<div style={{fontSize:11,color:"#e65100"}}>⏳ ${totalPend.toFixed(2)} por cobrar</div>}</div></div>}
     </div>
     {(()=>{
       const conCumple=stats.map(c=>({...c,dc:diasParaCumple(c.nacimiento)})).filter(c=>c.dc!==null&&c.dc<=7).sort((a,b)=>a.dc-b.dc);
@@ -6943,7 +7275,7 @@ function Clientes({clientes,setClientes,upsertCliente,ventas,setVentas,upsertVen
     <Card title="🔍 Buscar cliente">
       <input style={S.inp} placeholder="Nombre, teléfono, cédula o email..." value={q} onChange={e=>setQ(e.target.value)}/>
       <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
-        {[{id:"recientes",l:"🕐 Recientes"},{id:"gastado",l:"💵 Más gastan"},{id:"compras",l:"🧾 Más compran"},{id:"nombre",l:"🔤 A-Z"}].map(o=>(
+        {[{id:"recientes",l:"🕐 Recientes"},...(esAdmin?[{id:"gastado",l:"💵 Más gastan"}]:[]),{id:"compras",l:"🧾 Más compran"},{id:"nombre",l:"🔤 A-Z"}].map(o=>(
           <button key={o.id} style={{...S.pill,fontSize:11,...(orden===o.id?S.pillA:{})}} onClick={()=>setOrden(o.id)}>{o.l}</button>
         ))}
       </div>
@@ -6972,7 +7304,7 @@ function Clientes({clientes,setClientes,upsertCliente,ventas,setVentas,upsertVen
             <>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
                 <div style={{minWidth:0}}>
-                  <div style={{fontWeight:700,fontSize:15}}>{c.nombre}</div>
+                  <div style={{fontWeight:700,fontSize:15}}>{c.nombre} <SemaforoCliente clienteId={c.id} ventas={ventas}/></div>
                   <div style={{fontSize:12,color:"#888"}}>
                     {c.tel?`📱 ${c.tel}`:"📱 sin teléfono"}{c.cedula?` · 🪪 ${c.cedula}`:""}
                   </div>
@@ -6980,7 +7312,7 @@ function Clientes({clientes,setClientes,upsertCliente,ventas,setVentas,upsertVen
                   {c.nacimiento&&<div style={{fontSize:11,color:esCumpleHoy(c.nacimiento)?"#b45309":"#888",fontWeight:esCumpleHoy(c.nacimiento)?700:400}}>🎂 {c.nacimiento.slice(8,10)}/{c.nacimiento.slice(5,7)}{esCumpleHoy(c.nacimiento)?" · ¡HOY cumple años! 🎉":""}</div>}
                   {c.direccion&&<div style={{fontSize:11,color:"#888"}}>📍 {c.direccion}</div>}
                   <div style={{fontSize:11,color:"#4db6e4",marginTop:3}}>
-                    {c.compras} compra{c.compras!==1?"s":""} · ${c.gastado.toFixed(2)}{c.ultima?` · última: ${fmtD(c.ultima)}`:""}
+                    {c.compras} compra{c.compras!==1?"s":""}{esAdmin?` · $${c.gastado.toFixed(2)}`:""}{c.ultima?` · última: ${fmtD(c.ultima)}`:""}
                   </div>
                   {c.pendiente>0&&<div style={{...S.badge,background:"#fff3e0",color:"#e65100",marginTop:4}}>⏳ Debe ${c.pendiente.toFixed(2)}</div>}
                 </div>
@@ -7007,9 +7339,9 @@ function Clientes({clientes,setClientes,upsertCliente,ventas,setVentas,upsertVen
                         </div>
                       </div>);
                     })}
-                  <div style={{display:"flex",justifyContent:"space-between",fontSize:13,fontWeight:700,color:"#1a3c5e",paddingTop:8}}>
+                  {esAdmin&&<div style={{display:"flex",justifyContent:"space-between",fontSize:13,fontWeight:700,color:"#1a3c5e",paddingTop:8}}>
                     <span>Total histórico</span><span>${c.gastado.toFixed(2)}</span>
-                  </div>
+                  </div>}
                 </div>
               )}
             </>
@@ -7380,6 +7712,8 @@ const { data: activosFijos, setData: setActivosFijos, upsert: upsertActivoFijo }
 // 📋 Conteos físicos de inventario (Nohelia, 2 veces por semana)
 const { data: conteosInventario, setData: setConteosInventario, upsert: upsertConteoInventario } = useCollection("conteosInventario", "ll_conteos_inventario", []);
 const { data: deudas, setData: setDeudas, upsert: upsertDeuda } = useCollection("deudas", "ll_deudas", []);
+// 🧴 Registro manual de ventas de perfume/aromatizador para incentivos (solo cuenta si se registra a mano)
+const { data: ventasPerfumeReg, setData: setVentasPerfumeReg, upsert: upsertVentaPerfume } = useCollection("ventasPerfumeReg", "ll_ventas_perfume_reg", []);
 // 🎟️ SORTEO POR BOLETOS
 const { data: sorteos, setData: setSorteos, upsert: upsertSorteo } = useCollection("sorteos", "ll_sorteos", SORTEOS_DEFAULT);
 const { data: boletosSorteo, setData: setBoletosSorteo, upsert: upsertBoletoSorteo } = useCollection("boletosSorteo", "ll_boletos_sorteo", BOLETOS_SORTEO_DEFAULT);
@@ -7560,11 +7894,11 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
     empleadas={empleadas}
     upsertCaja={upsertCaja}
   />;
-  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={serviciosActivos} sesion={sesion} addAbono={addAbono} onLogout={onLogout} onIrProduccion={()=>setVista("produccion")} onIrTareas={()=>setVista("tareas")} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} upsertVenta={upsertVenta} upsertSalida={upsertSalida} upsertCliente={upsertCliente} upsertCaja={upsertCaja} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos} cfgInc={cfgInc} maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga} pins={pins} eventosProduccion={eventosProduccion} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto} sorteos={sorteos} setSorteos={setSorteos} upsertSorteo={upsertSorteo} setBoletosSorteo={setBoletosSorteo} upsertBoletoSorteo={upsertBoletoSorteo} boletosParaImprimir={boletosParaImprimir} setBoletosParaImprimir={setBoletosParaImprimir} depositos={depositos} setDepositos={setDepositos} upsertDeposito={upsertDeposito} setConteosInventario={setConteosInventario} upsertConteoInventario={upsertConteoInventario}/>;
+  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={serviciosActivos} sesion={sesion} addAbono={addAbono} onLogout={onLogout} onIrProduccion={()=>setVista("produccion")} onIrTareas={()=>setVista("tareas")} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} upsertVenta={upsertVenta} upsertSalida={upsertSalida} upsertCliente={upsertCliente} upsertCaja={upsertCaja} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos} cfgInc={cfgInc} maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga} pins={pins} eventosProduccion={eventosProduccion} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto} sorteos={sorteos} setSorteos={setSorteos} upsertSorteo={upsertSorteo} setBoletosSorteo={setBoletosSorteo} upsertBoletoSorteo={upsertBoletoSorteo} boletosParaImprimir={boletosParaImprimir} setBoletosParaImprimir={setBoletosParaImprimir} depositos={depositos} setDepositos={setDepositos} upsertDeposito={upsertDeposito} setConteosInventario={setConteosInventario} upsertConteoInventario={upsertConteoInventario} ventasPerfumeReg={ventasPerfumeReg} setVentasPerfumeReg={setVentasPerfumeReg} upsertVentaPerfume={upsertVentaPerfume}/>;
   const tabs=[
     {id:"ventas",icon:"🧾",l:"Venta"},{id:"historial",icon:"📋",l:"Historial"},
     {id:"pendientes",icon:"⏳",l:"Pendientes",b:pCount},{id:"bi",icon:"🚀",l:"Dashboard"},
-    {id:"clientes",icon:"👥",l:"Clientes"},{id:"promosAdmin",icon:"🎁",l:"Promos"},{id:"cupones",icon:"🎟️",l:"Cupones"},{id:"resumen",icon:"📈",l:"Resumen día"},
+    {id:"clientes",icon:"👥",l:"Clientes"},{id:"clientesAnalisis",icon:"📊",l:"Análisis clientes"},{id:"promosAdmin",icon:"🎁",l:"Promos"},{id:"cupones",icon:"🎟️",l:"Cupones"},{id:"resumen",icon:"📈",l:"Resumen día"},
     {id:"reportes",icon:"📊",l:"Reportes"},{id:"depositos",icon:"🏦",l:"Depósitos"},
     {id:"conciliacion",icon:"🏛️",l:"Conciliación"},
     {id:"gastos",icon:"🛒",l:"Gastos"},{id:"inventario",icon:"📦",l:"Inventario"},{id:"productosAdmin",icon:"🛍️",l:"Productos"},{id:"kardexAdmin",icon:"📒",l:"Kardex"},{id:"conteosAdmin",icon:"📋",l:"Conteos"},{id:"activosFijosAdmin",icon:"📦",l:"Activos Fijos"},{id:"deudasAdmin",icon:"💳",l:"Deudas"},{id:"sorteoAdmin",icon:"🎟️",l:"Sorteo"},
@@ -7576,7 +7910,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
     {id:"ventas_caja",icon:"🧾",l:"Ventas",tabIds:["ventas","historial","pendientes","depositos","conciliacion","cupones","promosAdmin","reportes","resumen"]},
     {id:"personal",icon:"👥",l:"Personal",tabIds:["equipo","pinsAdmin","usuarios","tareasAdmin","notasAdmin","incentivosAdmin"]},
     {id:"inventario_cat",icon:"📦",l:"Inventario",tabIds:["inventario","productosAdmin","kardexAdmin","conteosAdmin","gastos","maquinasAdmin","activosFijosAdmin","deudasAdmin"]},
-    {id:"negocio",icon:"📊",l:"Negocio",tabIds:["bi","clientes","sorteoAdmin","produccionAdmin","config"]},
+    {id:"negocio",icon:"📊",l:"Negocio",tabIds:["bi","clientes","clientesAnalisis","sorteoAdmin","produccionAdmin","config"]},
   ];
   const categoriaDeTab=id=>CATEGORIAS.find(c=>c.tabIds.includes(id))?.id||CATEGORIAS[0].id;
   const [categoria,setCategoria]=useState(()=>categoriaDeTab(tab));
@@ -7620,13 +7954,14 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
       {tab==="pendientes"&&<Pendientes ventas={ventas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} setVentas={setVentas} upsertVenta={upsertVenta}/>}
       {tab==="bi"&&<DashboardBI ventas={ventas} empleadas={empleadas} gastos={gastos}/>}
       {tab==="clientes"&&<Clientes clientes={clientes} setClientes={setClientes} upsertCliente={upsertCliente} ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta}/>}
+      {tab==="clientesAnalisis"&&<AnalisisClientes clientes={clientes} ventas={ventas}/>}
       {tab==="promosAdmin"&&<PromosAdmin promos={promos} setPromos={setPromos} upsertPromo={upsertPromo} servicios={servicios}/>}
       {tab==="cupones"&&<Cupones cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} clientes={clientes} ventas={ventas} sesion={sesion} promos={promos}/>}
       {tab==="resumen"&&<ResumenDia ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja}/>}
       {tab==="reportes"&&<Reportes ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja}/>}
       {tab==="depositos"&&<Depositos depositos={depositos} setDepositos={setDepositos} ventas={ventas} salidasCaja={salidasCaja} upsertDeposito={upsertDeposito}/>}
       {tab==="conciliacion"&&<Conciliacion ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} depositos={depositos} setDepositos={setDepositos} upsertDeposito={upsertDeposito}/>}
-      {tab==="gastos"&&<Gastos gastos={gastos} setGastos={setGastos} sesion={sesion} upsertGasto={upsertGasto} salidasCaja={salidasCaja} activosFijos={activosFijos} setActivosFijos={setActivosFijos} upsertActivoFijo={upsertActivoFijo} inventario={inventario} setInventario={setInventario} upsertInventario={upsertInventario} setKardexInsumos={setKardexInsumos} upsertKardexInsumo={upsertKardexInsumo}/>}
+      {tab==="gastos"&&<Gastos gastos={gastos} setGastos={setGastos} sesion={sesion} upsertGasto={upsertGasto} salidasCaja={salidasCaja} activosFijos={activosFijos} setActivosFijos={setActivosFijos} upsertActivoFijo={upsertActivoFijo} inventario={inventario} setInventario={setInventario} upsertInventario={upsertInventario} kardexInsumos={kardexInsumos} setKardexInsumos={setKardexInsumos} upsertKardexInsumo={upsertKardexInsumo}/>}
       {tab==="inventario"&&<Inventario inventario={inventario} setInventario={setInventario} upsertInventario={upsertInventario} kardexInsumos={kardexInsumos} setKardexInsumos={setKardexInsumos} upsertKardexInsumo={upsertKardexInsumo} sesion={sesion}/>}
       {tab==="productosAdmin"&&<ProductosAdmin productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} kardexProductos={kardexProductos} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto} sesion={sesion}/>}
       {tab==="kardexAdmin"&&<KardexView productos={productos} kardexProductos={kardexProductos} inventario={inventario} kardexInsumos={kardexInsumos}/>}
@@ -7635,7 +7970,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
       {tab==="deudasAdmin"&&<DeudasAdmin deudas={deudas} setDeudas={setDeudas} upsertDeuda={upsertDeuda} setGastos={setGastos} upsertGasto={upsertGasto} sesion={sesion}/>}
       {tab==="sorteoAdmin"&&<SorteosAdmin sorteos={sorteos} setSorteos={setSorteos} upsertSorteo={upsertSorteo} boletosSorteo={boletosSorteo} productos={productos}/>}
       {tab==="equipo"&&<Equipo empleadas={empleadas} setEmpleadas={setEmpleadas} ventas={ventas} esAdmin={esAdmin} upsertEmpleada={upsertEmpleada}/>}
-      {tab==="incentivosAdmin"&&<IncentivosAdmin cfgInc={cfgInc} setIncentivosArr={setIncentivosArr} upsertIncentivo={upsertIncentivo} ventas={ventas} empleadas={empleadas}/>}
+      {tab==="incentivosAdmin"&&<IncentivosAdmin cfgInc={cfgInc} setIncentivosArr={setIncentivosArr} upsertIncentivo={upsertIncentivo} ventas={ventas} empleadas={empleadas} ventasPerfumeReg={ventasPerfumeReg}/>}
       {tab==="maquinasAdmin"&&<MaquinasAdmin maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga}/>}
       {tab==="pinsAdmin"&&<PinsAdmin empleadas={empleadas} pins={pins} setPins={setPins} upsertPin={upsertPin}/>}
       {tab==="produccionAdmin"&&(<div style={S.panel}><h2 style={S.ptitle}>🧺 Producción</h2>
