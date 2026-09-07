@@ -72,7 +72,11 @@ const generarBoletosParaVenta=(venta,{sorteos,setSorteos,upsertSorteo,setBoletos
   if(!sorteo)return[];
   if(venta.boletoSorteoGenerado)return[]; // 🔒 ya se generaron boletos para esta venta, no duplicar
   const motivos=[];
-  if(sorteo.umbralMonto!=null&&(venta.total||0)>=sorteo.umbralMonto)motivos.push("monto");
+  // 🎟️ Un boleto por CADA vez que se alcanza el umbral (ej. $47 con umbral $10 = 4 boletos, no 1)
+  if(sorteo.umbralMonto&&sorteo.umbralMonto>0){
+    const vecesAlcanzado=Math.floor((venta.total||0)/sorteo.umbralMonto);
+    for(let i=0;i<vecesAlcanzado;i++)motivos.push("monto");
+  }
   const tienePerfume=(venta.items||[]).some(it=>{
     if(!it.esProducto)return false;
     const p=(productos||[]).find(x=>x.id===it.productoId);
@@ -6145,6 +6149,58 @@ function AnalisisClientes({clientes,ventas}){
   // 🟡 Poco frecuente: pasaron más de 21 días desde su última compra — en riesgo de perderse
   const pocoFrecuentes=clientesConDatos.filter(c=>c.diasDesdeUltima>VENTANA_HABITUAL);
 
+  // 🎯 TASA DE RETENCIÓN — de los clientes cuya "ventana de prueba" de 21 días YA pasó (o sea, ya tuvieron tiempo de volver),
+  // ¿cuántos volvieron (retenidos) vs cuántos no volvieron nunca (perdidos)? Esto SÍ mide qué tan bien retienes clientes.
+  const clientesConVentanaCumplida=clientesConDatos.filter(c=>Math.floor((new Date()-new Date(c.primera))/86400000)>VENTANA_HABITUAL);
+  const retenidos=clientesConVentanaCumplida.filter(c=>c.totalVentas>=2);
+  const perdidos=clientesConVentanaCumplida.filter(c=>c.totalVentas===1);
+  const tasaRetencion=clientesConVentanaCumplida.length>0?(retenidos.length/clientesConVentanaCumplida.length)*100:null;
+
+  // 📊 COMPARATIVA MENSUAL — últimos 6 meses: ventas totales, clientes nuevos, clientes atendidos, ticket promedio
+  const mesesComparativa=[];
+  for(let i=5;i>=0;i--){
+    const d=new Date();d.setDate(1);d.setMonth(d.getMonth()-i);
+    const clave=mesK(d);
+    const ventasMes=(ventas||[]).filter(v=>!v.anulada&&mesK(new Date(v.fecha))===clave);
+    const clientesUnicos=new Set(ventasMes.map(v=>v.clienteId)).size;
+    const nuevosDelMes=clientesConDatos.filter(c=>mesK(new Date(c.primera))===clave).length;
+    const totalVentasMes=ventasMes.reduce((a,v)=>a+v.total,0);
+    mesesComparativa.push({
+      clave,
+      label:d.toLocaleDateString("es-EC",{month:"short",year:"2-digit"}),
+      totalVentas:totalVentasMes,
+      nClientesAtendidos:clientesUnicos,
+      nNuevos:nuevosDelMes,
+      ticketProm:clientesUnicos>0?totalVentasMes/ventasMes.length:0,
+      nVentas:ventasMes.length,
+    });
+  }
+  const mesActualComp=mesesComparativa[mesesComparativa.length-1];
+  const mesAnteriorComp=mesesComparativa[mesesComparativa.length-2];
+  const variacionVentas=mesAnteriorComp&&mesAnteriorComp.totalVentas>0?((mesActualComp.totalVentas-mesAnteriorComp.totalVentas)/mesAnteriorComp.totalVentas)*100:null;
+  const variacionNuevos=mesAnteriorComp&&mesAnteriorComp.nNuevos>0?((mesActualComp.nNuevos-mesAnteriorComp.nNuevos)/mesAnteriorComp.nNuevos)*100:null;
+
+  // 🤖 "Análisis inteligente" — texto interpretativo generado con reglas de negocio (sin costo de IA externa)
+  const insights=[];
+  if(tasaRetencion!==null){
+    if(tasaRetencion>=50)insights.push({tipo:"bien",texto:`Tu tasa de retención es del ${tasaRetencion.toFixed(0)}% — más de la mitad de tus clientes nuevos vuelven a comprar dentro de 21 días. Eso es saludable para un negocio de lavandería.`});
+    else if(tasaRetencion>=30)insights.push({tipo:"regular",texto:`Tu tasa de retención es del ${tasaRetencion.toFixed(0)}% — hay margen de mejora. Considera contactar a los clientes "poco frecuentes" por WhatsApp para invitarlos a volver.`});
+    else insights.push({tipo:"mal",texto:`Tu tasa de retención es del ${tasaRetencion.toFixed(0)}%, bastante baja — la mayoría de clientes nuevos no está regresando dentro de 3 semanas. Vale la pena revisar la calidad del servicio o crear una promo de "segunda visita".`});
+  }else{
+    insights.push({tipo:"info",texto:"Todavía no hay suficiente historial (clientes con más de 21 días desde su primera compra) para calcular una tasa de retención confiable."});
+  }
+  if(variacionVentas!==null){
+    if(variacionVentas>5)insights.push({tipo:"bien",texto:`Las ventas de ${mesActualComp.label} subieron ${variacionVentas.toFixed(0)}% comparado con ${mesAnteriorComp.label}. 📈`});
+    else if(variacionVentas<-5)insights.push({tipo:"mal",texto:`Las ventas de ${mesActualComp.label} bajaron ${Math.abs(variacionVentas).toFixed(0)}% comparado con ${mesAnteriorComp.label}. 📉`});
+    else insights.push({tipo:"regular",texto:`Las ventas de ${mesActualComp.label} están estables comparadas con ${mesAnteriorComp.label} (${variacionVentas>=0?"+":""}${variacionVentas.toFixed(0)}%).`});
+  }
+  if(variacionNuevos!==null&&Math.abs(variacionNuevos)>10){
+    insights.push({tipo:variacionNuevos>0?"bien":"regular",texto:`La llegada de clientes nuevos ${variacionNuevos>0?"aumentó":"bajó"} ${Math.abs(variacionNuevos).toFixed(0)}% este mes comparado con el anterior.`});
+  }
+  if(pocoFrecuentes.length>habituales.length&&habituales.length+pocoFrecuentes.length>3){
+    insights.push({tipo:"regular",texto:`Tienes ${pocoFrecuentes.length} clientes "poco frecuentes" contra ${habituales.length} habituales — son más los que se están alejando que los que vuelven seguido. Podría valer la pena una campaña de reactivación.`});
+  }
+
   // 📈 Nuevos clientes por período (agrupando por la fecha de su PRIMERA compra)
   const hoy=new Date();hoy.setHours(0,0,0,0);
   const claveBucket=fecha=>{
@@ -6199,6 +6255,50 @@ function AnalisisClientes({clientes,ventas}){
 
   return(<div style={S.panel}>
     <h2 style={S.ptitle}>📊 Análisis de Clientes</h2>
+
+    <Card title="🤖 Análisis inteligente">
+      {insights.map((ins,i)=>(
+        <div key={i} style={{display:"flex",gap:8,padding:"8px 0",borderBottom:i<insights.length-1?"1px solid #f0f4f8":"none"}}>
+          <span style={{fontSize:16}}>{ins.tipo==="bien"?"✅":ins.tipo==="mal"?"⚠️":ins.tipo==="regular"?"🟡":"ℹ️"}</span>
+          <span style={{fontSize:13,color:"#1a3c5e",lineHeight:1.4}}>{ins.texto}</span>
+        </div>
+      ))}
+    </Card>
+
+    {tasaRetencion!==null&&(
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
+        <div style={{...S.kpi,borderLeft:`4px solid ${tasaRetencion>=50?"#2e7d32":tasaRetencion>=30?"#f59e0b":"#c62828"}`}}><div style={{fontSize:20}}>🎯</div><div><div style={{fontWeight:800,fontSize:18,color:tasaRetencion>=50?"#2e7d32":tasaRetencion>=30?"#e65100":"#c62828"}}>{tasaRetencion.toFixed(0)}%</div><div style={{fontSize:11,fontWeight:600,color:"#1a3c5e"}}>Tasa de retención</div></div></div>
+        <div style={{...S.kpi,borderLeft:"4px solid #1a3c5e"}}><div style={{fontSize:20}}>👥</div><div><div style={{fontWeight:800,fontSize:18,color:"#1a3c5e"}}>{retenidos.length}/{clientesConVentanaCumplida.length}</div><div style={{fontSize:11,fontWeight:600,color:"#1a3c5e"}}>Volvieron a comprar</div></div></div>
+      </div>
+    )}
+
+    <Card title="📊 Comparativa de los últimos 6 meses">
+      <div style={{overflowX:"auto"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:480}}>
+          <thead>
+            <tr style={{background:"#f0f4f8",textAlign:"left"}}>
+              <th style={{padding:"6px 8px"}}>Mes</th>
+              <th style={{padding:"6px 8px",textAlign:"right"}}>Ventas $</th>
+              <th style={{padding:"6px 8px",textAlign:"right"}}># Ventas</th>
+              <th style={{padding:"6px 8px",textAlign:"right"}}>Clientes nuevos</th>
+              <th style={{padding:"6px 8px",textAlign:"right"}}>Ticket prom.</th>
+            </tr>
+          </thead>
+          <tbody>
+            {mesesComparativa.map((m,i)=>(
+              <tr key={m.clave} style={{borderBottom:"1px solid #f0f4f8",background:i===mesesComparativa.length-1?"#eaf3fb":"transparent"}}>
+                <td style={{padding:"6px 8px",fontWeight:i===mesesComparativa.length-1?800:400,color:"#1a3c5e"}}>{m.label}{i===mesesComparativa.length-1?" (actual)":""}</td>
+                <td style={{padding:"6px 8px",textAlign:"right",fontWeight:700,color:"#2e7d32"}}>${m.totalVentas.toFixed(2)}</td>
+                <td style={{padding:"6px 8px",textAlign:"right",color:"#888"}}>{m.nVentas}</td>
+                <td style={{padding:"6px 8px",textAlign:"right",color:"#7b1fa2",fontWeight:600}}>{m.nNuevos}</td>
+                <td style={{padding:"6px 8px",textAlign:"right",color:"#888"}}>${m.ticketProm.toFixed(2)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {variacionVentas!==null&&<div style={{fontSize:11,color:"#888",marginTop:10,textAlign:"center"}}>Variación vs mes anterior: <strong style={{color:variacionVentas>=0?"#2e7d32":"#c62828"}}>{variacionVentas>=0?"+":""}{variacionVentas.toFixed(1)}%</strong></div>}
+    </Card>
 
     <div style={{fontSize:13,fontWeight:700,color:"#1a3c5e",marginBottom:8}}>📈 Clientes nuevos por período</div>
     <div style={{display:"flex",gap:6,marginBottom:10}}>
