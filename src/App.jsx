@@ -323,12 +323,12 @@ const PLANTILLAS_TAREAS_DEFAULT=[
   {id:"rec08",titulo:"Sacar la basura",descripcion:null,area:"adelante",bloque:"cierre",diasSemana:["lun","mie","vie"],horaLimite:"18:00",orden:8,activa:true,requiereFoto:false,rolRequerido:"recepcionista"},
 ];
 // 🎯 INCENTIVOS: comisión por impulsación de promo + bonos por meta grupal (editable desde el panel admin)
-const INCENTIVOS_DEFAULT = [{id:"config",comisionImpulso:0.40,bonoMetaPct:1,bonoExcedentePct:10,comisionPerfume:0.50}];
+const INCENTIVOS_DEFAULT = [{id:"config",comisionImpulso:0.40,bonoMetaPct:1,bonoExcedentePct:10,comisionPerfume:0.40}];
 // 📋 EVALUACIÓN DE DESEMPEÑO — pesos (deben sumar 100), metas, y tiempos estándar por etapa (minutos)
 const EVAL_CONFIG_DEFAULT=[{
   id:"config",
-  pesos:{protocolo:15,ticket:5,quejas:10,tiempoOrdenes:20,registroTiempo:15,reprocesos:10,tareas:15,asistencia:10},
-  metas:{protocolo:90,ticket:8,quejas:1,tiempoOrdenes:90,registroTiempo:90,reprocesos:1,tareas:95,asistencia:95},
+  pesos:{protocolo:15,ticket:5,quejas:10,tiempoOrdenes:20,registroTiempo:15,reprocesos:10,tareas:15,asistencia:10,ventaPerfumes:0},
+  metas:{protocolo:90,ticket:8,quejas:1,tiempoOrdenes:90,registroTiempo:90,reprocesos:1,tareas:95,asistencia:95,ventaPerfumes:5},
   // ⏱️ Tiempos estándar reales (minutos) — ropa vs zapatos son distintos procesos con distinta duración
   tiemposEstandar:{lavado:67,centrifugado:15,secado:70,doblado:20},
   tiemposEstandarZapatos:{lavado:78,centrifugado:15,secado:90}, // 1.3h lavado, 15min centrifugado (6-7 pares), 1.5h secado (20 pares)
@@ -343,6 +343,7 @@ const EVAL_INDICADORES=[
   {key:"reprocesos",label:"N° de reprocesos del mes",unidad:"#",grupo:"Tiempos de proceso",esMaximo:true},
   {key:"tareas",label:"% de tareas diarias cumplidas",unidad:"%",grupo:"Tareas"},
   {key:"asistencia",label:"% de asistencia/puntualidad",unidad:"%",grupo:"Tareas"},
+  {key:"ventaPerfumes",label:"Venta de aromatizadores/perfumes (meta 5 al mes)",unidad:"#",grupo:"Atención y ventas"},
 ];
 // Calcula la meta $ del mes (mismo criterio que el Dashboard BI: promedio ponderado de últimos 3 meses +10%)
 function calcMetaMes(ventas,mesSel){
@@ -366,16 +367,19 @@ function calcMetaMes(ventas,mesSel){
 }
 // 📋 EVALUACIÓN DE DESEMPEÑO — calcula los 8 indicadores de una colaboradora para un mes específico,
 // usando ÚNICAMENTE datos que ya existen en el sistema (ventas, cargas de producción, tareas, quejas).
-function calcularKPIsEmpleada(empleadaId,mes,{ventas,eventosProduccion,tareasDiarias,quejas,cargas,empleada,config}){
+function calcularKPIsEmpleada(empleadaId,mes,{ventas,eventosProduccion,tareasDiarias,quejas,cargas,empleada,config,calificacionesAudio,ventasPerfumeReg}){
   const empId=String(empleadaId);
   const enMes=fechaIso=>mesK(new Date(fechaIso))===mes;
 
   // --- ATENCIÓN Y VENTAS ---
   const ventasMes=(ventas||[]).filter(v=>!v.anulada&&String(v.empleadaId)===empId&&enMes(v.fecha));
-  const conProtocolo=ventasMes.filter(v=>v.protocoloCumplido===true).length;
-  const pctProtocolo=ventasMes.length>0?(conProtocolo/ventasMes.length)*100:null;
+  // 🎧 Protocolo: promedio de las calificaciones manuales de audios escuchados este mes (2 por semana, ~8 al mes)
+  const audiosDelMes=(calificacionesAudio||[]).filter(c=>String(c.empleadaId)===empId&&enMes(c.fecha));
+  const pctProtocolo=audiosDelMes.length>0?audiosDelMes.reduce((a,c)=>a+c.calificacion,0)/audiosDelMes.length:null;
   const ticketProm=ventasMes.length>0?ventasMes.reduce((a,v)=>a+v.total,0)/ventasMes.length:null;
   const quejasMes=(quejas||[]).filter(q=>String(q.empleadaId)===empId&&enMes(q.fecha)).length;
+  // 🧴 Ventas de aromatizador/perfume registradas manualmente este mes
+  const perfumesMes=(ventasPerfumeReg||[]).filter(r=>String(r.empleadaId)===empId&&enMes(r.fecha)).length;
 
   // --- TIEMPOS DE PROCESO ---
   // Cargas (lavado/centrifugado/secado) que ELLA inició y ya se retiraron, dentro del mes
@@ -428,7 +432,7 @@ function calcularKPIsEmpleada(empleadaId,mes,{ventas,eventosProduccion,tareasDia
   const pctAsistencia=diasConActividad.length>0?(diasATiempo.length/diasConActividad.length)*100:null;
 
   // --- Arma la tabla final: por cada indicador, meta/real/% cumplimiento/peso/puntaje ---
-  const valores={protocolo:pctProtocolo,ticket:ticketProm,quejas:quejasMes,tiempoOrdenes:pctTiempoOrdenes,registroTiempo:pctRegistroTiempo,reprocesos:reprocesosMes,tareas:pctTareas,asistencia:pctAsistencia};
+  const valores={protocolo:pctProtocolo,ticket:ticketProm,quejas:quejasMes,tiempoOrdenes:pctTiempoOrdenes,registroTiempo:pctRegistroTiempo,reprocesos:reprocesosMes,tareas:pctTareas,asistencia:pctAsistencia,ventaPerfumes:perfumesMes};
   const filas=EVAL_INDICADORES.map(ind=>{
     const real=valores[ind.key];
     const meta=config.metas[ind.key];
@@ -3792,7 +3796,7 @@ function PinsAdmin({empleadas,pins,setPins,upsertPin}){
   </div>);
 }
 
-function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,onIrProduccion,onIrTareas,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta,upsertSalida,upsertCliente,upsertCaja,cupones,setCupones,upsertCupon,promos,cfgInc,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga,pins,eventosProduccion,setEventosProduccion,upsertEvento,productos,setProductos,upsertProducto,setKardexProductos,upsertKardexProducto,sorteos,setSorteos,upsertSorteo,setBoletosSorteo,upsertBoletoSorteo,boletosParaImprimir,setBoletosParaImprimir,depositos,setDepositos,upsertDeposito,setConteosInventario,upsertConteoInventario,ventasPerfumeReg,setVentasPerfumeReg,upsertVentaPerfume,tareasDiarias,quejas,evalConfig}){
+function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,onIrProduccion,onIrTareas,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta,upsertSalida,upsertCliente,upsertCaja,cupones,setCupones,upsertCupon,promos,cfgInc,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga,pins,eventosProduccion,setEventosProduccion,upsertEvento,productos,setProductos,upsertProducto,setKardexProductos,upsertKardexProducto,sorteos,setSorteos,upsertSorteo,setBoletosSorteo,upsertBoletoSorteo,boletosParaImprimir,setBoletosParaImprimir,depositos,setDepositos,upsertDeposito,setConteosInventario,upsertConteoInventario,ventasPerfumeReg,setVentasPerfumeReg,upsertVentaPerfume,tareasDiarias,quejas,evalConfig,calificacionesAudio}){
   const [tab,setTab]=useState("hoy");const [busq,setBusq]=useState("");
   const [showNueva,setShowNueva]=useState(false);
   const [filtroTile,setFiltroTile]=useState(null); // 🔎 filtro rápido al tocar un contador (recibido/proceso/listo/entregado_pend)
@@ -3906,7 +3910,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
           :tab==="conteoEmp"
             ?<ConteoProductos productos={productos} setConteos={setConteosInventario} upsertConteo={upsertConteoInventario} sesion={sesion}/>
           :tab==="miEvaluacion"
-            ?<EvaluacionDesempeno empleadas={empleadas} ventas={ventas} eventosProduccion={eventosProduccion} tareasDiarias={tareasDiarias} quejas={quejas} cargas={cargas} evalConfig={evalConfig||EVAL_CONFIG_DEFAULT[0]} esAdmin={false} miEmpleadaId={miEmpleadaSesionPE?.id}/>
+            ?<EvaluacionDesempeno empleadas={empleadas} ventas={ventas} eventosProduccion={eventosProduccion} tareasDiarias={tareasDiarias} quejas={quejas} cargas={cargas} evalConfig={evalConfig||EVAL_CONFIG_DEFAULT[0]} esAdmin={false} miEmpleadaId={miEmpleadaSesionPE?.id} calificacionesAudio={calificacionesAudio} ventasPerfumeReg={ventasPerfumeReg}/>
           :tab==="clientes"
             ?<Clientes clientes={clientes} setClientes={setClientes} upsertCliente={upsertCliente} ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} esAdmin={false}/>
           :filtrados.length===0
@@ -6194,13 +6198,13 @@ function ConteosAdmin({conteos}){
 }
 
 // 📋 EVALUACIÓN DE DESEMPEÑO — pantalla principal: selector de mes/colaboradora, tabla de indicadores, nota final, semáforo, imprimir PDF
-function EvaluacionDesempeno({empleadas,ventas,eventosProduccion,tareasDiarias,quejas,cargas,evalConfig,esAdmin,miEmpleadaId}){
+function EvaluacionDesempeno({empleadas,ventas,eventosProduccion,tareasDiarias,quejas,cargas,evalConfig,esAdmin,miEmpleadaId,calificacionesAudio,ventasPerfumeReg}){
   const activas=(empleadas||[]).filter(e=>e.activa);
   const [mesSel,setMesSel]=useState(mesK(new Date()));
   const [empSel,setEmpSel]=useState(esAdmin?(activas[0]?.id||null):miEmpleadaId);
   const empleadaActual=activas.find(e=>String(e.id)===String(empSel))||empleadas.find(e=>String(e.id)===String(empSel));
 
-  const {filas,notaFinal}=empleadaActual?calcularKPIsEmpleada(empleadaActual.id,mesSel,{ventas,eventosProduccion,tareasDiarias,quejas,cargas,empleada:empleadaActual,config:evalConfig}):{filas:[],notaFinal:0};
+  const {filas,notaFinal}=empleadaActual?calcularKPIsEmpleada(empleadaActual.id,mesSel,{ventas,eventosProduccion,tareasDiarias,quejas,cargas,empleada:empleadaActual,config:evalConfig,calificacionesAudio,ventasPerfumeReg}):{filas:[],notaFinal:0};
   const semaforo=notaFinal>=90?{color:"#2e7d32",bg:"#e8f5e9",label:"🟢 Verde — desempeño sobresaliente"}:notaFinal>=75?{color:"#e65100",bg:"#fff3e0",label:"🟡 Amarillo — cumple, con oportunidades de mejora"}:{color:"#c62828",bg:"#ffebee",label:"🔴 Rojo — requiere plan de mejora"};
 
   const imprimirPDF=()=>{
@@ -6277,6 +6281,87 @@ function EvaluacionDesempeno({empleadas,ventas,eventosProduccion,tareasDiarias,q
 }
 
 // ⚙️ Configuración de pesos/metas de la Evaluación de Desempeño (solo admin)
+// 🎧 CALIFICACIÓN MANUAL — aquí se registran las 2 escuchas semanales de audio por colaboradora (~8 al mes),
+// y también se pueden agregar quejas que no vinieron de una venta específica.
+function CalificacionManualAdmin({empleadas,calificacionesAudio,setCalificacionesAudio,upsertCalificacionAudio,quejas,setQuejas,upsertQueja,sesion}){
+  const activas=(empleadas||[]).filter(e=>e.activa);
+  const [empSel,setEmpSel]=useState(activas[0]?.id||null);
+  const [fechaAudio,setFechaAudio]=useState(fechaHoyLocal());
+  const [calAudio,setCalAudio]=useState("90");
+  const [notaAudio,setNotaAudio]=useState("");
+  const [fechaQueja,setFechaQueja]=useState(fechaHoyLocal());
+  const [motivoQueja,setMotivoQueja]=useState("");
+
+  const mesAct=mesK(new Date());
+  const audiosDelMes=(calificacionesAudio||[]).filter(c=>String(c.empleadaId)===String(empSel)&&mesK(new Date(c.fecha))===mesAct);
+  const promedioMes=audiosDelMes.length>0?audiosDelMes.reduce((a,c)=>a+c.calificacion,0)/audiosDelMes.length:null;
+
+  const agregarAudio=()=>{
+    if(!empSel){alert("Selecciona una colaboradora");return;}
+    const cal=parseFloat(calAudio);
+    if(isNaN(cal)||cal<0||cal>100){alert("La calificación debe ser un número entre 0 y 100");return;}
+    const reg={id:"audio_"+Date.now(),empleadaId:empSel,fecha:fechaAudio,calificacion:cal,nota:notaAudio.trim()||null,registradoPor:sesion?.nombre||null};
+    setCalificacionesAudio(prev=>[reg,...prev]);
+    if(upsertCalificacionAudio)upsertCalificacionAudio({...reg,_updatedAt:new Date().toISOString()});
+    setCalAudio("90");setNotaAudio("");
+  };
+  const borrarAudio=id=>{
+    if(!window.confirm("¿Eliminar esta calificación?"))return;
+    setCalificacionesAudio(prev=>{
+      const next=prev.filter(c=>c.id!==id);
+      return next;
+    });
+  };
+  const agregarQuejaManual=()=>{
+    if(!empSel){alert("Selecciona una colaboradora");return;}
+    if(!motivoQueja.trim()){alert("Escribe el motivo de la queja");return;}
+    const q={id:"queja_"+Date.now(),empleadaId:empSel,ventaFolio:null,clienteNombre:"",motivo:motivoQueja.trim(),fecha:fechaQueja,registradoPor:sesion?.nombre||null};
+    setQuejas(prev=>[q,...prev]);
+    if(upsertQueja)upsertQueja({...q,_updatedAt:new Date().toISOString()});
+    setMotivoQueja("");
+  };
+
+  return(<div style={S.panel}>
+    <h2 style={S.ptitle}>🎧 Calificación manual</h2>
+    <Card title="🔍 Colaboradora">
+      <select style={S.inp} value={empSel||""} onChange={e=>setEmpSel(e.target.value)}>{activas.map(e=><option key={e.id} value={e.id}>{e.nombre}</option>)}</select>
+    </Card>
+
+    <Card title="🎧 Calificar un audio de atención">
+      <div style={{fontSize:12,color:"#888",marginBottom:10}}>Escucha 2 audios al azar por semana (~8 al mes) y califica cada uno con un % — el sistema promedia todos los del mes para el indicador de protocolo.</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+        <div><label style={S.lbl}>Fecha</label><input type="date" style={S.inp} value={fechaAudio} onChange={e=>setFechaAudio(e.target.value)}/></div>
+        <div><label style={S.lbl}>Calificación (%)</label><input type="number" min="0" max="100" style={S.inp} value={calAudio} onChange={e=>setCalAudio(e.target.value)}/></div>
+      </div>
+      <label style={S.lbl}>Nota (opcional)</label>
+      <input style={S.inp} placeholder="ej. Buen saludo, se le olvidó confirmar el teléfono..." value={notaAudio} onChange={e=>setNotaAudio(e.target.value)}/>
+      <button style={{...S.btnP,width:"100%",marginTop:10}} onClick={agregarAudio}>➕ Guardar calificación</button>
+      {promedioMes!=null&&<div style={{fontSize:13,fontWeight:700,color:"#1a3c5e",marginTop:10,textAlign:"center"}}>Promedio de este mes: {promedioMes.toFixed(0)}% ({audiosDelMes.length} audio{audiosDelMes.length!==1?"s":""} calificado{audiosDelMes.length!==1?"s":""})</div>}
+      {audiosDelMes.length>0&&(
+        <div style={{marginTop:10}}>
+          {audiosDelMes.sort((a,b)=>new Date(b.fecha)-new Date(a.fecha)).map(c=>(
+            <div key={c.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #f0f4f8"}}>
+              <div><span style={{fontSize:12,color:"#1a3c5e",fontWeight:600}}>{fmtD(c.fecha)}</span>{c.nota&&<span style={{fontSize:11,color:"#888"}}> · {c.nota}</span>}</div>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <strong style={{color:c.calificacion>=90?"#2e7d32":c.calificacion>=75?"#e65100":"#c62828"}}>{c.calificacion}%</strong>
+                <button style={S.btnR} onClick={()=>borrarAudio(c.id)}>✕</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+
+    <Card title="📢 Agregar queja (sin orden asociada)">
+      <div style={{fontSize:12,color:"#888",marginBottom:10}}>Si la queja no vino de una venta específica, regístrala aquí. Si sí es sobre una orden puntual, mejor usa el botón "📢 Registrar queja" desde el Historial de esa venta.</div>
+      <div style={{marginBottom:8}}><label style={S.lbl}>Fecha</label><input type="date" style={S.inp} value={fechaQueja} onChange={e=>setFechaQueja(e.target.value)}/></div>
+      <label style={S.lbl}>Motivo</label>
+      <textarea style={{...S.inp,minHeight:56,resize:"vertical"}} value={motivoQueja} onChange={e=>setMotivoQueja(e.target.value)}/>
+      <button style={{...S.btnP,width:"100%",marginTop:10,background:"linear-gradient(135deg,#e65100,#ff9800)"}} onClick={agregarQuejaManual}>📢 Registrar queja</button>
+    </Card>
+  </div>);
+}
+
 function EvaluacionConfigAdmin({evalConfig,setEvalConfigArr,upsertEvalConfig}){
   const [ed,setEd]=useState({pesos:{...evalConfig.pesos},metas:{...evalConfig.metas},tiemposEstandar:{...evalConfig.tiemposEstandar},tiemposEstandarZapatos:{...(evalConfig.tiemposEstandarZapatos||{lavado:78,centrifugado:15,secado:90})},toleranciaPuntualidadMin:evalConfig.toleranciaPuntualidadMin});
   const [guardado,setGuardado]=useState(false);
@@ -8394,6 +8479,8 @@ const { data: activosFijos, setData: setActivosFijos, upsert: upsertActivoFijo }
 const { data: conteosInventario, setData: setConteosInventario, upsert: upsertConteoInventario } = useCollection("conteosInventario", "ll_conteos_inventario", []);
 // 📋 EVALUACIÓN DE DESEMPEÑO — quejas registradas y configuración de pesos/metas
 const { data: quejas, setData: setQuejas, upsert: upsertQueja } = useCollection("quejas", "ll_quejas", []);
+// 🎧 Calificaciones manuales de audios de atención (2 por semana, ~8 al mes)
+const { data: calificacionesAudio, setData: setCalificacionesAudio, upsert: upsertCalificacionAudio } = useCollection("calificacionesAudio", "ll_calificaciones_audio", []);
 const { data: evalConfigArr, setData: setEvalConfigArr, upsert: upsertEvalConfig } = useCollection("evalConfig", "ll_eval_config", EVAL_CONFIG_DEFAULT);
 const evalConfig=evalConfigArr[0]||EVAL_CONFIG_DEFAULT[0];
 const { data: deudas, setData: setDeudas, upsert: upsertDeuda } = useCollection("deudas", "ll_deudas", []);
@@ -8579,7 +8666,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
     empleadas={empleadas}
     upsertCaja={upsertCaja}
   />;
-  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={serviciosActivos} sesion={sesion} addAbono={addAbono} onLogout={onLogout} onIrProduccion={()=>setVista("produccion")} onIrTareas={()=>setVista("tareas")} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} upsertVenta={upsertVenta} upsertSalida={upsertSalida} upsertCliente={upsertCliente} upsertCaja={upsertCaja} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos} cfgInc={cfgInc} maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga} pins={pins} eventosProduccion={eventosProduccion} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto} sorteos={sorteos} setSorteos={setSorteos} upsertSorteo={upsertSorteo} setBoletosSorteo={setBoletosSorteo} upsertBoletoSorteo={upsertBoletoSorteo} boletosParaImprimir={boletosParaImprimir} setBoletosParaImprimir={setBoletosParaImprimir} depositos={depositos} setDepositos={setDepositos} upsertDeposito={upsertDeposito} setConteosInventario={setConteosInventario} upsertConteoInventario={upsertConteoInventario} ventasPerfumeReg={ventasPerfumeReg} setVentasPerfumeReg={setVentasPerfumeReg} upsertVentaPerfume={upsertVentaPerfume} tareasDiarias={tareasDiarias} quejas={quejas} evalConfig={evalConfig}/>;
+  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={serviciosActivos} sesion={sesion} addAbono={addAbono} onLogout={onLogout} onIrProduccion={()=>setVista("produccion")} onIrTareas={()=>setVista("tareas")} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} upsertVenta={upsertVenta} upsertSalida={upsertSalida} upsertCliente={upsertCliente} upsertCaja={upsertCaja} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos} cfgInc={cfgInc} maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga} pins={pins} eventosProduccion={eventosProduccion} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto} sorteos={sorteos} setSorteos={setSorteos} upsertSorteo={upsertSorteo} setBoletosSorteo={setBoletosSorteo} upsertBoletoSorteo={upsertBoletoSorteo} boletosParaImprimir={boletosParaImprimir} setBoletosParaImprimir={setBoletosParaImprimir} depositos={depositos} setDepositos={setDepositos} upsertDeposito={upsertDeposito} setConteosInventario={setConteosInventario} upsertConteoInventario={upsertConteoInventario} ventasPerfumeReg={ventasPerfumeReg} setVentasPerfumeReg={setVentasPerfumeReg} upsertVentaPerfume={upsertVentaPerfume} tareasDiarias={tareasDiarias} quejas={quejas} evalConfig={evalConfig} calificacionesAudio={calificacionesAudio}/>;
   const tabs=[
     {id:"ventas",icon:"🧾",l:"Venta"},{id:"historial",icon:"📋",l:"Historial"},
     {id:"pendientes",icon:"⏳",l:"Pendientes",b:pCount},{id:"bi",icon:"🚀",l:"Dashboard"},
@@ -8587,13 +8674,13 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
     {id:"reportes",icon:"📊",l:"Reportes"},{id:"depositos",icon:"🏦",l:"Depósitos"},
     {id:"conciliacion",icon:"🏛️",l:"Conciliación"},
     {id:"gastos",icon:"🛒",l:"Gastos"},{id:"inventario",icon:"📦",l:"Inventario"},{id:"productosAdmin",icon:"🛍️",l:"Productos"},{id:"kardexAdmin",icon:"📒",l:"Kardex"},{id:"conteosAdmin",icon:"📋",l:"Conteos"},{id:"activosFijosAdmin",icon:"📦",l:"Activos Fijos"},{id:"deudasAdmin",icon:"💳",l:"Deudas"},{id:"sorteoAdmin",icon:"🎟️",l:"Sorteo"},
-    {id:"equipo",icon:"👩",l:"Equipo"},{id:"incentivosAdmin",icon:"🎯",l:"Incentivos"},{id:"maquinasAdmin",icon:"🏭",l:"Máquinas"},{id:"reporteMaquinasAdmin",icon:"⏱️",l:"Uso de máquinas"},{id:"tiemposRopaAdmin",icon:"👕",l:"Tiempos x Servicio"},{id:"pinsAdmin",icon:"🔒",l:"PINs"},{id:"produccionAdmin",icon:"🧺",l:"Producción"},{id:"tareasAdmin",icon:"📋",l:"Tareas"},{id:"notasAdmin",icon:"📝",l:"Notas"},{id:"evaluacionAdmin",icon:"📋",l:"Evaluación"},{id:"evaluacionConfigAdmin",icon:"⚙️",l:"Config. Evaluación"},
+    {id:"equipo",icon:"👩",l:"Equipo"},{id:"incentivosAdmin",icon:"🎯",l:"Incentivos"},{id:"maquinasAdmin",icon:"🏭",l:"Máquinas"},{id:"reporteMaquinasAdmin",icon:"⏱️",l:"Uso de máquinas"},{id:"tiemposRopaAdmin",icon:"👕",l:"Tiempos x Servicio"},{id:"pinsAdmin",icon:"🔒",l:"PINs"},{id:"produccionAdmin",icon:"🧺",l:"Producción"},{id:"tareasAdmin",icon:"📋",l:"Tareas"},{id:"notasAdmin",icon:"📝",l:"Notas"},{id:"evaluacionAdmin",icon:"📋",l:"Evaluación"},{id:"calificacionManualAdmin",icon:"🎧",l:"Calificación manual"},{id:"evaluacionConfigAdmin",icon:"⚙️",l:"Config. Evaluación"},
     {id:"config",icon:"⚙️",l:"Config"},{id:"usuarios",icon:"🔑",l:"Usuarios"},
   ];
   // 🗂️ Agrupa las pestañas en categorías para que el panel admin se vea más ordenado (menos scroll horizontal, todo lo relacionado junto)
   const CATEGORIAS=[
     {id:"ventas_caja",icon:"🧾",l:"Ventas",tabIds:["ventas","historial","pendientes","depositos","conciliacion","cupones","promosAdmin","reportes","resumen"]},
-    {id:"personal",icon:"👥",l:"Personal",tabIds:["equipo","pinsAdmin","usuarios","tareasAdmin","notasAdmin","incentivosAdmin","evaluacionAdmin","evaluacionConfigAdmin","reporteMaquinasAdmin","tiemposRopaAdmin"]},
+    {id:"personal",icon:"👥",l:"Personal",tabIds:["equipo","pinsAdmin","usuarios","tareasAdmin","notasAdmin","incentivosAdmin","evaluacionAdmin","calificacionManualAdmin","evaluacionConfigAdmin","reporteMaquinasAdmin","tiemposRopaAdmin"]},
     {id:"inventario_cat",icon:"📦",l:"Inventario",tabIds:["inventario","productosAdmin","kardexAdmin","conteosAdmin","gastos","maquinasAdmin","activosFijosAdmin","deudasAdmin"]},
     {id:"negocio",icon:"📊",l:"Negocio",tabIds:["bi","clientes","clientesAnalisis","sorteoAdmin","produccionAdmin","config"]},
   ];
@@ -8663,7 +8750,8 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
         <Produccion ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} empleadas={empleadas} pins={pins||[]} eventosProduccion={eventosProduccion||[]} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} maquinas={maquinas||[]} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas||[]} setCargas={setCargas} upsertCarga={upsertCarga}/></div>)}
       {tab==="tareasAdmin"&&<TareasAdminPanel plantillasTareas={plantillasTareas||[]} setPlantillasTareas={setPlantillasTareas} upsertPlantillaTarea={upsertPlantillaTarea} tareasDiarias={tareasDiarias||[]} setTareasDiarias={setTareasDiarias} upsertTareaDiaria={upsertTareaDiaria} empleadas={empleadas}/>}
       {tab==="notasAdmin"&&<NotasAdminPanel notas={notas||[]} setNotas={setNotas} upsertNota={upsertNota} empleadas={empleadas}/>}
-      {tab==="evaluacionAdmin"&&<EvaluacionDesempeno empleadas={empleadas} ventas={ventas} eventosProduccion={eventosProduccion} tareasDiarias={tareasDiarias} quejas={quejas} cargas={cargas} evalConfig={evalConfig} esAdmin={true}/>}
+      {tab==="evaluacionAdmin"&&<EvaluacionDesempeno empleadas={empleadas} ventas={ventas} eventosProduccion={eventosProduccion} tareasDiarias={tareasDiarias} quejas={quejas} cargas={cargas} evalConfig={evalConfig} esAdmin={true} calificacionesAudio={calificacionesAudio} ventasPerfumeReg={ventasPerfumeReg}/>}
+      {tab==="calificacionManualAdmin"&&<CalificacionManualAdmin empleadas={empleadas} calificacionesAudio={calificacionesAudio} setCalificacionesAudio={setCalificacionesAudio} upsertCalificacionAudio={upsertCalificacionAudio} quejas={quejas} setQuejas={setQuejas} upsertQueja={upsertQueja} sesion={sesion}/>}
       {tab==="evaluacionConfigAdmin"&&<EvaluacionConfigAdmin evalConfig={evalConfig} setEvalConfigArr={setEvalConfigArr} upsertEvalConfig={upsertEvalConfig}/>}
       {tab==="reporteMaquinasAdmin"&&<ReporteMaquinas cargas={cargas} maquinas={maquinas} ventas={ventas} evalConfig={evalConfig}/>}
       {tab==="tiemposRopaAdmin"&&<TiemposRopaAdmin ventas={ventas} eventosProduccion={eventosProduccion} cargas={cargas} maquinas={maquinas} empleadas={empleadas}/>}
