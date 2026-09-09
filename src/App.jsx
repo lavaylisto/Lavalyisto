@@ -67,6 +67,47 @@ const sorteoActivoHoy=sorteos=>{
 //   - 1 boleto "monto" si el total de la venta alcanza el mínimo del sorteo activo
 //   - 1 boleto "perfume" si la venta incluye al menos un producto con categoria:"aromatizador"
 // Cada motivo genera un documento SEPARADO con su propio número correlativo (2 papeles físicos si aplican ambos).
+// 👕 Extrae las libras de un nombre de servicio (ej. "LAVADO + SECADO 15LB" → 15)
+const librasDeLabel=lbl=>{const m=(lbl||"").match(/(\d+)\s*LB/i);return m?parseInt(m[1]):null;};
+// 👕 Libras totales de una venta (solo cuenta renglones que NO son de zapatos)
+const librasDeVenta=(venta,esZapatoLbl)=>{
+  let total=0;
+  (venta.items||[]).forEach(it=>{
+    if(esZapatoLbl(it.label))return;
+    const lb=librasDeLabel(it.label);
+    if(lb)total+=lb*(it.piezas||1);
+  });
+  return total;
+};
+// 🏭 ¿Había alguna máquina de ese tipo (lavadora/secadora, sin contar las de zapatos) LIBRE en un momento histórico exacto?
+// Se reconstruye mirando el historial de cargas: si ninguna carga de ese tipo de máquina estaba activa en ese instante, estaba libre.
+const habiaMaquinaLibreEn=(instante,tipoMaquina,cargas,maquinas)=>{
+  const t=new Date(instante).getTime();
+  const maquinasDelTipo=maquinas.filter(m=>m.tipo===tipoMaquina&&m.categoria!=="zapatos");
+  return maquinasDelTipo.some(m=>{
+    const ocupadaEnT=cargas.some(c=>c.maquinaId===m.id&&c.grupo!=="zapatos"&&new Date(c.inicio).getTime()<=t&&(!c.finReal||new Date(c.finReal).getTime()>=t));
+    return !ocupadaEnT;
+  });
+};
+// ⏰ Calcula los minutos transcurridos entre dos fechas contando SOLO horario laboral (9:15am-8pm por defecto).
+// Las máquinas no trabajan después de las 8pm, así que si una orden queda de un día para otro, esas horas
+// nocturnas no cuentan como demora — solo se descuentan las horas reales dentro del horario de atención.
+const minutosLaboralesEntre=(inicioIso,finIso,horaAbre=9,minAbre=15,horaCierra=20,minCierra=0)=>{
+  const fin=new Date(finIso);
+  let cursor=new Date(inicioIso);
+  if(fin<=cursor)return 0;
+  let total=0,guard=0;
+  while(cursor<fin&&guard<90){
+    guard++;
+    const apertura=new Date(cursor.getFullYear(),cursor.getMonth(),cursor.getDate(),horaAbre,minAbre,0,0);
+    const cierre=new Date(cursor.getFullYear(),cursor.getMonth(),cursor.getDate(),horaCierra,minCierra,0,0);
+    if(cursor<apertura)cursor=new Date(apertura);
+    const tope=cierre<fin?cierre:fin;
+    if(cursor<tope)total+=(tope-cursor)/60000;
+    cursor=new Date(cursor.getFullYear(),cursor.getMonth(),cursor.getDate()+1,horaAbre,minAbre,0,0);
+  }
+  return total;
+};
 const generarBoletosParaVenta=(venta,{sorteos,setSorteos,upsertSorteo,setBoletosSorteo,upsertBoletoSorteo,productos})=>{
   const sorteo=sorteoActivoHoy(sorteos);
   if(!sorteo)return[];
@@ -283,6 +324,26 @@ const PLANTILLAS_TAREAS_DEFAULT=[
 ];
 // 🎯 INCENTIVOS: comisión por impulsación de promo + bonos por meta grupal (editable desde el panel admin)
 const INCENTIVOS_DEFAULT = [{id:"config",comisionImpulso:0.40,bonoMetaPct:1,bonoExcedentePct:10,comisionPerfume:0.50}];
+// 📋 EVALUACIÓN DE DESEMPEÑO — pesos (deben sumar 100), metas, y tiempos estándar por etapa (minutos)
+const EVAL_CONFIG_DEFAULT=[{
+  id:"config",
+  pesos:{protocolo:15,ticket:5,quejas:10,tiempoOrdenes:20,registroTiempo:15,reprocesos:10,tareas:15,asistencia:10},
+  metas:{protocolo:90,ticket:8,quejas:1,tiempoOrdenes:90,registroTiempo:90,reprocesos:1,tareas:95,asistencia:95},
+  // ⏱️ Tiempos estándar reales (minutos) — ropa vs zapatos son distintos procesos con distinta duración
+  tiemposEstandar:{lavado:67,centrifugado:15,secado:70,doblado:20},
+  tiemposEstandarZapatos:{lavado:78,centrifugado:15,secado:90}, // 1.3h lavado, 15min centrifugado (6-7 pares), 1.5h secado (20 pares)
+  toleranciaPuntualidadMin:10, // minutos de tolerancia para contar como "a tiempo"
+}];
+const EVAL_INDICADORES=[
+  {key:"protocolo",label:"% clientes atendidos con protocolo completo",unidad:"%",grupo:"Atención y ventas"},
+  {key:"ticket",label:"Ticket promedio por cliente",unidad:"$",grupo:"Atención y ventas",invertido:false},
+  {key:"quejas",label:"N° de quejas del mes",unidad:"#",grupo:"Atención y ventas",esMaximo:true},
+  {key:"tiempoOrdenes",label:"% órdenes entregadas dentro del tiempo estándar",unidad:"%",grupo:"Tiempos de proceso"},
+  {key:"registroTiempo",label:"% órdenes registradas a tiempo en el sistema",unidad:"%",grupo:"Tiempos de proceso"},
+  {key:"reprocesos",label:"N° de reprocesos del mes",unidad:"#",grupo:"Tiempos de proceso",esMaximo:true},
+  {key:"tareas",label:"% de tareas diarias cumplidas",unidad:"%",grupo:"Tareas"},
+  {key:"asistencia",label:"% de asistencia/puntualidad",unidad:"%",grupo:"Tareas"},
+];
 // Calcula la meta $ del mes (mismo criterio que el Dashboard BI: promedio ponderado de últimos 3 meses +10%)
 function calcMetaMes(ventas,mesSel){
   const vOk=ventas.filter(v=>!v.anulada);
@@ -302,6 +363,92 @@ function calcMetaMes(ventas,mesSel){
     meta=Math.max(10,Math.ceil(proy/10)*10);
   }
   return{meta,ventaMes,vMes};
+}
+// 📋 EVALUACIÓN DE DESEMPEÑO — calcula los 8 indicadores de una colaboradora para un mes específico,
+// usando ÚNICAMENTE datos que ya existen en el sistema (ventas, cargas de producción, tareas, quejas).
+function calcularKPIsEmpleada(empleadaId,mes,{ventas,eventosProduccion,tareasDiarias,quejas,cargas,empleada,config}){
+  const empId=String(empleadaId);
+  const enMes=fechaIso=>mesK(new Date(fechaIso))===mes;
+
+  // --- ATENCIÓN Y VENTAS ---
+  const ventasMes=(ventas||[]).filter(v=>!v.anulada&&String(v.empleadaId)===empId&&enMes(v.fecha));
+  const conProtocolo=ventasMes.filter(v=>v.protocoloCumplido===true).length;
+  const pctProtocolo=ventasMes.length>0?(conProtocolo/ventasMes.length)*100:null;
+  const ticketProm=ventasMes.length>0?ventasMes.reduce((a,v)=>a+v.total,0)/ventasMes.length:null;
+  const quejasMes=(quejas||[]).filter(q=>String(q.empleadaId)===empId&&enMes(q.fecha)).length;
+
+  // --- TIEMPOS DE PROCESO ---
+  // Cargas (lavado/centrifugado/secado) que ELLA inició y ya se retiraron, dentro del mes
+  const cargasDelMes=(cargas||[]).filter(c=>String(c.empleadaId)===empId&&c.finReal&&["lavado","centrifugado","secado"].includes(c.tipo)&&enMes(c.inicio));
+  const dentroDeTiempo=cargasDelMes.filter(c=>{
+    const duracionReal=(new Date(c.finReal)-new Date(c.inicio))/60000;
+    const tablaEstandar=c.grupo==="zapatos"?(config.tiemposEstandarZapatos||config.tiemposEstandar):config.tiemposEstandar;
+    const estandar=(tablaEstandar&&tablaEstandar[c.tipo])||c.minutosProgramados||45;
+    return duracionReal<=estandar*1.15; // 15% de margen sobre el estándar
+  });
+  const pctTiempoOrdenes=cargasDelMes.length>0?(dentroDeTiempo.length/cargasDelMes.length)*100:null;
+  const reprocesosMes=cargasDelMes.filter(c=>c.esRepeticion).length;
+
+  // "Registrado a tiempo": entre el fin de una etapa y el inicio de la siguiente (misma orden, misma persona),
+  // el tiempo debe ser realista (≥3 min) — así se detecta si varias etapas se marcaron todas juntas al final del día.
+  const eventosMes=(eventosProduccion||[]).filter(ev=>String(ev.empleadaId)===empId&&enMes(ev.timestamp));
+  const porFolio={};
+  eventosMes.forEach(ev=>{(porFolio[ev.ventaFolio]=porFolio[ev.ventaFolio]||[]).push(ev);});
+  let transicionesTotal=0,transicionesOk=0;
+  Object.values(porFolio).forEach(evs=>{
+    const ordenados=[...evs].sort((a,b)=>new Date(a.timestamp)-new Date(b.timestamp));
+    for(let i=1;i<ordenados.length;i++){
+      transicionesTotal++;
+      const gapMin=(new Date(ordenados[i].timestamp)-new Date(ordenados[i-1].timestamp))/60000;
+      if(gapMin>=3)transicionesOk++;
+    }
+  });
+  const pctRegistroTiempo=transicionesTotal>0?(transicionesOk/transicionesTotal)*100:null;
+
+  // --- TAREAS ---
+  const tareasDeElla=(tareasDiarias||[]).filter(t=>!t.eliminada&&enMes(t.fecha)&&t.empleadaIds&&t.empleadaIds.some(id=>String(id)===empId));
+  const tareasCumplidas=tareasDeElla.filter(t=>t.estado==="completada").length;
+  const pctTareas=tareasDeElla.length>0?(tareasCumplidas/tareasDeElla.length)*100:null;
+
+  // --- ASISTENCIA/PUNTUALIDAD ---
+  // Días con actividad registrada este mes, comparando la 1ra actividad del día contra la hora esperada de entrada
+  const horaEsperada=empleada?.horaEntradaEsperada||"09:00";
+  const [hE,mE]=horaEsperada.split(":").map(Number);
+  const toleranciaMin=config.toleranciaPuntualidadMin!=null?config.toleranciaPuntualidadMin:10;
+  const actividadPorDia={};
+  eventosMes.forEach(ev=>{const d=fechaLocal(ev.timestamp);(actividadPorDia[d]=actividadPorDia[d]||[]).push(ev.timestamp);});
+  (tareasDeElla||[]).filter(t=>t.completadaEn).forEach(t=>{const d=fechaLocal(t.completadaEn);(actividadPorDia[d]=actividadPorDia[d]||[]).push(t.completadaEn);});
+  const diasConActividad=Object.keys(actividadPorDia);
+  const diasATiempo=diasConActividad.filter(d=>{
+    const primera=actividadPorDia[d].sort()[0];
+    const t=new Date(primera);
+    const limite=new Date(t);limite.setHours(hE,mE+toleranciaMin,0,0);
+    return t<=limite;
+  });
+  const pctAsistencia=diasConActividad.length>0?(diasATiempo.length/diasConActividad.length)*100:null;
+
+  // --- Arma la tabla final: por cada indicador, meta/real/% cumplimiento/peso/puntaje ---
+  const valores={protocolo:pctProtocolo,ticket:ticketProm,quejas:quejasMes,tiempoOrdenes:pctTiempoOrdenes,registroTiempo:pctRegistroTiempo,reprocesos:reprocesosMes,tareas:pctTareas,asistencia:pctAsistencia};
+  const filas=EVAL_INDICADORES.map(ind=>{
+    const real=valores[ind.key];
+    const meta=config.metas[ind.key];
+    const peso=config.pesos[ind.key];
+    let pctCumplimiento=null;
+    if(real!=null){
+      if(ind.esMaximo){
+        // Para quejas/reprocesos: cumplir 100% si real <= meta; si se pasa, penaliza proporcionalmente
+        pctCumplimiento=real<=meta?100:Math.max(0,100-((real-meta)*50));
+      }else if(ind.key==="ticket"){
+        pctCumplimiento=Math.min(100,(real/meta)*100);
+      }else{
+        pctCumplimiento=Math.min(100,(real/meta)*100);
+      }
+    }
+    const puntaje=pctCumplimiento!=null?(pctCumplimiento/100)*peso:0;
+    return{...ind,real,meta,peso,pctCumplimiento,puntaje,sinDatos:real==null};
+  });
+  const notaFinal=filas.reduce((a,f)=>a+f.puntaje,0);
+  return{filas,notaFinal};
 }
 const USUARIOS_DEFAULT = [
   {id:1,usuario:"admin",clave:"admin123",rol:"Administrador",nombre:"Administrador"},
@@ -3645,7 +3792,7 @@ function PinsAdmin({empleadas,pins,setPins,upsertPin}){
   </div>);
 }
 
-function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,onIrProduccion,onIrTareas,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta,upsertSalida,upsertCliente,upsertCaja,cupones,setCupones,upsertCupon,promos,cfgInc,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga,pins,eventosProduccion,setEventosProduccion,upsertEvento,productos,setProductos,upsertProducto,setKardexProductos,upsertKardexProducto,sorteos,setSorteos,upsertSorteo,setBoletosSorteo,upsertBoletoSorteo,boletosParaImprimir,setBoletosParaImprimir,depositos,setDepositos,upsertDeposito,setConteosInventario,upsertConteoInventario,ventasPerfumeReg,setVentasPerfumeReg,upsertVentaPerfume}){
+function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,onIrProduccion,onIrTareas,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta,upsertSalida,upsertCliente,upsertCaja,cupones,setCupones,upsertCupon,promos,cfgInc,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga,pins,eventosProduccion,setEventosProduccion,upsertEvento,productos,setProductos,upsertProducto,setKardexProductos,upsertKardexProducto,sorteos,setSorteos,upsertSorteo,setBoletosSorteo,upsertBoletoSorteo,boletosParaImprimir,setBoletosParaImprimir,depositos,setDepositos,upsertDeposito,setConteosInventario,upsertConteoInventario,ventasPerfumeReg,setVentasPerfumeReg,upsertVentaPerfume,tareasDiarias,quejas,evalConfig}){
   const [tab,setTab]=useState("hoy");const [busq,setBusq]=useState("");
   const [showNueva,setShowNueva]=useState(false);
   const [filtroTile,setFiltroTile]=useState(null); // 🔎 filtro rápido al tocar un contador (recibido/proceso/listo/entregado_pend)
@@ -3718,7 +3865,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         </div>
       )}
       <div style={{background:"#fff",display:"flex",borderBottom:"2px solid #e8f0f7",position:"sticky",top:0,zIndex:10}}>
-        {[{id:"hoy",l:"📋 Ordenes",c:pendientesRaw.length},{id:"cobrar",l:"💸 Recibido",c:porCob.length},{id:"proceso",l:"🔄 En proceso",c:porProc.length},{id:"entregar",l:"📦 Listo para retirar",c:porEnt.length},{id:"clientes",l:"👥 Clientes"},...(puedeFacturarAqui?[{id:"resumen",l:"📊 Resumen"},{id:"depositosEmp",l:"🏦 Depósitos"},{id:"conteoEmp",l:"📋 Conteo inventario"}]:[]),{id:"bonos",l:"📈 Bonos"},{id:"nueva",l:"➕ Nuevo"}].map(t=>(
+        {[{id:"hoy",l:"📋 Ordenes",c:pendientesRaw.length},{id:"cobrar",l:"💸 Recibido",c:porCob.length},{id:"proceso",l:"🔄 En proceso",c:porProc.length},{id:"entregar",l:"📦 Listo para retirar",c:porEnt.length},{id:"clientes",l:"👥 Clientes"},...(puedeFacturarAqui?[{id:"resumen",l:"📊 Resumen"},{id:"depositosEmp",l:"🏦 Depósitos"},{id:"conteoEmp",l:"📋 Conteo inventario"}]:[]),{id:"miEvaluacion",l:"📋 Mi Evaluación"},{id:"bonos",l:"📈 Bonos"},{id:"nueva",l:"➕ Nuevo"}].map(t=>(
           <button key={t.id} style={{flex:1,padding:"12px 4px",border:"none",background:"transparent",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:tab===t.id?700:500,color:tab===t.id?"#1a3c5e":"#888",borderBottom:tab===t.id?"2px solid #4db6e4":"none",marginBottom:-2,fontSize:11,position:"relative"}}
             onClick={()=>t.id==="nueva"?setShowNueva(true):setTab(t.id)}>
             {t.l}{t.c>0&&<span style={{position:"absolute",top:5,right:3,background:"#e53935",color:"#fff",borderRadius:10,fontSize:9,fontWeight:800,padding:"1px 4px"}}>{t.c}</span>}
@@ -3726,7 +3873,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         ))}
       </div>
       <div style={{padding:12}}>
-        {tab!=="bonos"&&tab!=="resumen"&&tab!=="clientes"&&tab!=="depositosEmp"&&tab!=="conteoEmp"&&(<div style={{display:"flex",gap:8,marginBottom:12}}>
+        {tab!=="bonos"&&tab!=="resumen"&&tab!=="clientes"&&tab!=="depositosEmp"&&tab!=="conteoEmp"&&tab!=="miEvaluacion"&&(<div style={{display:"flex",gap:8,marginBottom:12}}>
           <input style={{...S.inp,flex:1}} placeholder="🔍 Buscar cliente o folio..." value={busq} onChange={e=>setBusq(e.target.value)}/>
         </div>)}
         {tab==="hoy"&&(<>
@@ -3758,6 +3905,8 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
             ?<Depositos depositos={depositos} setDepositos={setDepositos} ventas={ventas} salidasCaja={salidasCaja} upsertDeposito={upsertDeposito}/>
           :tab==="conteoEmp"
             ?<ConteoProductos productos={productos} setConteos={setConteosInventario} upsertConteo={upsertConteoInventario} sesion={sesion}/>
+          :tab==="miEvaluacion"
+            ?<EvaluacionDesempeno empleadas={empleadas} ventas={ventas} eventosProduccion={eventosProduccion} tareasDiarias={tareasDiarias} quejas={quejas} cargas={cargas} evalConfig={evalConfig||EVAL_CONFIG_DEFAULT[0]} esAdmin={false} miEmpleadaId={miEmpleadaSesionPE?.id}/>
           :tab==="clientes"
             ?<Clientes clientes={clientes} setClientes={setClientes} upsertCliente={upsertCliente} ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} esAdmin={false}/>
           :filtrados.length===0
@@ -4075,6 +4224,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
   const [cupInput,setCupInput]=useState("");const [cupApl,setCupApl]=useState(null);const [cupErr,setCupErr]=useState(""); // 🎟️ cupón
   const [descCumple,setDescCumple]=useState(false); // 🎂 10% cumpleaños
   const [tienePrendaMancha,setTienePrendaMancha]=useState(null); // null=sin responder, true/false — 🧽 obligatorio antes de registrar
+  const [protocoloCumplido,setProtocoloCumplido]=useState(true); // 📋 para Evaluación de Desempeño — checklist de atención al cliente (saludo, confirmar datos, explicar tiempos, despedida)
   const [boletoResena,setBoletoResena]=useState(false); // 🌟 opcional — boleto extra si sigue redes y deja reseña en Google
   const [obsPrendaMancha,setObsPrendaMancha]=useState("");
   const cFilt=clientes.filter(c=>c.nombre.toLowerCase().includes(cQ.toLowerCase())||(c.tel&&c.tel.includes(cQ))).slice(0,5);
@@ -4220,7 +4370,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
       pago:metodo,total,abonos:abs,pagada:tPago==="completo",notas,checkMsgRetiro:false,checkMsgEntrega:false,facturadoSRI:false,estado:todosProductos?"entregado":"recibido",
       cuponId:cupApl?.id||null,
       prendaManchaAviso:!!tienePrendaMancha,prendaManchaObs:tienePrendaMancha?obsPrendaMancha.trim():null,
-      boletoResenaSolicitado:!!boletoResena};
+      boletoResenaSolicitado:!!boletoResena,protocoloCumplido:!!protocoloCumplido};
     setVentas([v,...ventas]);if(upsertVenta)upsertVenta(v);
     // 🛍️ Descuenta del stock cada producto vendido en esta venta, y deja el movimiento en el Kardex
     const prodsVendidos=items.filter(it=>it.esProducto&&it.productoId);
@@ -4259,7 +4409,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
     }
     setWaVenta(v); // WhatsApp obligatorio antes de mostrar el ticket
     setCQ("");setCId(null);setNC({nombre:"",tel:"",cedula:"",email:"",rfc:"",direccion:"",nacimiento:""});setDescCumple(false);setImpulsos([]);setCupApl(null);setCupInput("");setCupErr("");
-    setTienePrendaMancha(null);setObsPrendaMancha("");setBoletoResena(false);
+    setTienePrendaMancha(null);setObsPrendaMancha("");setBoletoResena(false);setProtocoloCumplido(true);
     setItems([{servId:servicios[0]?.id,piezas:1,custom:false,esProducto:false,productoId:null,lC:"",pC:""}]);
     setNotas("");setErr("");setAbono("");setTPago("completo");
   };
@@ -4355,6 +4505,12 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
             <div style={{fontSize:11,color:"#ff9800",marginTop:4}}>🧺 Incluye lavado en seco — solo cuenta el 20% como ganancia</div>
           }
         </div>
+      </Card>
+      <Card title="📋 Protocolo de atención">
+        <label style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:protocoloCumplido?"#e8f5e9":"#ffebee",borderRadius:10,cursor:"pointer",border:"1.5px solid "+(protocoloCumplido?"#2e7d32":"#e53935")}}>
+          <input type="checkbox" checked={protocoloCumplido} onChange={e=>setProtocoloCumplido(e.target.checked)} style={{width:18,height:18}}/>
+          <span style={{fontWeight:600,fontSize:13,color:"#1a3c5e"}}>✅ Cumplí el protocolo completo (saludo, confirmar datos del cliente, explicar tiempos, despedida)</span>
+        </label>
       </Card>
       <Card title="🧽 Prendas que pueden manchar">
         <div style={{fontSize:13,color:"#1a3c5e",marginBottom:10}}>¿El cliente trae alguna prenda que pueda <strong>destiñir o manchar</strong> el resto de la carga? (ej. ropa nueva de color fuerte, prendas oscuras sin lavar antes, etc.)</div>
@@ -4549,7 +4705,7 @@ function NotaCreditoModal({venta,productos,onConfirmar,onCancelar}){
   );
 }
 
-function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertVenta,sesion,productos,setProductos,upsertProducto,setKardexProductos,upsertKardexProducto}){
+function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertVenta,sesion,productos,setProductos,upsertProducto,setKardexProductos,upsertKardexProducto,setQuejas,upsertQueja}){
   const [showAb,setShowAb]=useState(false);
   const [waListo,setWaListo]=useState(false);
   const [showNotaCredito,setShowNotaCredito]=useState(false);
@@ -4628,6 +4784,15 @@ function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertV
           {!esPag&&!v.anulada&&<button style={{...S.btnT,background:"#fff3e0",color:"#e65100"}} onClick={()=>setShowAb(true)}>💰 Pago</button>}
           {!v.anulada&&esAdmin&&setVentas&&<button style={{...S.btnT,background:"#ffebee",color:"#c62828"}} onClick={()=>{const m=window.prompt("Motivo de anulacion:");if(m===null||!m.trim())return;setVentas(prev=>{const next=prev.map(vv=>vv.folio===v.folio?{...vv,anulada:true,motivoAnulacion:m,anuladaPor:sesion?.nombre||"Administrador",anuladaEn:new Date().toISOString()}:vv);const updated=next.find(vv=>vv.folio===v.folio);if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});return next;});}}>❌ Anular</button>}
           {!v.anulada&&esAdmin&&tieneProductos&&setProductos&&<button style={{...S.btnT,background:"#e8f5e9",color:"#2e7d32"}} onClick={()=>setShowNotaCredito(true)}>↩️ Nota de crédito</button>}
+          {!v.anulada&&esAdmin&&setQuejas&&<button style={{...S.btnT,background:"#fff3e0",color:"#e65100"}} onClick={()=>{
+            const emp=empleadas.find(e=>e.id===v.empleadaId);
+            const motivo=window.prompt(`¿Motivo de la queja sobre esta orden?${emp?` (atendida por ${emp.nombre})`:""}`,"");
+            if(motivo===null||!motivo.trim())return;
+            const q={id:"queja_"+Date.now(),empleadaId:v.empleadaId||null,ventaFolio:v.folio,clienteNombre:v.clienteNombre||"",motivo:motivo.trim(),fecha:new Date().toISOString(),registradoPor:sesion?.nombre||null};
+            setQuejas(prev=>[q,...prev]);
+            if(upsertQueja)upsertQueja({...q,_updatedAt:new Date().toISOString()});
+            alert("Queja registrada.");
+          }}>📢 Registrar queja</button>}
         </div>
         {(v.notasCredito||[]).length>0&&(
           <div style={{marginTop:8,background:"#e8f5e9",borderRadius:8,padding:"8px 10px"}}>
@@ -4644,7 +4809,7 @@ function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertV
   );
 }
 
-function Historial({ventas,setVentas,empleadas,setTicket,addAbono,esAdmin,upsertVenta,sesion,productos,setProductos,upsertProducto,setKardexProductos,upsertKardexProducto}){
+function Historial({ventas,setVentas,empleadas,setTicket,addAbono,esAdmin,upsertVenta,sesion,productos,setProductos,upsertProducto,setKardexProductos,upsertKardexProducto,setQuejas,upsertQueja}){
   const [fP,setFP]=useState("Todos");const [fE,setFE]=useState("Todos");
   const [fEmp,setFEmp]=useState("Todos");const [fF,setFF]=useState("");const [busq,setBusq]=useState("");
   const filtered=ventas.filter(v=>{
@@ -4669,7 +4834,7 @@ function Historial({ventas,setVentas,empleadas,setTicket,addAbono,esAdmin,upsert
         </div>
       </Card>
       <div style={{fontSize:12,color:"#888",marginBottom:8}}>{filtered.length} ventas — Total: ${filtered.reduce((a,v)=>a+v.total,0).toFixed(2)}</div>
-      {filtered.length===0?<div style={S.empty}>Sin resultados</div>:filtered.map(v=><VentaCardItem key={v.folio} v={v} empleadas={empleadas} setTicket={setTicket} addAbono={addAbono} setVentas={setVentas} esAdmin={esAdmin} upsertVenta={upsertVenta} sesion={sesion} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto}/>)}
+      {filtered.length===0?<div style={S.empty}>Sin resultados</div>:filtered.map(v=><VentaCardItem key={v.folio} v={v} empleadas={empleadas} setTicket={setTicket} addAbono={addAbono} setVentas={setVentas} esAdmin={esAdmin} upsertVenta={upsertVenta} sesion={sesion} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto} setQuejas={setQuejas} upsertQueja={upsertQueja}/>)}
     </div>
   );
 }
@@ -5261,6 +5426,10 @@ function Equipo({empleadas,setEmpleadas,ventas,esAdmin,upsertEmpleada}){
                     <option value="general">General</option>
                     <option value="recepcionista">🧾 Recepcionista (facturación SRI, etc.)</option>
                   </select>
+                </div>
+                <div style={{marginTop:8}}>
+                  <label style={S.lbl}>Hora esperada de entrada al turno (para Evaluación de Desempeño)</label>
+                  <input type="time" style={S.inp} value={ed.horaEntradaEsperada||"09:00"} onChange={ev=>setEd({...ed,horaEntradaEsperada:ev.target.value})}/>
                 </div>
               </div>
               <div style={{display:"flex",gap:8}}><button style={{...S.btnP,flex:1}} onClick={save2}>✓ Guardar</button><button style={S.btnC} onClick={()=>setEditId(null)}>Cancelar</button></div>
@@ -6021,6 +6190,418 @@ function ConteosAdmin({conteos}){
         </Card>
       );
     })}
+  </div>);
+}
+
+// 📋 EVALUACIÓN DE DESEMPEÑO — pantalla principal: selector de mes/colaboradora, tabla de indicadores, nota final, semáforo, imprimir PDF
+function EvaluacionDesempeno({empleadas,ventas,eventosProduccion,tareasDiarias,quejas,cargas,evalConfig,esAdmin,miEmpleadaId}){
+  const activas=(empleadas||[]).filter(e=>e.activa);
+  const [mesSel,setMesSel]=useState(mesK(new Date()));
+  const [empSel,setEmpSel]=useState(esAdmin?(activas[0]?.id||null):miEmpleadaId);
+  const empleadaActual=activas.find(e=>String(e.id)===String(empSel))||empleadas.find(e=>String(e.id)===String(empSel));
+
+  const {filas,notaFinal}=empleadaActual?calcularKPIsEmpleada(empleadaActual.id,mesSel,{ventas,eventosProduccion,tareasDiarias,quejas,cargas,empleada:empleadaActual,config:evalConfig}):{filas:[],notaFinal:0};
+  const semaforo=notaFinal>=90?{color:"#2e7d32",bg:"#e8f5e9",label:"🟢 Verde — desempeño sobresaliente"}:notaFinal>=75?{color:"#e65100",bg:"#fff3e0",label:"🟡 Amarillo — cumple, con oportunidades de mejora"}:{color:"#c62828",bg:"#ffebee",label:"🔴 Rojo — requiere plan de mejora"};
+
+  const imprimirPDF=()=>{
+    const w=window.open("","_blank","width=800,height=1000");
+    if(!w)return;
+    const filasHtml=filas.map(f=>{
+      const realTxt=f.sinDatos?"Sin datos":f.unidad==="$"?"$"+f.real.toFixed(2):f.unidad==="#"?f.real:f.real.toFixed(0)+"%";
+      const metaTxt=f.unidad==="$"?"$"+f.meta.toFixed(2):f.unidad==="#"?"máx "+f.meta:f.meta+"%";
+      return"<tr><td style='padding:8px;border:1px solid #ddd'>"+f.label+"</td><td style='padding:8px;border:1px solid #ddd;text-align:center'>"+metaTxt+"</td><td style='padding:8px;border:1px solid #ddd;text-align:center'>"+realTxt+"</td><td style='padding:8px;border:1px solid #ddd;text-align:center'>"+(f.sinDatos?"—":f.pctCumplimiento.toFixed(0)+"%")+"</td><td style='padding:8px;border:1px solid #ddd;text-align:center'>"+f.peso+"%</td><td style='padding:8px;border:1px solid #ddd;text-align:center;font-weight:bold'>"+f.puntaje.toFixed(1)+"</td></tr>";
+    }).join("");
+    const html="<html><head><meta charset='UTF-8'><title>Evaluación de Desempeño</title><style>body{font-family:sans-serif;padding:30px;color:#1a3c5e}table{width:100%;border-collapse:collapse;margin-top:16px;font-size:13px}th{background:#1a3c5e;color:#fff;padding:8px;text-align:left}</style></head><body>"
+      +"<div style='text-align:center;margin-bottom:20px'><div style='font-size:22px;font-weight:800'>🫧 Lava&Listo</div><div style='font-size:12px;color:#888'>Ricaurte, Cuenca</div></div>"
+      +"<h2 style='text-align:center;border-bottom:2px solid #1a3c5e;padding-bottom:10px'>Evaluación de Desempeño</h2>"
+      +"<div style='display:flex;justify-content:space-between;margin:16px 0;font-size:14px'><div><strong>Colaboradora:</strong> "+(empleadaActual?.nombre||"")+"</div><div><strong>Mes evaluado:</strong> "+mesSel+"</div></div>"
+      +"<table><tr><th>Indicador</th><th>Meta</th><th>Resultado real</th><th>% Cumplimiento</th><th>Peso</th><th>Puntaje</th></tr>"+filasHtml+"</table>"
+      +"<div style='margin-top:24px;padding:16px;background:"+semaforo.bg+";border-radius:10px;text-align:center'><div style='font-size:14px;color:#555'>NOTA FINAL</div><div style='font-size:32px;font-weight:800;color:"+semaforo.color+"'>"+notaFinal.toFixed(1)+"%</div><div style='font-size:13px;color:"+semaforo.color+";font-weight:600'>"+semaforo.label+"</div></div>"
+      +"<div style='margin-top:60px;display:flex;justify-content:space-between'><div style='border-top:1px solid #333;width:200px;text-align:center;padding-top:6px;font-size:12px'>Firma colaboradora</div><div style='border-top:1px solid #333;width:200px;text-align:center;padding-top:6px;font-size:12px'>Firma administradora</div></div>"
+      +"<scr"+"ipt>window.print();</"+"script></body></html>";
+    w.document.write(html);
+    w.document.close();
+  };
+
+  return(<div style={S.panel}>
+    <h2 style={S.ptitle}>📋 Evaluación de Desempeño</h2>
+    <Card title="🔍 Selección">
+      <div style={{display:"grid",gridTemplateColumns:esAdmin?"1fr 1fr":"1fr",gap:8}}>
+        <div><label style={S.lbl}>Mes</label><input type="month" style={S.inp} value={mesSel} onChange={e=>setMesSel(e.target.value)}/></div>
+        {esAdmin&&<div><label style={S.lbl}>Colaboradora</label><select style={S.inp} value={empSel||""} onChange={e=>setEmpSel(e.target.value)}>{activas.map(e=><option key={e.id} value={e.id}>{e.nombre}</option>)}</select></div>}
+      </div>
+    </Card>
+
+    {!empleadaActual&&<div style={S.empty}>No se pudo identificar a la colaboradora.</div>}
+
+    {empleadaActual&&(<>
+      <div style={{background:semaforo.bg,borderRadius:14,padding:18,marginBottom:16,textAlign:"center",border:`2px solid ${semaforo.color}`}}>
+        <div style={{fontSize:12,color:"#888",fontWeight:600}}>{empleadaActual.nombre} · {mesSel}</div>
+        <div style={{fontSize:38,fontWeight:800,color:semaforo.color,margin:"6px 0"}}>{notaFinal.toFixed(1)}%</div>
+        <div style={{fontSize:13,fontWeight:700,color:semaforo.color}}>{semaforo.label}</div>
+      </div>
+
+      <Card title="📊 Detalle por indicador">
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:520}}>
+            <thead>
+              <tr style={{background:"#f0f4f8",textAlign:"left"}}>
+                <th style={{padding:"6px 8px"}}>Indicador</th>
+                <th style={{padding:"6px 8px",textAlign:"center"}}>Meta</th>
+                <th style={{padding:"6px 8px",textAlign:"center"}}>Real</th>
+                <th style={{padding:"6px 8px",textAlign:"center"}}>% Cumpl.</th>
+                <th style={{padding:"6px 8px",textAlign:"center"}}>Peso</th>
+                <th style={{padding:"6px 8px",textAlign:"center"}}>Puntaje</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filas.map(f=>(
+                <tr key={f.key} style={{borderBottom:"1px solid #f0f4f8"}}>
+                  <td style={{padding:"6px 8px",color:"#1a3c5e",fontWeight:600}}>{f.label}</td>
+                  <td style={{padding:"6px 8px",textAlign:"center",color:"#888"}}>{f.unidad==="$"?"$"+f.meta.toFixed(2):f.unidad==="#"?"máx "+f.meta:f.meta+"%"}</td>
+                  <td style={{padding:"6px 8px",textAlign:"center",fontWeight:700,color:f.sinDatos?"#aaa":"#1a3c5e"}}>{f.sinDatos?"Sin datos":f.unidad==="$"?"$"+f.real.toFixed(2):f.unidad==="#"?f.real:f.real.toFixed(0)+"%"}</td>
+                  <td style={{padding:"6px 8px",textAlign:"center",fontWeight:700,color:f.sinDatos?"#aaa":f.pctCumplimiento>=90?"#2e7d32":f.pctCumplimiento>=75?"#e65100":"#c62828"}}>{f.sinDatos?"—":f.pctCumplimiento.toFixed(0)+"%"}</td>
+                  <td style={{padding:"6px 8px",textAlign:"center",color:"#888"}}>{f.peso}%</td>
+                  <td style={{padding:"6px 8px",textAlign:"center",fontWeight:800,color:"#1a3c5e"}}>{f.puntaje.toFixed(1)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {filas.some(f=>f.sinDatos)&&<div style={{fontSize:11,color:"#888",marginTop:10}}>💡 "Sin datos" significa que no hubo actividad registrada de ese indicador en el mes — no resta puntos, pero tampoco suma.</div>}
+      </Card>
+
+      <button style={{...S.btnP,width:"100%"}} onClick={imprimirPDF}>🖨️ Imprimir / Exportar PDF</button>
+    </>)}
+  </div>);
+}
+
+// ⚙️ Configuración de pesos/metas de la Evaluación de Desempeño (solo admin)
+function EvaluacionConfigAdmin({evalConfig,setEvalConfigArr,upsertEvalConfig}){
+  const [ed,setEd]=useState({pesos:{...evalConfig.pesos},metas:{...evalConfig.metas},tiemposEstandar:{...evalConfig.tiemposEstandar},tiemposEstandarZapatos:{...(evalConfig.tiemposEstandarZapatos||{lavado:78,centrifugado:15,secado:90})},toleranciaPuntualidadMin:evalConfig.toleranciaPuntualidadMin});
+  const [guardado,setGuardado]=useState(false);
+  const sumaPesos=Object.values(ed.pesos).reduce((a,v)=>a+(parseFloat(v)||0),0);
+  const guardar=()=>{
+    if(Math.round(sumaPesos)!==100){alert(`Los pesos deben sumar exactamente 100%. Ahora mismo suman ${sumaPesos}%.`);return;}
+    const nuevo={id:"config",pesos:Object.fromEntries(Object.entries(ed.pesos).map(([k,v])=>[k,parseFloat(v)||0])),metas:Object.fromEntries(Object.entries(ed.metas).map(([k,v])=>[k,parseFloat(v)||0])),tiemposEstandar:Object.fromEntries(Object.entries(ed.tiemposEstandar).map(([k,v])=>[k,parseFloat(v)||0])),tiemposEstandarZapatos:Object.fromEntries(Object.entries(ed.tiemposEstandarZapatos).map(([k,v])=>[k,parseFloat(v)||0])),toleranciaPuntualidadMin:parseFloat(ed.toleranciaPuntualidadMin)||10};
+    setEvalConfigArr([nuevo]);
+    if(upsertEvalConfig)upsertEvalConfig({...nuevo,_updatedAt:new Date().toISOString()});
+    setGuardado(true);setTimeout(()=>setGuardado(false),2000);
+  };
+  return(<div style={S.panel}>
+    <h2 style={S.ptitle}>⚙️ Configurar Evaluación de Desempeño</h2>
+    {guardado&&<div style={{...S.alrt,background:"#e8f5e9",color:"#2e7d32"}}>✅ Guardado</div>}
+    <Card title="⚖️ Pesos por indicador (deben sumar 100%)">
+      <div style={{fontSize:13,fontWeight:800,marginBottom:8,color:sumaPesos===100?"#2e7d32":"#c62828"}}>Suma actual: {sumaPesos}% {sumaPesos===100?"✅":"⚠️"}</div>
+      {EVAL_INDICADORES.map(ind=>(
+        <div key={ind.key} style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+          <span style={{flex:1,fontSize:13}}>{ind.label}</span>
+          <input type="number" style={{...S.inp,width:70}} value={ed.pesos[ind.key]} onChange={e=>setEd({...ed,pesos:{...ed.pesos,[ind.key]:e.target.value}})}/>
+          <span style={{fontSize:12,color:"#888"}}>%</span>
+        </div>
+      ))}
+    </Card>
+    <Card title="🎯 Metas por indicador">
+      {EVAL_INDICADORES.map(ind=>(
+        <div key={ind.key} style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+          <span style={{flex:1,fontSize:13}}>{ind.label}</span>
+          <input type="number" step="0.01" style={{...S.inp,width:80}} value={ed.metas[ind.key]} onChange={e=>setEd({...ed,metas:{...ed.metas,[ind.key]:e.target.value}})}/>
+          <span style={{fontSize:12,color:"#888"}}>{ind.unidad}</span>
+        </div>
+      ))}
+    </Card>
+    <Card title="⏱️ Tiempo estándar por etapa — ROPA (minutos)">
+      {[["lavado","Lavado"],["centrifugado","Centrifugado"],["secado","Secado"],["doblado","Doblado/Empaquetado"]].map(([k,l])=>(
+        <div key={k} style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+          <span style={{flex:1,fontSize:13}}>{l}</span>
+          <input type="number" style={{...S.inp,width:70}} value={ed.tiemposEstandar[k]} onChange={e=>setEd({...ed,tiemposEstandar:{...ed.tiemposEstandar,[k]:e.target.value}})}/>
+          <span style={{fontSize:12,color:"#888"}}>min</span>
+        </div>
+      ))}
+    </Card>
+    <Card title="⏱️ Tiempo estándar por etapa — ZAPATOS (minutos)">
+      <div style={{fontSize:11,color:"#888",marginBottom:8}}>Lavado 1.3h y secado 1.5h para 20 pares — la duración real crece si hay más pares o se usan más máquinas, este es solo el estándar de referencia.</div>
+      {[["lavado","Lavado"],["centrifugado","Centrifugado (6-7 pares)"],["secado","Secado (hasta 20 pares)"]].map(([k,l])=>(
+        <div key={k} style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+          <span style={{flex:1,fontSize:13}}>{l}</span>
+          <input type="number" style={{...S.inp,width:70}} value={ed.tiemposEstandarZapatos[k]} onChange={e=>setEd({...ed,tiemposEstandarZapatos:{...ed.tiemposEstandarZapatos,[k]:e.target.value}})}/>
+          <span style={{fontSize:12,color:"#888"}}>min</span>
+        </div>
+      ))}
+      <div style={{display:"flex",alignItems:"center",gap:10,marginTop:10}}>
+        <span style={{flex:1,fontSize:13}}>Tolerancia de puntualidad</span>
+        <input type="number" style={{...S.inp,width:70}} value={ed.toleranciaPuntualidadMin} onChange={e=>setEd({...ed,toleranciaPuntualidadMin:e.target.value})}/>
+        <span style={{fontSize:12,color:"#888"}}>min</span>
+      </div>
+    </Card>
+    <button style={{...S.btnP,width:"100%"}} onClick={guardar}>💾 Guardar configuración</button>
+  </div>);
+}
+
+// 🏭 REPORTE DE USO DE MÁQUINAS — desde qué hora hasta qué hora estuvo ocupada cada máquina, comparado contra el
+// tiempo estándar real (ropa: lavado ~67min, secado ~70min · zapatos: lavado 1.3h, centrifugado 15min, secado hasta 1.5h)
+function ReporteMaquinas({cargas,maquinas,ventas,evalConfig}){
+  const hoy=fechaHoyLocal();
+  const [desde,setDesde]=useState(hoy);
+  const [hasta,setHasta]=useState(hoy);
+  const [filtroMaquina,setFiltroMaquina]=useState("todas");
+  const nombreMaquina=id=>maquinas.find(m=>m.id===id)?.nombre||id;
+  const clienteDe=folio=>ventas.find(v=>v.folio===folio)?.clienteNombre||"—";
+
+  const cargasFiltradas=(cargas||[]).filter(c=>{
+    const f=fechaLocal(c.inicio);
+    if(f<desde||f>hasta)return false;
+    if(filtroMaquina!=="todas"&&c.maquinaId!==filtroMaquina)return false;
+    return true;
+  }).sort((a,b)=>new Date(b.inicio)-new Date(a.inicio));
+
+  const estandarDe=c=>{
+    const tabla=c.grupo==="zapatos"?(evalConfig.tiemposEstandarZapatos||{}):evalConfig.tiemposEstandar;
+    return tabla[c.tipo]||c.minutosProgramados||45;
+  };
+
+  const totalHorasOcupada=cargasFiltradas.filter(c=>c.finReal).reduce((a,c)=>a+(new Date(c.finReal)-new Date(c.inicio))/3600000,0);
+  const promDuracion=cargasFiltradas.filter(c=>c.finReal).length>0?cargasFiltradas.filter(c=>c.finReal).reduce((a,c)=>a+(new Date(c.finReal)-new Date(c.inicio))/60000,0)/cargasFiltradas.filter(c=>c.finReal).length:0;
+
+  const exportarCSV=()=>{
+    if(cargasFiltradas.length===0){alert("No hay cargas en ese rango.");return;}
+    const enc=["Máquina","Tipo","Grupo","Cliente(s)","Desde","Hasta","Duración real (min)","Estándar (min)","Diferencia (min)","¿Dentro del estándar?"];
+    const filas=cargasFiltradas.map(c=>{
+      const folios=c.ventaFolios&&c.ventaFolios.length?c.ventaFolios:[c.ventaFolio];
+      const duracionReal=c.finReal?Math.round((new Date(c.finReal)-new Date(c.inicio))/60000):null;
+      const estandar=estandarDe(c);
+      return[nombreMaquina(c.maquinaId),c.tipo,c.grupo||"ropa",folios.map(clienteDe).join(" | "),fmt(c.inicio),c.finReal?fmt(c.finReal):"En curso",duracionReal??"—",estandar,duracionReal!=null?duracionReal-estandar:"—",duracionReal!=null?(duracionReal<=estandar*1.15?"Sí":"No"):"—"];
+    });
+    const csv=[enc,...filas].map(f=>f.map(c=>'"'+String(c).replace(/"/g,'\\"')+'"').join(",")).join("\n");
+    const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
+    const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="uso_maquinas-"+desde+"_a_"+hasta+".csv";a.click();
+  };
+
+  return(<div style={S.panel}>
+    <h2 style={S.ptitle}>🏭 Reporte de uso de máquinas</h2>
+    <Card title="🔍 Filtros">
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+        <div><label style={S.lbl}>Desde</label><input type="date" style={S.inp} value={desde} onChange={e=>setDesde(e.target.value)}/></div>
+        <div><label style={S.lbl}>Hasta</label><input type="date" style={S.inp} value={hasta} onChange={e=>setHasta(e.target.value)}/></div>
+      </div>
+      <label style={S.lbl}>Máquina</label>
+      <select style={S.inp} value={filtroMaquina} onChange={e=>setFiltroMaquina(e.target.value)}>
+        <option value="todas">Todas las máquinas</option>
+        {maquinas.map(m=><option key={m.id} value={m.id}>{m.nombre}</option>)}
+      </select>
+      <button style={{...S.btnP,width:"100%",marginTop:10}} onClick={exportarCSV}>📥 Descargar CSV ({cargasFiltradas.length})</button>
+    </Card>
+
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
+      <div style={{...S.kpi,borderLeft:"4px solid #1a3c5e"}}><div style={{fontSize:20}}>⏱️</div><div><div style={{fontWeight:800,fontSize:16,color:"#1a3c5e"}}>{totalHorasOcupada.toFixed(1)}h</div><div style={{fontSize:11,fontWeight:600,color:"#1a3c5e"}}>Total horas ocupadas</div></div></div>
+      <div style={{...S.kpi,borderLeft:"4px solid #4db6e4"}}><div style={{fontSize:20}}>📊</div><div><div style={{fontWeight:800,fontSize:16,color:"#1a3c5e"}}>{promDuracion.toFixed(0)} min</div><div style={{fontSize:11,fontWeight:600,color:"#1a3c5e"}}>Duración promedio</div></div></div>
+    </div>
+
+    <Card title={`📋 Cargas registradas (${cargasFiltradas.length})`}>
+      {cargasFiltradas.length===0&&<div style={S.empty}>Sin cargas en este rango.</div>}
+      <div style={{overflowX:"auto"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:640}}>
+          <thead>
+            <tr style={{background:"#f0f4f8",textAlign:"left"}}>
+              <th style={{padding:"6px 8px"}}>Máquina</th>
+              <th style={{padding:"6px 8px"}}>Tipo</th>
+              <th style={{padding:"6px 8px"}}>Cliente(s)</th>
+              <th style={{padding:"6px 8px",whiteSpace:"nowrap"}}>Desde</th>
+              <th style={{padding:"6px 8px",whiteSpace:"nowrap"}}>Hasta</th>
+              <th style={{padding:"6px 8px",textAlign:"right"}}>Duración</th>
+              <th style={{padding:"6px 8px",textAlign:"right"}}>Estándar</th>
+              <th style={{padding:"6px 8px",textAlign:"center"}}>¿OK?</th>
+            </tr>
+          </thead>
+          <tbody>
+            {cargasFiltradas.map(c=>{
+              const folios=c.ventaFolios&&c.ventaFolios.length?c.ventaFolios:[c.ventaFolio];
+              const duracionReal=c.finReal?Math.round((new Date(c.finReal)-new Date(c.inicio))/60000):null;
+              const estandar=estandarDe(c);
+              const ok=duracionReal!=null?duracionReal<=estandar*1.15:null;
+              return(
+                <tr key={c.id} style={{borderBottom:"1px solid #f0f4f8"}}>
+                  <td style={{padding:"6px 8px",fontWeight:700,color:"#1a3c5e"}}>{nombreMaquina(c.maquinaId)}{c.grupo==="zapatos"?" 👟":""}</td>
+                  <td style={{padding:"6px 8px",color:"#888"}}>{c.tipo}</td>
+                  <td style={{padding:"6px 8px",color:"#888",maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{folios.map(clienteDe).join(", ")}</td>
+                  <td style={{padding:"6px 8px",whiteSpace:"nowrap"}}>{fmt(c.inicio)}</td>
+                  <td style={{padding:"6px 8px",whiteSpace:"nowrap"}}>{c.finReal?fmt(c.finReal):<span style={{color:"#1565c0",fontWeight:700}}>En curso</span>}</td>
+                  <td style={{padding:"6px 8px",textAlign:"right",fontWeight:700}}>{duracionReal!=null?duracionReal+" min":"—"}</td>
+                  <td style={{padding:"6px 8px",textAlign:"right",color:"#888"}}>{estandar} min</td>
+                  <td style={{padding:"6px 8px",textAlign:"center"}}>{ok===null?"—":ok?"✅":"⚠️"}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  </div>);
+}
+
+// ⏱️ TIEMPOS DE ROPA POR LIBRAS — analiza cada orden de ropa: quién la atendió, cuánto tardó en total, y en cada
+// espera entre etapas, si fue porque las máquinas estaban ocupadas (normal) o porque nadie actuó a tiempo aunque
+// había máquina libre (demora operativa). Excluye zapatos — eso se ve en la pestaña Zapatos, no aquí.
+function TiemposRopaAdmin({ventas,eventosProduccion,cargas,maquinas,empleadas}){
+  const hoy=fechaHoyLocal();
+  const [desde,setDesde]=useState((()=>{const d=new Date();d.setDate(d.getDate()-30);return fechaLocal(d.toISOString());})());
+  const [hasta,setHasta]=useState(hoy);
+  const [verDetalleFolio,setVerDetalleFolio]=useState(null);
+  const esZapatoLbl=lbl=>/ZAPATO|PARES?\b|TENIS|CALZADO|BOTAS?\b|SANDALIA|ZAPATILLA|MOCAS[IÍ]N|SNEAKER|TAC[OÓ]N/i.test(lbl||"");
+  const esLavadoSecoLbl=lbl=>/SECO/i.test(lbl||"");
+  const nombreDe=id=>empleadas.find(e=>String(e.id)===String(id))?.nombre||"—";
+  const eventosDeFolio=(folio,etapa,grupo)=>(eventosProduccion||[]).filter(ev=>ev.ventaFolio===folio&&ev.etapa===etapa&&(grupo?(ev.grupo||null)===grupo:!ev.grupo)).sort((a,b)=>new Date(a.timestamp)-new Date(b.timestamp));
+  const cargaDeFolio=(folio,tipo,grupo)=>(cargas||[]).filter(c=>(c.ventaFolio===folio||(c.ventaFolios||[]).includes(folio))&&c.tipo===tipo&&(grupo?c.grupo===grupo:!c.grupo)).sort((a,b)=>new Date(a.inicio)-new Date(b.inicio))[0];
+
+  // 📋 Ordenes de ropa/edredones/otros servicios (excluye zapatos Y lavado en seco) dentro del rango, con revisión hecha
+  const ordenesRopa=(ventas||[]).filter(v=>{
+    if(v.anulada)return false;
+    const f=fechaLocal(v.fecha);
+    if(f<desde||f>hasta)return false;
+    const itemsNoZapato=(v.items||[]).filter(it=>!esZapatoLbl(it.label));
+    const tieneRopa=v.prodGrupos?v.prodGrupos.includes("ropa"):itemsNoZapato.length>0;
+    const soloLavadoSeco=itemsNoZapato.length>0&&itemsNoZapato.every(it=>esLavadoSecoLbl(it.label));
+    return tieneRopa&&!soloLavadoSeco&&v.clasificacion;
+  });
+
+  const analisis=ordenesRopa.map(v=>{
+    const grupo=v.prodGrupos?"ropa":null;
+    const libras=librasDeVenta(v,esZapatoLbl);
+    const servicioPrincipal=(v.items||[]).find(it=>!esZapatoLbl(it.label)&&!esLavadoSecoLbl(it.label))?.label||(v.items||[])[0]?.label||"—";
+    const clasifTs=v.clasificacion.timestamp;
+    const cLav=cargaDeFolio(v.folio,"lavado",grupo);
+    const cCen=cargaDeFolio(v.folio,"centrifugado",grupo);
+    const cSec=cargaDeFolio(v.folio,"secado",grupo);
+    const evDobIni=eventosDeFolio(v.folio,"doblado_inicio",grupo)[0];
+    const evDobFin=eventosDeFolio(v.folio,"doblado_fin",grupo)[0];
+
+    const etapas=[];
+    if(cLav){
+      const esperaLav=minutosLaboralesEntre(clasifTs,cLav.inicio);
+      etapas.push({nombre:"Espera para lavar",min:esperaLav,tipoEspera:esperaLav>5?(habiaMaquinaLibreEn(clasifTs,"lavadora",cargas,maquinas)?"demora":"maquina"):"ok"});
+      etapas.push({nombre:"Lavado",min:cLav.finReal?minutosLaboralesEntre(cLav.inicio,cLav.finReal):null,tipoEspera:"proceso",empleadaId:cLav.empleadaId});
+    }
+    const finLav=cLav?.finReal;
+    const inicioSiguiente=cCen?.inicio||cSec?.inicio;
+    if(finLav&&inicioSiguiente){
+      const esperaSig=minutosLaboralesEntre(finLav,inicioSiguiente);
+      const tipoMaq=cCen?"lavadora":"secadora";
+      etapas.push({nombre:cCen?"Espera para centrifugar":"Espera para secar",min:esperaSig,tipoEspera:esperaSig>5?(habiaMaquinaLibreEn(finLav,tipoMaq,cargas,maquinas)?"demora":"maquina"):"ok"});
+    }
+    if(cCen)etapas.push({nombre:"Centrifugado",min:cCen.finReal?minutosLaboralesEntre(cCen.inicio,cCen.finReal):null,tipoEspera:"proceso",empleadaId:cCen.empleadaId});
+    const finCen=cCen?.finReal;
+    if(finCen&&cSec){
+      const esperaSec=minutosLaboralesEntre(finCen,cSec.inicio);
+      etapas.push({nombre:"Espera para secar",min:esperaSec,tipoEspera:esperaSec>5?(habiaMaquinaLibreEn(finCen,"secadora",cargas,maquinas)?"demora":"maquina"):"ok"});
+    }
+    if(cSec)etapas.push({nombre:"Secado",min:cSec.finReal?minutosLaboralesEntre(cSec.inicio,cSec.finReal):null,tipoEspera:"proceso",empleadaId:cSec.empleadaId});
+    if(cSec?.finReal&&evDobIni){
+      const esperaDob=minutosLaboralesEntre(cSec.finReal,evDobIni.timestamp);
+      etapas.push({nombre:"Espera para doblar",min:esperaDob,tipoEspera:esperaDob>5?"demora":"ok"}); // doblar no usa máquina, así que si tarda, es operativo
+    }
+    if(evDobIni&&evDobFin)etapas.push({nombre:"Doblado",min:minutosLaboralesEntre(evDobIni.timestamp,evDobFin.timestamp),tipoEspera:"proceso",empleadaId:evDobFin.empleadaId});
+
+    const tiempoTotalMin=evDobFin?minutosLaboralesEntre(v.fecha,evDobFin.timestamp):null;
+    return{folio:v.folio,cliente:v.clienteNombre,libras,servicioPrincipal,atendidaPor:v.clasificacion.empleadaId,tiempoTotalMin,etapas,completa:!!evDobFin};
+  });
+
+  // 📊 Agrupar por rango de libras
+  const RANGOS=[[0,15,"0-15 lb"],[16,25,"16-25 lb"],[26,40,"26-40 lb"],[41,999,"41+ lb"]];
+  const porRango=RANGOS.map(([min,max,label])=>{
+    const deEsteRango=analisis.filter(a=>a.completa&&a.libras>=min&&a.libras<=max);
+    const promedio=deEsteRango.length>0?deEsteRango.reduce((a,x)=>a+x.tiempoTotalMin,0)/deEsteRango.length:null;
+    return{label,cantidad:deEsteRango.length,promedioMin:promedio};
+  });
+
+  // 📊 Agrupar por SERVICIO (ej. "COLCHA GRANDE", "3 PARES (PACK AHORRO)") — cuánto tarda cada uno en promedio
+  const porServicio={};
+  analisis.filter(a=>a.completa).forEach(a=>{
+    if(!porServicio[a.servicioPrincipal])porServicio[a.servicioPrincipal]={total:0,cantidad:0};
+    porServicio[a.servicioPrincipal].total+=a.tiempoTotalMin;
+    porServicio[a.servicioPrincipal].cantidad+=1;
+  });
+  const listaPorServicio=Object.entries(porServicio).map(([nombre,d])=>({nombre,cantidad:d.cantidad,promedioMin:d.total/d.cantidad})).sort((a,b)=>b.cantidad-a.cantidad);
+
+  // 📊 Totales de minutos perdidos por espera de máquina vs demora operativa (solo órdenes completas)
+  let minPorMaquina=0,minPorDemora=0;
+  analisis.forEach(a=>a.etapas.forEach(e=>{if(e.tipoEspera==="maquina")minPorMaquina+=e.min;else if(e.tipoEspera==="demora")minPorDemora+=e.min;}));
+
+  const exportarCSV=()=>{
+    if(analisis.length===0){alert("No hay órdenes en ese rango.");return;}
+    const enc=["Folio","Cliente","Servicio","Libras","Atendida por","Tiempo total (min)","Minutos por espera de máquina","Minutos por demora operativa"];
+    const filas=analisis.map(a=>{
+      const porMaq=a.etapas.filter(e=>e.tipoEspera==="maquina").reduce((s,e)=>s+e.min,0);
+      const porDem=a.etapas.filter(e=>e.tipoEspera==="demora").reduce((s,e)=>s+e.min,0);
+      return[a.folio,a.cliente,a.servicioPrincipal,a.libras||"—",nombreDe(a.atendidaPor),a.tiempoTotalMin!=null?a.tiempoTotalMin.toFixed(0):"En proceso",porMaq.toFixed(0),porDem.toFixed(0)];
+    });
+    const csv=[enc,...filas].map(f=>f.map(c=>'"'+String(c).replace(/"/g,'\\"')+'"').join(",")).join("\n");
+    const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
+    const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="tiempos_por_servicio-"+desde+"_a_"+hasta+".csv";a.click();
+  };
+
+  return(<div style={S.panel}>
+    <h2 style={S.ptitle}>⏱️ Tiempos por Servicio (Ropa, edredones y otros)</h2>
+    <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ Incluye ropa, edredones y demás servicios — excluye zapatos (pestaña aparte) y lavado en seco (proceso distinto, subcontratado). Los tiempos <strong>ya descuentan las horas fuera de atención (después de las 8pm hasta que abre al día siguiente)</strong>, así una orden que queda de un día para otro no sale con tiempos inflados. Cada espera se etiqueta como <strong>⏳ Máquina ocupada</strong> (había fila, es normal) o <strong>🐢 Demora operativa</strong> (había máquina libre pero nadie actuó a tiempo).</div>
+    <Card title="🔍 Filtros">
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <div><label style={S.lbl}>Desde</label><input type="date" style={S.inp} value={desde} onChange={e=>setDesde(e.target.value)}/></div>
+        <div><label style={S.lbl}>Hasta</label><input type="date" style={S.inp} value={hasta} onChange={e=>setHasta(e.target.value)}/></div>
+      </div>
+      <button style={{...S.btnP,width:"100%",marginTop:10}} onClick={exportarCSV}>📥 Descargar CSV ({analisis.length})</button>
+    </Card>
+
+    <Card title="🧾 Promedio de tiempo total por servicio">
+      {listaPorServicio.length===0&&<div style={S.empty}>Sin órdenes completas en ese rango todavía.</div>}
+      {listaPorServicio.map(s=>(
+        <div key={s.nombre} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid #f0f4f8"}}>
+          <span style={{fontSize:13,fontWeight:600,color:"#1a3c5e",flex:1,marginRight:8}}>{s.nombre}</span>
+          <span style={{fontSize:13,color:"#888",whiteSpace:"nowrap"}}>{s.cantidad} orden{s.cantidad!==1?"es":""} · promedio {(s.promedioMin/60).toFixed(1)}h</span>
+        </div>
+      ))}
+    </Card>
+    <Card title="📊 Promedio de tiempo total por rango de libras">
+      {porRango.map(r=>(
+        <div key={r.label} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid #f0f4f8"}}>
+          <span style={{fontSize:13,fontWeight:600,color:"#1a3c5e"}}>{r.label}</span>
+          <span style={{fontSize:13,color:"#888"}}>{r.cantidad} orden{r.cantidad!==1?"es":""}{r.promedioMin!=null?` · promedio ${(r.promedioMin/60).toFixed(1)}h`:""}</span>
+        </div>
+      ))}
+    </Card>
+
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
+      <div style={{...S.kpi,borderLeft:"4px solid #1565c0"}}><div style={{fontSize:20}}>⏳</div><div><div style={{fontWeight:800,fontSize:16,color:"#1565c0"}}>{(minPorMaquina/60).toFixed(1)}h</div><div style={{fontSize:11,fontWeight:600,color:"#1a3c5e"}}>Espera por máquina ocupada</div></div></div>
+      <div style={{...S.kpi,borderLeft:"4px solid #c62828"}}><div style={{fontSize:20}}>🐢</div><div><div style={{fontWeight:800,fontSize:16,color:"#c62828"}}>{(minPorDemora/60).toFixed(1)}h</div><div style={{fontSize:11,fontWeight:600,color:"#1a3c5e"}}>Demora operativa</div></div></div>
+    </div>
+
+    <Card title={`📋 Detalle por orden (${analisis.length})`}>
+      {analisis.length===0&&<div style={S.empty}>No hay órdenes de ropa con revisión hecha en ese rango.</div>}
+      {analisis.map(a=>(
+        <div key={a.folio} style={S.vcard}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div>
+              <div style={{fontWeight:700,fontSize:13}}>{a.cliente} <span style={{color:"#aaa",fontWeight:400,fontSize:11}}>({a.folio})</span></div>
+              <div style={{fontSize:11,color:"#888"}}>{a.servicioPrincipal}{a.libras?` · ${a.libras} lb`:""} · Atendida por {nombreDe(a.atendidaPor)}</div>
+            </div>
+            <div style={{textAlign:"right"}}>
+              <div style={{fontWeight:800,color:"#1a3c5e"}}>{a.tiempoTotalMin!=null?(a.tiempoTotalMin/60).toFixed(1)+"h":"En proceso"}</div>
+              <button style={{...S.btnS,marginTop:4}} onClick={()=>setVerDetalleFolio(verDetalleFolio===a.folio?null:a.folio)}>{verDetalleFolio===a.folio?"Ocultar":"Ver etapas"}</button>
+            </div>
+          </div>
+          {verDetalleFolio===a.folio&&(
+            <div style={{marginTop:10,background:"#f8fbfd",borderRadius:8,padding:"8px 10px"}}>
+              {a.etapas.map((e,i)=>(
+                <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:i<a.etapas.length-1?"1px solid #f0f4f8":"none"}}>
+                  <span style={{color:e.tipoEspera==="maquina"?"#1565c0":e.tipoEspera==="demora"?"#c62828":"#1a3c5e"}}>
+                    {e.tipoEspera==="maquina"?"⏳ ":e.tipoEspera==="demora"?"🐢 ":""}{e.nombre}{e.empleadaId?` (${nombreDe(e.empleadaId)})`:""}
+                  </span>
+                  <strong>{e.min!=null?e.min.toFixed(0)+" min":"—"}</strong>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </Card>
   </div>);
 }
 
@@ -7811,6 +8392,10 @@ const { data: kardexInsumos, setData: setKardexInsumos, upsert: upsertKardexInsu
 const { data: activosFijos, setData: setActivosFijos, upsert: upsertActivoFijo } = useCollection("activosFijos", "ll_activos_fijos", []);
 // 📋 Conteos físicos de inventario (Nohelia, 2 veces por semana)
 const { data: conteosInventario, setData: setConteosInventario, upsert: upsertConteoInventario } = useCollection("conteosInventario", "ll_conteos_inventario", []);
+// 📋 EVALUACIÓN DE DESEMPEÑO — quejas registradas y configuración de pesos/metas
+const { data: quejas, setData: setQuejas, upsert: upsertQueja } = useCollection("quejas", "ll_quejas", []);
+const { data: evalConfigArr, setData: setEvalConfigArr, upsert: upsertEvalConfig } = useCollection("evalConfig", "ll_eval_config", EVAL_CONFIG_DEFAULT);
+const evalConfig=evalConfigArr[0]||EVAL_CONFIG_DEFAULT[0];
 const { data: deudas, setData: setDeudas, upsert: upsertDeuda } = useCollection("deudas", "ll_deudas", []);
 // 🧴 Registro manual de ventas de perfume/aromatizador para incentivos (solo cuenta si se registra a mano)
 const { data: ventasPerfumeReg, setData: setVentasPerfumeReg, upsert: upsertVentaPerfume } = useCollection("ventasPerfumeReg", "ll_ventas_perfume_reg", []);
@@ -7994,7 +8579,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
     empleadas={empleadas}
     upsertCaja={upsertCaja}
   />;
-  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={serviciosActivos} sesion={sesion} addAbono={addAbono} onLogout={onLogout} onIrProduccion={()=>setVista("produccion")} onIrTareas={()=>setVista("tareas")} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} upsertVenta={upsertVenta} upsertSalida={upsertSalida} upsertCliente={upsertCliente} upsertCaja={upsertCaja} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos} cfgInc={cfgInc} maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga} pins={pins} eventosProduccion={eventosProduccion} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto} sorteos={sorteos} setSorteos={setSorteos} upsertSorteo={upsertSorteo} setBoletosSorteo={setBoletosSorteo} upsertBoletoSorteo={upsertBoletoSorteo} boletosParaImprimir={boletosParaImprimir} setBoletosParaImprimir={setBoletosParaImprimir} depositos={depositos} setDepositos={setDepositos} upsertDeposito={upsertDeposito} setConteosInventario={setConteosInventario} upsertConteoInventario={upsertConteoInventario} ventasPerfumeReg={ventasPerfumeReg} setVentasPerfumeReg={setVentasPerfumeReg} upsertVentaPerfume={upsertVentaPerfume}/>;
+  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={serviciosActivos} sesion={sesion} addAbono={addAbono} onLogout={onLogout} onIrProduccion={()=>setVista("produccion")} onIrTareas={()=>setVista("tareas")} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} upsertVenta={upsertVenta} upsertSalida={upsertSalida} upsertCliente={upsertCliente} upsertCaja={upsertCaja} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos} cfgInc={cfgInc} maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga} pins={pins} eventosProduccion={eventosProduccion} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto} sorteos={sorteos} setSorteos={setSorteos} upsertSorteo={upsertSorteo} setBoletosSorteo={setBoletosSorteo} upsertBoletoSorteo={upsertBoletoSorteo} boletosParaImprimir={boletosParaImprimir} setBoletosParaImprimir={setBoletosParaImprimir} depositos={depositos} setDepositos={setDepositos} upsertDeposito={upsertDeposito} setConteosInventario={setConteosInventario} upsertConteoInventario={upsertConteoInventario} ventasPerfumeReg={ventasPerfumeReg} setVentasPerfumeReg={setVentasPerfumeReg} upsertVentaPerfume={upsertVentaPerfume} tareasDiarias={tareasDiarias} quejas={quejas} evalConfig={evalConfig}/>;
   const tabs=[
     {id:"ventas",icon:"🧾",l:"Venta"},{id:"historial",icon:"📋",l:"Historial"},
     {id:"pendientes",icon:"⏳",l:"Pendientes",b:pCount},{id:"bi",icon:"🚀",l:"Dashboard"},
@@ -8002,13 +8587,13 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
     {id:"reportes",icon:"📊",l:"Reportes"},{id:"depositos",icon:"🏦",l:"Depósitos"},
     {id:"conciliacion",icon:"🏛️",l:"Conciliación"},
     {id:"gastos",icon:"🛒",l:"Gastos"},{id:"inventario",icon:"📦",l:"Inventario"},{id:"productosAdmin",icon:"🛍️",l:"Productos"},{id:"kardexAdmin",icon:"📒",l:"Kardex"},{id:"conteosAdmin",icon:"📋",l:"Conteos"},{id:"activosFijosAdmin",icon:"📦",l:"Activos Fijos"},{id:"deudasAdmin",icon:"💳",l:"Deudas"},{id:"sorteoAdmin",icon:"🎟️",l:"Sorteo"},
-    {id:"equipo",icon:"👩",l:"Equipo"},{id:"incentivosAdmin",icon:"🎯",l:"Incentivos"},{id:"maquinasAdmin",icon:"🏭",l:"Máquinas"},{id:"pinsAdmin",icon:"🔒",l:"PINs"},{id:"produccionAdmin",icon:"🧺",l:"Producción"},{id:"tareasAdmin",icon:"📋",l:"Tareas"},{id:"notasAdmin",icon:"📝",l:"Notas"},
+    {id:"equipo",icon:"👩",l:"Equipo"},{id:"incentivosAdmin",icon:"🎯",l:"Incentivos"},{id:"maquinasAdmin",icon:"🏭",l:"Máquinas"},{id:"reporteMaquinasAdmin",icon:"⏱️",l:"Uso de máquinas"},{id:"tiemposRopaAdmin",icon:"👕",l:"Tiempos x Servicio"},{id:"pinsAdmin",icon:"🔒",l:"PINs"},{id:"produccionAdmin",icon:"🧺",l:"Producción"},{id:"tareasAdmin",icon:"📋",l:"Tareas"},{id:"notasAdmin",icon:"📝",l:"Notas"},{id:"evaluacionAdmin",icon:"📋",l:"Evaluación"},{id:"evaluacionConfigAdmin",icon:"⚙️",l:"Config. Evaluación"},
     {id:"config",icon:"⚙️",l:"Config"},{id:"usuarios",icon:"🔑",l:"Usuarios"},
   ];
   // 🗂️ Agrupa las pestañas en categorías para que el panel admin se vea más ordenado (menos scroll horizontal, todo lo relacionado junto)
   const CATEGORIAS=[
     {id:"ventas_caja",icon:"🧾",l:"Ventas",tabIds:["ventas","historial","pendientes","depositos","conciliacion","cupones","promosAdmin","reportes","resumen"]},
-    {id:"personal",icon:"👥",l:"Personal",tabIds:["equipo","pinsAdmin","usuarios","tareasAdmin","notasAdmin","incentivosAdmin"]},
+    {id:"personal",icon:"👥",l:"Personal",tabIds:["equipo","pinsAdmin","usuarios","tareasAdmin","notasAdmin","incentivosAdmin","evaluacionAdmin","evaluacionConfigAdmin","reporteMaquinasAdmin","tiemposRopaAdmin"]},
     {id:"inventario_cat",icon:"📦",l:"Inventario",tabIds:["inventario","productosAdmin","kardexAdmin","conteosAdmin","gastos","maquinasAdmin","activosFijosAdmin","deudasAdmin"]},
     {id:"negocio",icon:"📊",l:"Negocio",tabIds:["bi","clientes","clientesAnalisis","sorteoAdmin","produccionAdmin","config"]},
   ];
@@ -8050,7 +8635,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
     </div>
     <div style={S.content}>
       {tab==="ventas"&&<NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={setTicketV} servicios={serviciosActivos} sesion={sesion} upsertVenta={upsertVenta} upsertCliente={upsertCliente} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto} sorteos={sorteos} setSorteos={setSorteos} upsertSorteo={upsertSorteo} setBoletosSorteo={setBoletosSorteo} upsertBoletoSorteo={upsertBoletoSorteo} onBoletosGenerados={setBoletosParaImprimir}/>}
-      {tab==="historial"&&<Historial ventas={ventas} setVentas={setVentas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} esAdmin={esAdmin} upsertVenta={upsertVenta} sesion={sesion} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto}/>}
+      {tab==="historial"&&<Historial ventas={ventas} setVentas={setVentas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} esAdmin={esAdmin} upsertVenta={upsertVenta} sesion={sesion} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto} setQuejas={setQuejas} upsertQueja={upsertQueja}/>}
       {tab==="pendientes"&&<Pendientes ventas={ventas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} setVentas={setVentas} upsertVenta={upsertVenta}/>}
       {tab==="bi"&&<DashboardBI ventas={ventas} empleadas={empleadas} gastos={gastos}/>}
       {tab==="clientes"&&<Clientes clientes={clientes} setClientes={setClientes} upsertCliente={upsertCliente} ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta}/>}
@@ -8078,6 +8663,10 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
         <Produccion ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} empleadas={empleadas} pins={pins||[]} eventosProduccion={eventosProduccion||[]} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} maquinas={maquinas||[]} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas||[]} setCargas={setCargas} upsertCarga={upsertCarga}/></div>)}
       {tab==="tareasAdmin"&&<TareasAdminPanel plantillasTareas={plantillasTareas||[]} setPlantillasTareas={setPlantillasTareas} upsertPlantillaTarea={upsertPlantillaTarea} tareasDiarias={tareasDiarias||[]} setTareasDiarias={setTareasDiarias} upsertTareaDiaria={upsertTareaDiaria} empleadas={empleadas}/>}
       {tab==="notasAdmin"&&<NotasAdminPanel notas={notas||[]} setNotas={setNotas} upsertNota={upsertNota} empleadas={empleadas}/>}
+      {tab==="evaluacionAdmin"&&<EvaluacionDesempeno empleadas={empleadas} ventas={ventas} eventosProduccion={eventosProduccion} tareasDiarias={tareasDiarias} quejas={quejas} cargas={cargas} evalConfig={evalConfig} esAdmin={true}/>}
+      {tab==="evaluacionConfigAdmin"&&<EvaluacionConfigAdmin evalConfig={evalConfig} setEvalConfigArr={setEvalConfigArr} upsertEvalConfig={upsertEvalConfig}/>}
+      {tab==="reporteMaquinasAdmin"&&<ReporteMaquinas cargas={cargas} maquinas={maquinas} ventas={ventas} evalConfig={evalConfig}/>}
+      {tab==="tiemposRopaAdmin"&&<TiemposRopaAdmin ventas={ventas} eventosProduccion={eventosProduccion} cargas={cargas} maquinas={maquinas} empleadas={empleadas}/>}
       {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={handleCierreListo} onResetCierre={()=>setCierreOk(false)} sesion={sesion} salidasCaja={salidasCaja} setVentas={setVentas} upsertVenta={upsertVenta} upsertCaja={upsertCaja}/>}
       {tab==="config"&&<Configuracion servicios={servicios} setServicios={setServicios} exportarDatos={exportarDatos} importarDatos={importarDatos} upsertVenta={upsertVenta} upsertServicio={upsertServicio}/>}
       {tab==="usuarios"&&<GestionUsuarios/>}
