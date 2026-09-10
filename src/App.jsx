@@ -686,7 +686,7 @@ const expCSV=(ventas,titulo,empleadas)=>{
   const filas=ventas.map(v=>{
     const p=(v.abonos||[]).reduce((a,ab)=>a+ab.monto,0);
     const m=[...new Set((v.abonos||[]).map(ab=>ab.metodo))].join("/");
-    return[v.folio,fmt(v.fecha),v.clienteNombre||"",v.items.map(it=>it.label).join("|"),"$"+v.total.toFixed(2),"$"+p.toFixed(2),"$"+(v.total-p).toFixed(2),m,v.estado||"recibido",v.notas||""];
+    return[v.folio,fmt(v.fecha),v.clienteNombre||"",(v.items||[]).map(it=>it.label).join("|"),"$"+v.total.toFixed(2),"$"+p.toFixed(2),"$"+(v.total-p).toFixed(2),m,v.estado||"recibido",v.notas||""];
   });
   // 💰 Fila de totales al final — para cuadrar cuentas: cuánto se vendió, cuánto se cobró y cuánto queda pendiente
   const totVendido=ventas.reduce((a,v)=>a+v.total,0);
@@ -880,7 +880,7 @@ function TicketModal({venta,empleadas,onClose}){
         {emp&&<div style={S.trow}><span>Atendio</span><span>{emp.nombre}</span></div>}
         <div style={{...S.trow,color:est.color}}><span>Estado</span><span>{est.icon} {est.label}</span></div>
         <div style={S.tdiv}/>
-        {venta.items.map((it,i)=><div key={i} style={S.trow}><span>{it.label}{it.piezas>1?` x${it.piezas}`:""}</span><span>${(it.precio*it.piezas).toFixed(2)}</span></div>)}
+        {(venta.items||[]).map((it,i)=><div key={i} style={S.trow}><span>{it.label}{it.piezas>1?` x${it.piezas}`:""}</span><span>${(it.precio*it.piezas).toFixed(2)}</span></div>)}
         <div style={S.tdiv}/>
         <div style={{...S.trow,fontSize:16,fontWeight:800}}><span>TOTAL</span><span>${venta.total.toFixed(2)}</span></div>
         {abs.length>0&&<>{abs.map((ab,i)=><div key={i} style={S.trow}><span>{ab.metodo}</span><span style={{color:"#2e7d32"}}>-${ab.monto.toFixed(2)}</span></div>)}<div style={S.trow}><span>Pagado</span><strong style={{color:"#2e7d32"}}>${totAb.toFixed(2)}</strong></div></>}
@@ -1594,7 +1594,7 @@ function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta,clientes,setClien
         </div>
         {v.clienteTel&&<div style={{fontSize:12,color:"#888",marginTop:2}}>📱 {v.clienteTel}</div>}
         {v.clienteDireccion&&<div style={{fontSize:12,color:"#888",marginTop:2}}>📍 {v.clienteDireccion}</div>}
-        <div style={{fontSize:13,color:"#555",margin:"6px 0"}}>{v.items.map((it,i)=><span key={i}>{it.label}{it.piezas>1?` x${it.piezas}`:""}{i<v.items.length-1?" · ":""}</span>)}</div>
+        <div style={{fontSize:13,color:"#555",margin:"6px 0"}}>{(v.items||[]).map((it,i)=><span key={i}>{it.label}{it.piezas>1?` x${it.piezas}`:""}{i<(v.items||[]).length-1?" · ":""}</span>)}</div>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:4}}>
           <div>
             <div style={{fontWeight:800,fontSize:18,color:"#1a3c5e"}}>${v.total.toFixed(2)}</div>
@@ -4779,7 +4779,7 @@ function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertV
             <div style={{...S.badge,background:esPag?"#e8f5e9":"#fff3e0",color:esPag?"#2e7d32":"#e65100"}}>{esPag?"✅ Pagado":`⏳ $${pend.toFixed(2)}`}</div>
           </div>
         </div>
-        <div style={{fontSize:12,color:"#555",marginTop:6}}>{v.items.map((it,i)=><span key={i}>{it.label}{it.piezas>1?` x${it.piezas}`:""}{esLavadoSeco(it.label)&&<span style={{color:"#ff9800",fontSize:10}}> (20%)</span>}{i<v.items.length-1?" · ":""}</span>)}</div>
+        <div style={{fontSize:12,color:"#555",marginTop:6}}>{(v.items||[]).map((it,i)=><span key={i}>{it.label}{it.piezas>1?` x${it.piezas}`:""}{esLavadoSeco(it.label)&&<span style={{color:"#ff9800",fontSize:10}}> (20%)</span>}{i<(v.items||[]).length-1?" · ":""}</span>)}</div>
         <div style={{fontSize:12,color:"#555",marginTop:2}}>📅 {fmtD(v.entrega)}</div>
         {v.anulada&&<div style={{background:"#ffebee",borderRadius:6,padding:"6px 10px",marginTop:6,fontSize:12,color:"#c62828"}}>❌ ANULADA por <strong>{v.anuladaPor||"—"}</strong> — Motivo: {v.motivoAnulacion}{v.anuladaEn?` · ${fmt(v.anuladaEn)}`:""}</div>}
         {abs.length>0&&<div style={{marginTop:8,background:"#f0faf4",borderRadius:8,padding:"8px 10px"}}>
@@ -4876,7 +4876,7 @@ function PendienteItem({v,empleadas,setTicket,addAbono,setVentas,upsertVenta}){
             <div style={{fontWeight:700,color:"#1a3c5e",fontSize:15}}>{v.clienteNombre}</div>
             <div style={{fontSize:11,color:"#888"}}>{v.folio} · {fmt(v.fecha)}</div>
             {emp&&<div style={{fontSize:11,color:"#4db6e4"}}>👩 {emp.nombre}</div>}
-            <div style={{fontSize:12,color:"#555",marginTop:4}}>{v.items.map((it,i)=><span key={i}>{it.label}{i<v.items.length-1?" · ":""}</span>)}</div>
+            <div style={{fontSize:12,color:"#555",marginTop:4}}>{(v.items||[]).map((it,i)=><span key={i}>{it.label}{i<(v.items||[]).length-1?" · ":""}</span>)}</div>
             <div style={{fontSize:12,color:"#555"}}>📅 {fmtD(v.entrega)}</div>
           </div>
           <div style={{textAlign:"right"}}>
