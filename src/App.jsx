@@ -1264,7 +1264,7 @@ function LoginScreen({onLogin}){
   const [verificando,setVerificando]=useState(false);
   const go=()=>{
     const users=load("ll_usuarios",USUARIOS_DEFAULT);
-    const found=users.find(x=>x.usuario.toLowerCase()===u.toLowerCase().trim()&&x.clave===c);
+    const found=users.find(x=>(x.usuario||"").toLowerCase()===u.toLowerCase().trim()&&x.clave===c);
     if(!found){setErr("Usuario o clave incorrectos");return;}
     onLogin(found);
   };
@@ -3857,7 +3857,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
   const porEnt=ventas.filter(v=>!v.anulada&&(v.estado||"recibido")==="listo");
   const porEntregadoPend=pendientesRaw.filter(v=>(v.estado||"recibido")==="entregado");
   const lista=tab==="cobrar"?porCob:tab==="proceso"?porProc:tab==="entregar"?porEnt:pendientes;
-  const filtrados=busq?lista.filter(v=>v.clienteNombre?.toLowerCase().includes(busq.toLowerCase())||v.folio.toLowerCase().includes(busq.toLowerCase())):lista;
+  const filtrados=busq?lista.filter(v=>v.clienteNombre?.toLowerCase().includes(busq.toLowerCase())||(v.folio||"").toLowerCase().includes(busq.toLowerCase())):lista;
   return(
     <div style={{fontFamily:"'DM Sans',sans-serif",minHeight:"100vh",background:"#f0f4f8",paddingBottom:40}}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=DM+Sans:wght@400;500;600;700&display=swap');*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:6px}::-webkit-scrollbar-thumb{background:#4db6e4;border-radius:3px}`}</style>
@@ -4046,7 +4046,7 @@ function ServicioBuscador({servId,piezas,servicios,onServChange,onPiezasChange})
   const selSrv=servicios.find(s=>s.id===servId)||servicios[0];
   const [busq,setBusq]=useState("");
   const [open,setOpen]=useState(false);
-  const filtrados=busq?servicios.filter(s=>s.label.toLowerCase().includes(busq.toLowerCase())).slice(0,8):servicios.slice(0,8);
+  const filtrados=busq?servicios.filter(s=>(s.label||"").toLowerCase().includes(busq.toLowerCase())).slice(0,8):servicios.slice(0,8);
   return(
     <div style={{display:"flex",gap:6,alignItems:"flex-start",position:"relative"}}>
       <div style={{flex:1,position:"relative"}}>
@@ -4084,7 +4084,7 @@ function ProductoBuscador({productoId,piezas,productos,onProdChange,onPiezasChan
   const selP=productos.find(p=>p.id===productoId)||productos[0];
   const [busq,setBusq]=useState("");
   const [open,setOpen]=useState(false);
-  const filtrados=busq?productos.filter(p=>p.nombre.toLowerCase().includes(busq.toLowerCase())).slice(0,8):productos.slice(0,8);
+  const filtrados=busq?productos.filter(p=>(p.nombre||"").toLowerCase().includes(busq.toLowerCase())).slice(0,8):productos.slice(0,8);
   return(
     <div style={{display:"flex",gap:6,alignItems:"flex-start",position:"relative"}}>
       <div style={{flex:1,position:"relative"}}>
@@ -4252,7 +4252,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
   const [protocoloCumplido,setProtocoloCumplido]=useState(true); // 📋 para Evaluación de Desempeño — checklist de atención al cliente (saludo, confirmar datos, explicar tiempos, despedida)
   const [boletoResena,setBoletoResena]=useState(false); // 🌟 opcional — boleto extra si sigue redes y deja reseña en Google
   const [obsPrendaMancha,setObsPrendaMancha]=useState("");
-  const cFilt=clientes.filter(c=>c.nombre.toLowerCase().includes(cQ.toLowerCase())||(c.tel&&c.tel.includes(cQ))).slice(0,5);
+  const cFilt=clientes.filter(c=>(c.nombre||"").toLowerCase().includes(cQ.toLowerCase())||(c.tel&&c.tel.includes(cQ))).slice(0,5);
   const selC=clientes.find(c=>c.id===cId);
   // 🛍️ Productos activos disponibles para vender (catálogo, sin los eliminados)
   const productosActivos=(productos||[]).filter(p=>!p.eliminada);
@@ -4843,7 +4843,7 @@ function Historial({ventas,setVentas,empleadas,setTicket,addAbono,esAdmin,upsert
     if(fE==="Pendientes"&&pagada(v))return false;
     if(fEmp!=="Todos"&&String(v.empleadaId)!==fEmp)return false;
     if(fF&&!fechaLocal(v.fecha).startsWith(fF))return false;
-    if(busq&&!v.clienteNombre?.toLowerCase().includes(busq.toLowerCase())&&!v.folio.toLowerCase().includes(busq.toLowerCase()))return false;
+    if(busq&&!v.clienteNombre?.toLowerCase().includes(busq.toLowerCase())&&!(v.folio||"").toLowerCase().includes(busq.toLowerCase()))return false;
     return true;
   });
   return(
@@ -4912,7 +4912,7 @@ function Pendientes({ventas,empleadas,setTicket,addAbono,setVentas,upsertVenta})
   const porEnt=ventas.filter(v=>pagada(v)&&!v.anulada&&(v.estado||"recibido")!=="entregado");
   const lista=filtro==="cobrar"?porCob:filtro==="entregar"?porEnt:[...porCob,...porEnt];
   const dedup=lista.filter((v,i,a)=>a.findIndex(x=>x.folio===v.folio)===i);
-  const filtrados=busq?dedup.filter(v=>v.clienteNombre?.toLowerCase().includes(busq.toLowerCase())||v.folio.toLowerCase().includes(busq.toLowerCase())):dedup;
+  const filtrados=busq?dedup.filter(v=>v.clienteNombre?.toLowerCase().includes(busq.toLowerCase())||(v.folio||"").toLowerCase().includes(busq.toLowerCase())):dedup;
   const totCob=porCob.reduce((a,v)=>a+saldo(v),0);
   return(
     <div style={S.panel}>
@@ -5699,7 +5699,7 @@ function Gastos({gastos,setGastos,sesion,upsertGasto,salidasCaja,activosFijos,se
   const [fMes,setFMes]=useState(mesK(new Date()));const [fCat,setFCat]=useState("Todas");const [err,setErr]=useState("");
   const [incluirSalidas,setIncluirSalidas]=useState(true); // 💸 combinar salidas de caja en este reporte
   // 🔎 Busca el insumo por código o por nombre (coincidencia parcial)
-  const insumoEncontrado=(inventario||[]).find(i=>!i.eliminada&&buscarCod.trim()&&((i.codigo||"").toLowerCase()===buscarCod.trim().toLowerCase()||(i.codigo||"").toLowerCase().includes(buscarCod.trim().toLowerCase())||i.nombre.toLowerCase().includes(buscarCod.trim().toLowerCase())));
+  const insumoEncontrado=(inventario||[]).find(i=>!i.eliminada&&buscarCod.trim()&&((i.codigo||"").toLowerCase()===buscarCod.trim().toLowerCase()||(i.codigo||"").toLowerCase().includes(buscarCod.trim().toLowerCase())||(i.nombre||"").toLowerCase().includes(buscarCod.trim().toLowerCase())));
   const agregarItemCompra=()=>{
     if(!buscarCod.trim()){alert("Escribe el código o nombre del insumo");return;}
     const cant=parseFloat(cantCod)||1;
@@ -7185,7 +7185,7 @@ function Configuracion({servicios,setServicios,exportarDatos,importarDatos,upser
   const add=()=>{if(!nv.label.trim()||!nv.precio)return;const ns={id:"c-"+Date.now(),label:nv.label.toUpperCase(),precio:parseFloat(nv.precio)};setServicios(prev=>[...prev,ns]);if(upsertServicio)upsertServicio({...ns,_updatedAt:new Date().toISOString()});setNv({label:"",precio:""});};
   const del=id=>{if(!window.confirm("¿Eliminar este servicio?"))return;setServicios(prev=>{const next=prev.map(s=>s.id===id?{...s,eliminada:true}:s);const borrado=next.find(s=>s.id===id);if(borrado&&upsertServicio)upsertServicio({...borrado,_updatedAt:new Date().toISOString()});return next;});};
   const sav=()=>{setServicios(prev=>{const next=prev.map(s=>s.id===editId?{...s,label:ed.label.toUpperCase(),precio:parseFloat(ed.precio),limite:ed.limite?parseInt(ed.limite):null}:s);const updated=next.find(s=>s.id===editId);if(updated&&upsertServicio)upsertServicio({...updated,_updatedAt:new Date().toISOString()});return next;});setEditId(null);};
-  const fil=activos.filter(s=>s.label.toLowerCase().includes(busq.toLowerCase()));
+  const fil=activos.filter(s=>(s.label||"").toLowerCase().includes(busq.toLowerCase()));
   return(<div style={S.panel}>
     <h2 style={S.ptitle}>⚙️ Configuracion</h2>
     <Card title="💾 Respaldo">
@@ -7271,7 +7271,7 @@ function GestionUsuarios(){
   };
   const add=()=>{
     if(!nv.usuario.trim()||!nv.clave.trim()||!nv.nombre.trim()){setErr("Completa todos los campos");return;}
-    if(visibles.find(u=>u.usuario.toLowerCase()===nv.usuario.toLowerCase())){setErr("Ese usuario ya existe");return;}
+    if(visibles.find(u=>(u.usuario||"").toLowerCase()===nv.usuario.toLowerCase())){setErr("Ese usuario ya existe");return;}
     const nuevo={...nv,id:Date.now()};
     setUsers(prev=>[...prev,nuevo]);subirUsuario(nuevo);
     setNv({usuario:"",clave:"",nombre:"",rol:"Empleada"});setErr("");setMsg("✅ Usuario creado y subido a la nube");setTimeout(()=>setMsg(""),3000);
