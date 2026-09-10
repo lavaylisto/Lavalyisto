@@ -551,7 +551,7 @@ const msgWa = (v, tipo) => {
   const pend = saldo(v);
   if(tipo==="recibido"){
     const manchaLinea=v.prendaManchaAviso?`\n${E.item} *Prenda que puede destiñir/manchar declarada:* ${v.prendaManchaObs}\n${L}`:"";
-    return `${E.burbuja} *LAVA & LISTO* ${E.burbuja}\n_Lavanderia & Limpieza Especializada_\n${L}\n¡Hola *${v.clienteNombre}*! ${E.saludo}\nTu orden fue *RECIBIDA* ${E.check}\n\n${E.folio} *Folio:* ${v.folio}\n${L}\n*DETALLE DEL SERVICIO:*\n${items}\n${L}${manchaLinea}\n${E.dinero} *Total:* $${v.total.toFixed(2)}\n${pend>0?`${E.reloj} *Saldo pendiente:* $${pend.toFixed(2)}`:`${E.check} *Pagado en su totalidad*`}\n${E.fecha} *Entrega estimada:* ${fmtD(v.entrega)}\n${L}\n¡Gracias por confiar en nosotros! ${E.corazon}\n${E.pin} Ricaurte, Cuenca\n\n_No nos hacemos responsables por daños, manchas o decoloración en su ropa si la información sobre prendas que destiñen o manchan no fue proporcionada correctamente al momento de dejar la orden._`;
+    return `${E.burbuja} *LAVA & LISTO* ${E.burbuja}\n_Lavanderia & Limpieza Especializada_\n${L}\n¡Hola *${v.clienteNombre}*! ${E.saludo}\nTu orden fue *RECIBIDA* ${E.check}\n\n${E.folio} *Folio:* ${v.folio}\n${L}\n*DETALLE DEL SERVICIO:*\n${items}\n${L}${manchaLinea}\n${E.dinero} *Total:* $${(v.total||0).toFixed(2)}\n${pend>0?`${E.reloj} *Saldo pendiente:* $${pend.toFixed(2)}`:`${E.check} *Pagado en su totalidad*`}\n${E.fecha} *Entrega estimada:* ${fmtD(v.entrega)}\n${L}\n¡Gracias por confiar en nosotros! ${E.corazon}\n${E.pin} Ricaurte, Cuenca\n\n_No nos hacemos responsables por daños, manchas o decoloración en su ropa si la información sobre prendas que destiñen o manchan no fue proporcionada correctamente al momento de dejar la orden._`;
   }
   // 🧽 Detalle del restregado extra (si se solicitó), para que el cliente vea siempre qué se incluyó o no en su cuenta final
   const rEstado=v.clasificacion?.restregadoEstado;
@@ -686,7 +686,7 @@ const expCSV=(ventas,titulo,empleadas)=>{
   const filas=ventas.map(v=>{
     const p=(v.abonos||[]).reduce((a,ab)=>a+ab.monto,0);
     const m=[...new Set((v.abonos||[]).map(ab=>ab.metodo))].join("/");
-    return[v.folio,fmt(v.fecha),v.clienteNombre||"",(v.items||[]).map(it=>it.label).join("|"),"$"+v.total.toFixed(2),"$"+p.toFixed(2),"$"+(v.total-p).toFixed(2),m,v.estado||"recibido",v.notas||""];
+    return[v.folio,fmt(v.fecha),v.clienteNombre||"",(v.items||[]).map(it=>it.label).join("|"),"$"+(v.total||0).toFixed(2),"$"+p.toFixed(2),"$"+(v.total-p).toFixed(2),m,v.estado||"recibido",v.notas||""];
   });
   // 💰 Fila de totales al final — para cuadrar cuentas: cuánto se vendió, cuánto se cobró y cuánto queda pendiente
   const totVendido=ventas.reduce((a,v)=>a+v.total,0);
@@ -882,8 +882,8 @@ function TicketModal({venta,empleadas,onClose}){
         <div style={S.tdiv}/>
         {(venta.items||[]).map((it,i)=><div key={i} style={S.trow}><span>{it.label}{it.piezas>1?` x${it.piezas}`:""}</span><span>${(it.precio*it.piezas).toFixed(2)}</span></div>)}
         <div style={S.tdiv}/>
-        <div style={{...S.trow,fontSize:16,fontWeight:800}}><span>TOTAL</span><span>${venta.total.toFixed(2)}</span></div>
-        {abs.length>0&&<>{abs.map((ab,i)=><div key={i} style={S.trow}><span>{ab.metodo}</span><span style={{color:"#2e7d32"}}>-${ab.monto.toFixed(2)}</span></div>)}<div style={S.trow}><span>Pagado</span><strong style={{color:"#2e7d32"}}>${totAb.toFixed(2)}</strong></div></>}
+        <div style={{...S.trow,fontSize:16,fontWeight:800}}><span>TOTAL</span><span>${(venta.total||0).toFixed(2)}</span></div>
+        {abs.length>0&&<>{abs.map((ab,i)=><div key={i} style={S.trow}><span>{ab.metodo}</span><span style={{color:"#2e7d32"}}>-${(ab.monto||0).toFixed(2)}</span></div>)}<div style={S.trow}><span>Pagado</span><strong style={{color:"#2e7d32"}}>${totAb.toFixed(2)}</strong></div></>}
         {pend>0&&<div style={{background:"#fff3e0",borderRadius:8,padding:"8px 10px",marginTop:8,display:"flex",justifyContent:"space-between"}}><span style={{fontSize:13,fontWeight:700,color:"#e65100"}}>⚠️ Pendiente</span><strong style={{color:"#e65100"}}>${pend.toFixed(2)}</strong></div>}
         {pend<=0&&<div style={{background:"#e8f5e9",borderRadius:8,padding:"8px 10px",marginTop:8,textAlign:"center"}}><span style={{fontSize:13,fontWeight:700,color:"#2e7d32"}}>✅ Pagado completo</span></div>}
         {venta.notas&&<div style={{fontSize:11,color:"#888",marginTop:8}}>Nota: {venta.notas}</div>}
@@ -937,7 +937,7 @@ function NotificacionesPanel({ventas,setVentas,upsertVenta,addAbono,clientes,maq
         cl?.email||"",
         v.clienteTel||cl?.tel||"",
         detalleServicios(v),
-        "$"+v.total.toFixed(2),
+        "$"+(v.total||0).toFixed(2),
         v.facturadoSRI?"Sí":"No",
         v.facturadoSRIEn?fmt(v.facturadoSRIEn):"",
         v.facturadoSRIPor||""
@@ -1078,7 +1078,7 @@ function NotificacionesPanel({ventas,setVentas,upsertVenta,addAbono,clientes,maq
             {(verTodasSRI?ventas.filter(v=>!v.anulada&&pagada(v)):pendientesFacturarSRI).map(v=>(
               <div key={v.folio} style={{...S.vcard,borderLeft:`4px solid ${v.facturadoSRI?"#2e7d32":"#1565c0"}`,marginTop:10}}>
                 <div style={{fontWeight:700,fontSize:14}}>{v.clienteNombre}</div>
-                <div style={{fontSize:11,color:"#888"}}>{v.folio} · ${v.total.toFixed(2)}{v.facturadoSRIPor?` · ${v.facturadoSRIPor}`:""}</div>
+                <div style={{fontSize:11,color:"#888"}}>{v.folio} · ${(v.total||0).toFixed(2)}{v.facturadoSRIPor?` · ${v.facturadoSRIPor}`:""}</div>
                 <label style={{display:"flex",alignItems:"center",gap:8,marginTop:8,cursor:"pointer"}}>
                   <input type="checkbox" checked={!!v.facturadoSRI} onChange={()=>v.facturadoSRI?desmarcarFacturado(v):marcarFacturado(v)}/>
                   <span style={{fontSize:13,fontWeight:600,color:v.facturadoSRI?"#2e7d32":"#1a3c5e"}}>{v.facturadoSRI?"✅ Ya facturada":"Ya se facturó en el SRI"}</span>
@@ -1597,7 +1597,7 @@ function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta,clientes,setClien
         <div style={{fontSize:13,color:"#555",margin:"6px 0"}}>{(v.items||[]).map((it,i)=><span key={i}>{it.label}{it.piezas>1?` x${it.piezas}`:""}{i<(v.items||[]).length-1?" · ":""}</span>)}</div>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:4}}>
           <div>
-            <div style={{fontWeight:800,fontSize:18,color:"#1a3c5e"}}>${v.total.toFixed(2)}</div>
+            <div style={{fontWeight:800,fontSize:18,color:"#1a3c5e"}}>${(v.total||0).toFixed(2)}</div>
             {!esPag&&<div style={{background:"#c62828",color:"#fff",padding:"3px 10px",borderRadius:6,fontSize:12,fontWeight:800,marginTop:2}}>💸 DEBE ${pend.toFixed(2)}</div>}
             {esPag&&<div style={{background:"#2e7d32",color:"#fff",padding:"3px 10px",borderRadius:6,fontSize:12,fontWeight:700,marginTop:2}}>✅ PAGADO</div>}
           </div>
@@ -4046,7 +4046,7 @@ function ServicioBuscador({servId,piezas,servicios,onServChange,onPiezasChange})
         <input
           style={{...S.inp}}
           placeholder="Escribir para buscar servicio..."
-          value={open?busq:(selSrv?`${selSrv.label} — $${selSrv.precio.toFixed(2)}`:"")}
+          value={open?busq:(selSrv?`${selSrv.label} — $${(selSrv.precio||0).toFixed(2)}`:"")}
           onFocus={()=>{setOpen(true);setBusq("");}}
           onChange={e=>{setBusq(e.target.value);setOpen(true);}}
           onBlur={()=>setTimeout(()=>setOpen(false),200)}
@@ -4058,7 +4058,7 @@ function ServicioBuscador({servId,piezas,servicios,onServChange,onPiezasChange})
               <div key={s.id} style={{padding:"10px 14px",cursor:"pointer",borderBottom:"1px solid #f0f4f8",fontSize:13,background:s.id===servId?"#e8f5fd":"#fff"}}
                 onMouseDown={()=>{onServChange(s.id);setBusq("");setOpen(false);}}>
                 <div style={{fontWeight:600}}>{s.label}</div>
-                <div style={{color:"#4db6e4",fontWeight:700,fontSize:12}}>${s.precio.toFixed(2)}</div>
+                <div style={{color:"#4db6e4",fontWeight:700,fontSize:12}}>${(s.precio||0).toFixed(2)}</div>
               </div>
             ))}
           </div>
@@ -4144,7 +4144,7 @@ const promosDeHoy=(promos,servicios)=>{
     if(p.tipo==="segundo50")return{...p,precioTxt:`-${p.pct||50}% (2da unidad)`};
     const s=servicios.find(x=>x.id===p.servId&&!x.eliminada);
     if(!s)return null; // si el servicio ya no existe, la promo no se muestra
-    return{...p,precioTxt:`$${s.precio.toFixed(2)}`,detalle:p.detalle};
+    return{...p,precioTxt:`$${(s.precio||0).toFixed(2)}`,detalle:p.detalle};
   };
   return (promos&&promos.length?promos:DEFAULT_PROMOS)
     .filter(p=>!p.dias||p.dias.length===0||p.dias.includes(dow))
@@ -4170,7 +4170,7 @@ function SegundaUnidadPicker({promo,servicios,onElegir,onCancelar}){
             <button key={s.id} onClick={()=>onElegir(s)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",width:"100%",textAlign:"left",background:"#f8fbfd",border:"1.5px solid #e8f0f7",borderRadius:12,padding:"12px 14px",marginBottom:8,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
               <div style={{fontWeight:700,fontSize:14,color:"#1a3c5e"}}>{s.label}</div>
               <div style={{textAlign:"right",flexShrink:0}}>
-                <div style={{fontSize:11,color:"#c62828",textDecoration:"line-through"}}>${s.precio.toFixed(2)}</div>
+                <div style={{fontSize:11,color:"#c62828",textDecoration:"line-through"}}>${(s.precio||0).toFixed(2)}</div>
                 <div style={{fontWeight:800,fontSize:15,color:"#2e7d32"}}>${(s.precio*(1-pct/100)).toFixed(2)}</div>
               </div>
             </button>
@@ -4311,7 +4311,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
       return;
     }
     if(p.tipo==="descuento"&&posActual()<(p.minCompra||CUPON_MIN_COMPRA_DESC)){
-      alert(`El descuento de $${p.monto.toFixed(2)} aplica en compras desde $${(p.minCompra||CUPON_MIN_COMPRA_DESC).toFixed(2)}. Agrega primero los servicios del cliente. 🛒`);
+      alert(`El descuento de $${(p.monto||0).toFixed(2)} aplica en compras desde $${(p.minCompra||CUPON_MIN_COMPRA_DESC).toFixed(2)}. Agrega primero los servicios del cliente. 🛒`);
       return;
     }
     setImpulsos(prev=>[...prev,{promoId:p.id,titulo:p.titulo,fecha:new Date().toISOString()}]); // 🎯 impulsación registrada
@@ -4775,7 +4775,7 @@ function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertV
             <div style={{...S.badge,background:est.bg,color:est.color,marginTop:4}}>{est.icon} {est.label}</div>
           </div>
           <div style={{textAlign:"right"}}>
-            <div style={{fontWeight:800,fontSize:16,color:"#1a3c5e"}}>${v.total.toFixed(2)}</div>
+            <div style={{fontWeight:800,fontSize:16,color:"#1a3c5e"}}>${(v.total||0).toFixed(2)}</div>
             <div style={{...S.badge,background:esPag?"#e8f5e9":"#fff3e0",color:esPag?"#2e7d32":"#e65100"}}>{esPag?"✅ Pagado":`⏳ $${pend.toFixed(2)}`}</div>
           </div>
         </div>
@@ -4783,8 +4783,8 @@ function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertV
         <div style={{fontSize:12,color:"#555",marginTop:2}}>📅 {fmtD(v.entrega)}</div>
         {v.anulada&&<div style={{background:"#ffebee",borderRadius:6,padding:"6px 10px",marginTop:6,fontSize:12,color:"#c62828"}}>❌ ANULADA por <strong>{v.anuladaPor||"—"}</strong> — Motivo: {v.motivoAnulacion}{v.anuladaEn?` · ${fmt(v.anuladaEn)}`:""}</div>}
         {abs.length>0&&<div style={{marginTop:8,background:"#f0faf4",borderRadius:8,padding:"8px 10px"}}>
-          {abs.map((ab,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#2e7d32"}}><span>{ab.metodo} · {fmtD(ab.fecha)}{ab.cobradoPorNombre?` · ${ab.cobradoPorNombre}`:""}</span><strong>+${ab.monto.toFixed(2)}</strong></div>)}
-          <div style={{display:"flex",justifyContent:"space-between",fontSize:12,borderTop:"1px dashed #c8e6c9",marginTop:4,paddingTop:4}}><span style={{color:"#888"}}>Pagado</span><span style={{color:"#2e7d32",fontWeight:700}}>${totAb.toFixed(2)} / ${v.total.toFixed(2)}</span></div>
+          {abs.map((ab,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#2e7d32"}}><span>{ab.metodo} · {fmtD(ab.fecha)}{ab.cobradoPorNombre?` · ${ab.cobradoPorNombre}`:""}</span><strong>+${(ab.monto||0).toFixed(2)}</strong></div>)}
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:12,borderTop:"1px dashed #c8e6c9",marginTop:4,paddingTop:4}}><span style={{color:"#888"}}>Pagado</span><span style={{color:"#2e7d32",fontWeight:700}}>${totAb.toFixed(2)} / ${(v.total||0).toFixed(2)}</span></div>
         </div>}
         {esAdmin&&setVentas&&<div style={{marginTop:8}}>
           <label style={S.lbl}>Estado:</label>
@@ -4880,7 +4880,7 @@ function PendienteItem({v,empleadas,setTicket,addAbono,setVentas,upsertVenta}){
             <div style={{fontSize:12,color:"#555"}}>📅 {fmtD(v.entrega)}</div>
           </div>
           <div style={{textAlign:"right"}}>
-            <div style={{fontWeight:800,fontSize:18,color:"#1a3c5e"}}>${v.total.toFixed(2)}</div>
+            <div style={{fontWeight:800,fontSize:18,color:"#1a3c5e"}}>${(v.total||0).toFixed(2)}</div>
             {!esPag&&<div style={{fontSize:13,color:"#e53935",fontWeight:700}}>Debe: ${pend.toFixed(2)}</div>}
             {totAb>0&&<div style={{fontSize:11,color:"#2e7d32"}}>Abonado: ${totAb.toFixed(2)}</div>}
           </div>
@@ -4969,7 +4969,7 @@ function Reportes({ventas,empleadas,salidasCaja}){
           const enc=["Empleada","Folio","Cliente","Servicios","Fecha","Hora","Total"];
           const filas=vRngOrdenado.map(v=>{
             const dt=new Date(v.fecha);
-            return[nombreDeE(v.empleadaId),v.folio,v.clienteNombre||"",(v.items||[]).map(it=>it.label+(it.piezas>1?` x${it.piezas}`:"")).join(" | "),fmtD(v.fecha),dt.toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"}),"$"+v.total.toFixed(2)];
+            return[nombreDeE(v.empleadaId),v.folio,v.clienteNombre||"",(v.items||[]).map(it=>it.label+(it.piezas>1?` x${it.piezas}`:"")).join(" | "),fmtD(v.fecha),dt.toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"}),"$"+(v.total||0).toFixed(2)];
           });
           filas.push(["","","","","","",""]);
           rankingRango.forEach(([n,d])=>filas.push([n,d.cnt+" venta(s)","","","","","$"+d.tot.toFixed(2)]));
@@ -5004,7 +5004,7 @@ function Reportes({ventas,empleadas,salidasCaja}){
                     <div style={{fontSize:11,color:"#888"}}>{v.clienteNombre||"—"} · {v.folio} · {fmtD(v.fecha)} {dt.toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"})}</div>
                     <div style={{fontSize:12,color:"#4db6e4",marginTop:2}}>{(v.items||[]).map(it=>it.label+(it.piezas>1?` x${it.piezas}`:"")).join(" · ")}</div>
                   </div>
-                  <strong style={{color:"#1a3c5e",flexShrink:0,marginLeft:8}}>${v.total.toFixed(2)}</strong>
+                  <strong style={{color:"#1a3c5e",flexShrink:0,marginLeft:8}}>${(v.total||0).toFixed(2)}</strong>
                 </div>
               );
             })}
@@ -5060,7 +5060,7 @@ function Reportes({ventas,empleadas,salidasCaja}){
                     <div style={{fontWeight:700,color:"#1a3c5e",fontSize:15}}>{new Date(fecha+"T12:00:00").toLocaleDateString("es-MX",{weekday:"long",day:"numeric",month:"long"})}</div>
                     <div style={{fontSize:11,color:"#888"}}>{fecha}</div>
                   </div>
-                  <div style={{background:"#1a3c5e",color:"#fff",padding:"4px 14px",borderRadius:8,fontWeight:800,fontSize:15}}>${d.total.toFixed(2)}</div>
+                  <div style={{background:"#1a3c5e",color:"#fff",padding:"4px 14px",borderRadius:8,fontWeight:800,fontSize:15}}>${(d.total||0).toFixed(2)}</div>
                 </div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
                   {d.efectivo>0&&<div style={{background:"#e8f5e9",borderRadius:8,padding:"8px 10px",display:"flex",justifyContent:"space-between"}}><span style={{fontSize:12,color:"#2e7d32",fontWeight:600}}>💵 Depositar banco</span><strong style={{color:"#2e7d32"}}>${d.efectivo.toFixed(2)}</strong></div>}
@@ -5091,7 +5091,7 @@ function Reportes({ventas,empleadas,salidasCaja}){
             const nombreDia=new Date(dia+"T12:00:00").toLocaleDateString("es-MX",{weekday:"long",day:"numeric",month:"long"});
             const totDia=lista.reduce((a,s)=>a+s.monto,0);
             return "<tr><td colspan='3' style='background:#e8f0f7;padding:5px;font-weight:bold;text-transform:capitalize'>"+nombreDia+"</td><td style='background:#e8f0f7;padding:5px;text-align:right;font-weight:bold'>-$"+totDia.toFixed(2)+"</td></tr>"
-              +lista.map(s=>"<tr style='border-bottom:1px solid #eee'><td style='padding:4px'>"+(s.hora||"")+"</td><td style='padding:4px'>"+s.motivo+"</td><td style='padding:4px'>"+(s.quien||"")+"</td><td style='padding:4px;text-align:right;color:#c62828;font-weight:bold'>-$"+s.monto.toFixed(2)+"</td></tr>").join("");
+              +lista.map(s=>"<tr style='border-bottom:1px solid #eee'><td style='padding:4px'>"+(s.hora||"")+"</td><td style='padding:4px'>"+s.motivo+"</td><td style='padding:4px'>"+(s.quien||"")+"</td><td style='padding:4px;text-align:right;color:#c62828;font-weight:bold'>-$"+(s.monto||0).toFixed(2)+"</td></tr>").join("");
           }).join("");
           const quienHtml=Object.entries(porQuien).sort((a,b)=>b[1]-a[1]).map(([q,m])=>"<div style='font-size:12px'>"+q+": <strong>-$"+m.toFixed(2)+"</strong></div>").join("");
           const html="<html><head><title>Salidas de caja del mes</title><style>body{font-family:sans-serif;padding:20px}h2{color:#1a3c5e;text-align:center}table{border-collapse:collapse;width:100%;font-size:11px}</style></head><body>"
@@ -5132,7 +5132,7 @@ function Reportes({ventas,empleadas,salidasCaja}){
                   </div>
                   {lista.map(s=>(
                     <div key={s.id} style={{display:"flex",justifyContent:"space-between",padding:"5px 12px",borderBottom:"1px solid #f0f4f8",fontSize:13}}>
-                      <div><span style={{color:"#c62828",fontWeight:700}}>-${s.monto.toFixed(2)}</span> {s.motivo} <span style={{color:"#888",fontSize:11}}>({s.quien})</span></div>
+                      <div><span style={{color:"#c62828",fontWeight:700}}>-${(s.monto||0).toFixed(2)}</span> {s.motivo} <span style={{color:"#888",fontSize:11}}>({s.quien})</span></div>
                       <span style={{color:"#888",fontSize:11}}>{s.hora}</span>
                     </div>
                   ))}
@@ -5161,7 +5161,7 @@ function Reportes({ventas,empleadas,salidasCaja}){
         {vRng.slice(0,50).map(v=>{const ep=pagada(v);return(<div key={v.folio} style={{...S.vcard,borderLeft:`4px solid ${ep?"#4caf50":"#ff9800"}`}}>
           <div style={{display:"flex",justifyContent:"space-between"}}>
             <div><div style={{fontWeight:700}}>{v.clienteNombre}</div><div style={{fontSize:11,color:"#888"}}>{v.folio} · {fmt(v.fecha)}</div></div>
-            <div style={{textAlign:"right"}}><div style={{fontWeight:800,fontSize:15}}>${v.total.toFixed(2)}</div><div style={{...S.badge,background:ep?"#e8f5e9":"#fff3e0",color:ep?"#2e7d32":"#e65100"}}>{ep?"✅ Pagado":`⏳ $${saldo(v).toFixed(2)}`}</div></div>
+            <div style={{textAlign:"right"}}><div style={{fontWeight:800,fontSize:15}}>${(v.total||0).toFixed(2)}</div><div style={{...S.badge,background:ep?"#e8f5e9":"#fff3e0",color:ep?"#2e7d32":"#e65100"}}>{ep?"✅ Pagado":`⏳ $${saldo(v).toFixed(2)}`}</div></div>
           </div>
         </div>);})}
       </div>)}
@@ -5760,8 +5760,8 @@ function Gastos({gastos,setGastos,sesion,upsertGasto,salidasCaja,activosFijos,se
   const descargarGastosCSV=()=>{
     if(fil.length===0&&salidasFil.length===0){alert("No hay gastos para descargar con los filtros actuales.");return;}
     const enc=["Fecha","Descripción","Categoría","Proveedor","N° Factura","Monto","Método de pago","Registrado por","Notas"];
-    const filas=fil.map(g=>[fmtD(g.fecha),g.descripcion||"",g.categoria||"",g.proveedor||"",g.numeroFactura||"","$"+g.monto.toFixed(2),g.metodoPago||"",g.registradoPor||"",g.notas||""]);
-    salidasFil.forEach(s=>filas.push([fmtD(s.fecha),s.motivo||"","Salidas de caja","","","$"+s.monto.toFixed(2),"Efectivo",s.quien||"","Salida de caja del día · "+(s.hora||"")]));
+    const filas=fil.map(g=>[fmtD(g.fecha),g.descripcion||"",g.categoria||"",g.proveedor||"",g.numeroFactura||"","$"+(g.monto||0).toFixed(2),g.metodoPago||"",g.registradoPor||"",g.notas||""]);
+    salidasFil.forEach(s=>filas.push([fmtD(s.fecha),s.motivo||"","Salidas de caja","","","$"+(s.monto||0).toFixed(2),"Efectivo",s.quien||"","Salida de caja del día · "+(s.hora||"")]));
     filas.push(["","","","","","","","",""]);
     if(salidasFil.length>0){
       filas.push(["","","","","Subtotal gastos:","$"+totGastos.toFixed(2),"","",""]);
@@ -5883,7 +5883,7 @@ function Gastos({gastos,setGastos,sesion,upsertGasto,salidasCaja,activosFijos,se
         <div key={g.id} style={{...S.vcard,borderLeft:"4px solid #e53935"}}>
           <div style={{display:"flex",justifyContent:"space-between"}}>
             <div><div style={{fontWeight:700}}>{g.descripcion}</div><div style={{fontSize:11,color:"#888"}}>{g.categoria} · {fmtD(g.fecha)}</div>{g.proveedor&&<div style={{fontSize:11}}>🏪 {g.proveedor}</div>}{g.numeroFactura&&<div style={{fontSize:11,color:"#4db6e4"}}>🧾 {g.numeroFactura}</div>}</div>
-            <div style={{textAlign:"right"}}><div style={{fontWeight:800,color:"#e53935"}}>${g.monto.toFixed(2)}</div><div style={{...S.badge,background:"#f3e8fd",color:"#7c3aed",marginTop:4}}>{g.metodoPago}</div>{sesion.rol==="Administrador"&&<button style={{...S.btnR,display:"block",marginTop:4}} onClick={()=>del(g.id)}>✕</button>}</div>
+            <div style={{textAlign:"right"}}><div style={{fontWeight:800,color:"#e53935"}}>${(g.monto||0).toFixed(2)}</div><div style={{...S.badge,background:"#f3e8fd",color:"#7c3aed",marginTop:4}}>{g.metodoPago}</div>{sesion.rol==="Administrador"&&<button style={{...S.btnR,display:"block",marginTop:4}} onClick={()=>del(g.id)}>✕</button>}</div>
           </div>
         </div>
       ))}
@@ -5894,7 +5894,7 @@ function Gastos({gastos,setGastos,sesion,upsertGasto,salidasCaja,activosFijos,se
           <div key={s.id} style={{...S.vcard,borderLeft:"4px solid #c62828"}}>
             <div style={{display:"flex",justifyContent:"space-between"}}>
               <div><div style={{fontWeight:700}}>{s.motivo}</div><div style={{fontSize:11,color:"#888"}}>Salida de caja · {fmtD(s.fecha)} {s.hora?`· ${s.hora}`:""}</div>{s.quien&&<div style={{fontSize:11}}>👤 {s.quien}</div>}</div>
-              <div style={{textAlign:"right"}}><div style={{fontWeight:800,color:"#c62828"}}>${s.monto.toFixed(2)}</div></div>
+              <div style={{textAlign:"right"}}><div style={{fontWeight:800,color:"#c62828"}}>${(s.monto||0).toFixed(2)}</div></div>
             </div>
           </div>
         ))}
@@ -7131,7 +7131,7 @@ function Configuracion({servicios,setServicios,exportarDatos,importarDatos,upser
           </div>
         ):(
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <div><div style={{fontSize:13,fontWeight:600}}>{s.label}</div><div style={{fontSize:12,color:"#4db6e4",fontWeight:700}}>${s.precio.toFixed(2)}{s.limite?<span style={{color:"#e65100",fontWeight:600}}> · máx {s.limite}/venta</span>:""}</div></div>
+            <div><div style={{fontSize:13,fontWeight:600}}>{s.label}</div><div style={{fontSize:12,color:"#4db6e4",fontWeight:700}}>${(s.precio||0).toFixed(2)}{s.limite?<span style={{color:"#e65100",fontWeight:600}}> · máx {s.limite}/venta</span>:""}</div></div>
             <div style={{display:"flex",gap:6}}>
               <button style={S.btnS} onClick={()=>{setEditId(s.id);setEd({label:s.label,precio:s.precio,limite:s.limite||""});}}>✏️</button>
               <button style={S.btnR} onClick={()=>del(s.id)}>✕</button>
@@ -7272,7 +7272,7 @@ function SalidaCaja({sesion,salidasCaja,setSalidasCaja,onClose,upsertSalida}){
             {salidasHoy.map(s=>(
               <div key={s.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #f0f4f8"}}>
                 <div>
-                  <div style={{fontSize:13,fontWeight:600,color:"#c62828"}}>-${s.monto.toFixed(2)} <span style={{color:"#555",fontWeight:400}}>{s.motivo}</span></div>
+                  <div style={{fontSize:13,fontWeight:600,color:"#c62828"}}>-${(s.monto||0).toFixed(2)} <span style={{color:"#555",fontWeight:400}}>{s.motivo}</span></div>
                   <div style={{fontSize:11,color:"#888"}}>{s.hora} · {s.quien}</div>
                 </div>
                 <button style={S.btnR} onClick={()=>eliminar(s.id)}>✕</button>
@@ -8141,7 +8141,7 @@ function Clientes({clientes,setClientes,upsertCliente,ventas,setVentas,upsertVen
                           <div style={{fontSize:11,color:"#888"}}>{fmt(v.fecha)} · {(v.items||[]).map(it=>it.label).join(", ").slice(0,60)}{(v.items||[]).map(it=>it.label).join(", ").length>60?"…":""}</div>
                         </div>
                         <div style={{textAlign:"right",flexShrink:0}}>
-                          <div style={{fontWeight:800}}>${v.total.toFixed(2)}</div>
+                          <div style={{fontWeight:800}}>${(v.total||0).toFixed(2)}</div>
                           <div style={{...S.badge,background:p?"#e8f5e9":"#fff3e0",color:p?"#2e7d32":"#e65100",fontSize:10}}>{p?"✅ Pagado":`⏳ $${saldo(v).toFixed(2)}`}</div>
                         </div>
                       </div>);
@@ -8875,7 +8875,7 @@ function ResumenDia({ventas,empleadas,salidasCaja}){
         +cobrosOrd.map(c=>{
           const hora=c.fecha?new Date(c.fecha).toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"}):"";
           const tag=c.factAnterior?" <span style='color:#e65100;font-weight:bold'>(FACT. ANTERIOR)</span>":"";
-          return "<tr style='border-bottom:1px solid #eee'><td style='padding:4px'>"+hora+"</td><td style='padding:4px'>"+(c.cliente||"")+tag+"</td><td style='padding:4px'>"+c.metodo+"</td><td style='padding:4px'>"+c.quien+"</td><td style='padding:4px;text-align:right;color:#2e7d32;font-weight:bold'>+$"+c.monto.toFixed(2)+"</td></tr>";
+          return "<tr style='border-bottom:1px solid #eee'><td style='padding:4px'>"+hora+"</td><td style='padding:4px'>"+(c.cliente||"")+tag+"</td><td style='padding:4px'>"+c.metodo+"</td><td style='padding:4px'>"+c.quien+"</td><td style='padding:4px;text-align:right;color:#2e7d32;font-weight:bold'>+$"+(c.monto||0).toFixed(2)+"</td></tr>";
         }).join("")
         +"<tr><td colspan='4' style='padding:4px;font-weight:bold'>TOTAL COBRADO</td><td style='padding:4px;text-align:right;font-weight:bold'>$"+totCobrado.toFixed(2)+"</td></tr>"
         +"</table>"
@@ -8884,7 +8884,7 @@ function ResumenDia({ventas,empleadas,salidasCaja}){
       ?"<h3 style='color:#c62828;margin-top:14px'>Detalle de salidas de caja ("+salidasDia.length+")</h3>"
         +"<table cellpadding='4' cellspacing='0' style='border-collapse:collapse;width:100%;font-size:11px'>"
         +"<tr><th style='background:#ffebee;text-align:left;padding:4px'>Hora</th><th style='background:#ffebee;text-align:left;padding:4px'>Motivo</th><th style='background:#ffebee;text-align:left;padding:4px'>Registró</th><th style='background:#ffebee;text-align:right;padding:4px'>Monto</th></tr>"
-        +salidasDia.map(s=>"<tr style='border-bottom:1px solid #eee'><td style='padding:4px'>"+(s.hora||"")+"</td><td style='padding:4px'>"+s.motivo+"</td><td style='padding:4px'>"+s.quien+"</td><td style='padding:4px;text-align:right;color:#c62828;font-weight:bold'>-$"+s.monto.toFixed(2)+"</td></tr>").join("")
+        +salidasDia.map(s=>"<tr style='border-bottom:1px solid #eee'><td style='padding:4px'>"+(s.hora||"")+"</td><td style='padding:4px'>"+s.motivo+"</td><td style='padding:4px'>"+s.quien+"</td><td style='padding:4px;text-align:right;color:#c62828;font-weight:bold'>-$"+(s.monto||0).toFixed(2)+"</td></tr>").join("")
         +"<tr><td colspan='3' style='padding:4px;font-weight:bold'>TOTAL SALIDAS</td><td style='padding:4px;text-align:right;font-weight:bold;color:#c62828'>-$"+totSalidas.toFixed(2)+"</td></tr>"
         +"</table>"
       :"";
@@ -8951,7 +8951,7 @@ function ResumenDia({ventas,empleadas,salidasCaja}){
           {[...cobros].sort((a,b)=>(a.fecha||"").localeCompare(b.fecha||"")).map((c,i)=>(
             <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f0f4f8",fontSize:13}}>
               <div>
-                <span style={{color:"#2e7d32",fontWeight:700}}>+${c.monto.toFixed(2)}</span> {c.cliente} <span style={{color:"#888",fontSize:11}}>({c.metodo} · {c.quien})</span>
+                <span style={{color:"#2e7d32",fontWeight:700}}>+${(c.monto||0).toFixed(2)}</span> {c.cliente} <span style={{color:"#888",fontSize:11}}>({c.metodo} · {c.quien})</span>
                 {c.factAnterior&&<span style={{background:"#fff3e0",color:"#e65100",borderRadius:4,padding:"1px 6px",fontSize:10,fontWeight:700,marginLeft:6}}>FACT. ANTERIOR</span>}
               </div>
               <span style={{color:"#888",fontSize:11}}>{c.fecha?new Date(c.fecha).toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"}):""}</span>
@@ -8964,7 +8964,7 @@ function ResumenDia({ventas,empleadas,salidasCaja}){
       <Card title={"💸 Salidas de caja — Total: -$"+totSalidas.toFixed(2)}>
         {salidasDia.length===0?<div style={S.empty}>Sin salidas registradas</div>:salidasDia.map(s=>(
           <div key={s.id} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f0f4f8",fontSize:13}}>
-            <div><span style={{color:"#c62828",fontWeight:700}}>-${s.monto.toFixed(2)}</span> {s.motivo} <span style={{color:"#888",fontSize:11}}>({s.quien})</span></div>
+            <div><span style={{color:"#c62828",fontWeight:700}}>-${(s.monto||0).toFixed(2)}</span> {s.motivo} <span style={{color:"#888",fontSize:11}}>({s.quien})</span></div>
             <span style={{color:"#888",fontSize:11}}>{s.hora}</span>
           </div>
         ))}
@@ -9096,7 +9096,7 @@ function Depositos({depositos,setDepositos,ventas,salidasCaja,upsertDeposito}){
                     {deps.map(d=>(
                       <div key={d.id} style={{background:"#f8fbfd",borderRadius:8,padding:"8px 12px",marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center",border:"1px solid #e8f0f7"}}>
                         <div>
-                          <div style={{fontWeight:700,fontSize:13}}>🏦 {d.banco} — ${d.monto.toFixed(2)}</div>
+                          <div style={{fontWeight:700,fontSize:13}}>🏦 {d.banco} — ${(d.monto||0).toFixed(2)}</div>
                           <div style={{fontSize:11,color:"#4db6e4"}}>Comprobante: <strong>{d.comprobante}</strong></div>
                           {d.notas&&<div style={{fontSize:11,color:"#888"}}>{d.notas}</div>}
                         </div>
@@ -9247,7 +9247,7 @@ function Conciliacion({ventas,setVentas,upsertVenta,depositos,setDepositos,upser
                   </div>
                   {m.esMesAnterior&&<div style={{display:"inline-block",marginTop:3,fontSize:10,fontWeight:700,color:"#e65100",background:"#fff3e0",borderRadius:6,padding:"2px 6px"}}>🔙 Venta de {m.mesVenta}</div>}
                 </div>
-                <div style={{fontWeight:800,fontSize:14,color:m.conciliado?"#2e7d32":color}}>${m.monto.toFixed(2)}</div>
+                <div style={{fontWeight:800,fontSize:14,color:m.conciliado?"#2e7d32":color}}>${(m.monto||0).toFixed(2)}</div>
               </label>
             ))
           }
@@ -9267,7 +9267,7 @@ function Conciliacion({ventas,setVentas,upsertVenta,depositos,setDepositos,upser
           +"<td style='text-align:center;padding:4px'>"+(m.conciliado?"✔":"◻")+"</td>"
           +"<td style='padding:4px'>"+m.fecha+"</td>"
           +"<td style='padding:4px'>"+(tipo==="dep"?(m.banco+" · "+m.comprobante):m.cliente+(m.esMesAnterior?" <span style='color:#e65100;font-weight:bold'>(🔙 venta de "+m.mesVenta+")</span>":""))+"</td>"
-          +"<td style='padding:4px;text-align:right;font-weight:bold'>$"+m.monto.toFixed(2)+"</td></tr>").join("")
+          +"<td style='padding:4px;text-align:right;font-weight:bold'>$"+(m.monto||0).toFixed(2)+"</td></tr>").join("")
         +"<tr><td colspan='3' style='padding:4px;font-weight:bold'>Total: $"+r.tot.toFixed(2)+" · Conciliado: $"+r.con.toFixed(2)+"</td><td style='padding:4px;text-align:right;font-weight:bold;color:"+(r.pend>0?"#c62828":"#2e7d32")+"'>"+(r.pend>0?"Pendiente $"+r.pend.toFixed(2):"✔ OK")+"</td></tr>"
         +"</table>";
     };
@@ -9276,7 +9276,7 @@ function Conciliacion({ventas,setVentas,upsertVenta,depositos,setDepositos,upser
     const pendHtml=pendientesMes.length===0?"":"<h3 style='color:#e65100;margin-top:16px'>⏳ Pendiente al último día de "+mesVer+" ("+fmtD(finDeMesStr)+")</h3>"
       +"<table cellpadding='4' cellspacing='0' style='border-collapse:collapse;width:100%;font-size:11px'>"
       +"<tr><th style='background:#fff3e0;text-align:left;padding:4px'>Folio</th><th style='background:#fff3e0;text-align:left;padding:4px'>Cliente</th><th style='background:#fff3e0;text-align:left;padding:4px'>Fecha venta</th><th style='background:#fff3e0;text-align:right;padding:4px'>Total</th><th style='background:#fff3e0;text-align:right;padding:4px'>Pendiente al cierre</th><th style='background:#fff3e0;text-align:right;padding:4px'>Pendiente hoy</th></tr>"
-      +pendientesMes.map(v=>"<tr style='border-bottom:1px solid #eee'><td style='padding:4px'>"+v.folio+"</td><td style='padding:4px'>"+(v.clienteNombre||"")+"</td><td style='padding:4px'>"+fmtD(v.fecha)+"</td><td style='padding:4px;text-align:right'>$"+v.total.toFixed(2)+"</td><td style='padding:4px;text-align:right;font-weight:bold;color:#e65100'>$"+saldoAlFinDeMes(v).toFixed(2)+"</td><td style='padding:4px;text-align:right'>$"+saldo(v).toFixed(2)+"</td></tr>").join("")
+      +pendientesMes.map(v=>"<tr style='border-bottom:1px solid #eee'><td style='padding:4px'>"+v.folio+"</td><td style='padding:4px'>"+(v.clienteNombre||"")+"</td><td style='padding:4px'>"+fmtD(v.fecha)+"</td><td style='padding:4px;text-align:right'>$"+(v.total||0).toFixed(2)+"</td><td style='padding:4px;text-align:right;font-weight:bold;color:#e65100'>$"+saldoAlFinDeMes(v).toFixed(2)+"</td><td style='padding:4px;text-align:right'>$"+saldo(v).toFixed(2)+"</td></tr>").join("")
       +"<tr><td colspan='4' style='padding:4px;font-weight:bold'>Total pendiente al cierre de "+mesVer+"</td><td style='padding:4px;text-align:right;font-weight:bold;color:#e65100'>$"+totalPendienteMes.toFixed(2)+"</td><td></td></tr>"
       +"</table>";
     const banner=todoConciliado
@@ -9339,7 +9339,7 @@ function Conciliacion({ventas,setVentas,upsertVenta,depositos,setDepositos,upser
                 <div key={v.folio} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:"1px solid #f0f4f8"}}>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{fontSize:13,fontWeight:600,color:"#1a3c5e"}}>{v.clienteNombre||"—"} <span style={{color:"#aaa",fontWeight:400,fontSize:11}}>({v.folio})</span></div>
-                    <div style={{fontSize:11,color:"#888"}}>Vendido {fmtD(v.fecha)} · Total ${v.total.toFixed(2)}</div>
+                    <div style={{fontSize:11,color:"#888"}}>Vendido {fmtD(v.fecha)} · Total ${(v.total||0).toFixed(2)}</div>
                     {yaSeCobro&&<div style={{fontSize:11,color:"#2e7d32",fontWeight:600}}>✅ Ya se cobró después — hoy debe ${pendHoy.toFixed(2)}</div>}
                   </div>
                   <div style={{fontWeight:800,fontSize:14,color:"#e65100"}}>${pendAlFin.toFixed(2)}</div>
