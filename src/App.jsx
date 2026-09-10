@@ -502,10 +502,15 @@ const getEst=v=>ESTADOS.find(e=>e.id===(v.estado||"recibido"))||ESTADOS[0];
 const sigEst=actual=>{const i=ESTADOS.findIndex(e=>e.id===actual);return i<ESTADOS.length-1?ESTADOS[i+1]:null;};
 
 const esLavadoSeco = label => label && label.toUpperCase().includes("SECO");
-const calcGanancia = (items) => items.reduce((acc, it) => {
-  const subtotal = (it.precio||0) * (it.piezas||1);
-  return acc + (esLavadoSeco(it.label) ? subtotal * 0.20 : subtotal);
-}, 0);
+// 🧴 Ganancia real de una venta: si ya se registró la factura real de Martinizing para esta orden,
+// se usa el costo real (subtotal lavado en seco - lo que cobró Martinizing). Si todavía está pendiente
+// de facturar, se usa el estimado de 20% como aproximación, hasta que se registre el valor real.
+const calcGanancia = (items, costoMartinizingReal) => {
+  const subtotalSeco = items.reduce((acc, it) => acc + (esLavadoSeco(it.label) ? (it.precio||0)*(it.piezas||1) : 0), 0);
+  const subtotalResto = items.reduce((acc, it) => acc + (esLavadoSeco(it.label) ? 0 : (it.precio||0)*(it.piezas||1)), 0);
+  const gananciaSeco = costoMartinizingReal!=null ? Math.max(0, subtotalSeco - costoMartinizingReal) : subtotalSeco*0.20;
+  return subtotalResto + gananciaSeco;
+};
 
 // ===== WhatsApp obligatorio =====
 // Normaliza teléfonos de Ecuador al formato internacional para wa.me (593...)
@@ -4779,7 +4784,7 @@ function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertV
             <div style={{...S.badge,background:esPag?"#e8f5e9":"#fff3e0",color:esPag?"#2e7d32":"#e65100"}}>{esPag?"✅ Pagado":`⏳ $${pend.toFixed(2)}`}</div>
           </div>
         </div>
-        <div style={{fontSize:12,color:"#555",marginTop:6}}>{(v.items||[]).map((it,i)=><span key={i}>{it.label}{it.piezas>1?` x${it.piezas}`:""}{esLavadoSeco(it.label)&&<span style={{color:"#ff9800",fontSize:10}}> (20%)</span>}{i<(v.items||[]).length-1?" · ":""}</span>)}</div>
+        <div style={{fontSize:12,color:"#555",marginTop:6}}>{(v.items||[]).map((it,i)=><span key={i}>{it.label}{it.piezas>1?` x${it.piezas}`:""}{esLavadoSeco(it.label)&&<span style={{color:v.costoMartinizingReal!=null?"#2e7d32":"#ff9800",fontSize:10}}> {v.costoMartinizingReal!=null?"(facturado)":"(pend. Martinizing)"}</span>}{i<(v.items||[]).length-1?" · ":""}</span>)}</div>
         <div style={{fontSize:12,color:"#555",marginTop:2}}>📅 {fmtD(v.entrega)}</div>
         {v.anulada&&<div style={{background:"#ffebee",borderRadius:6,padding:"6px 10px",marginTop:6,fontSize:12,color:"#c62828"}}>❌ ANULADA por <strong>{v.anuladaPor||"—"}</strong> — Motivo: {v.motivoAnulacion}{v.anuladaEn?` · ${fmt(v.anuladaEn)}`:""}</div>}
         {abs.length>0&&<div style={{marginTop:8,background:"#f0faf4",borderRadius:8,padding:"8px 10px"}}>
@@ -5753,7 +5758,7 @@ function Gastos({gastos,setGastos,sesion,upsertGasto,salidasCaja,activosFijos,se
   const del=id=>{if(!window.confirm("Eliminar?"))return;setGastos(prev=>{const next=prev.map(g=>g.id===id?{...g,eliminada:true}:g);const borrado=next.find(g=>g.id===id);if(borrado&&upsertGasto)upsertGasto({...borrado,_updatedAt:new Date().toISOString()});return next;});};
   const fil=gastos.filter(g=>!g.eliminada&&(!fMes||fechaLocal(g.fecha).startsWith(fMes))&&(fCat==="Todas"||g.categoria===fCat));
   // 💸 Salidas de caja del mismo rango — se muestran como una "categoría" más dentro de este reporte, si se incluye
-  const salidasFil=incluirSalidas&&(fCat==="Todas"||fCat==="Salidas de caja")?(salidasCaja||[]).filter(s=>!s.eliminada&&(!fMes||s.fecha.startsWith(fMes))):[];
+  const salidasFil=incluirSalidas&&(fCat==="Todas"||fCat==="Salidas de caja")?(salidasCaja||[]).filter(s=>!s.eliminada&&!s.esCostoVenta&&(!fMes||s.fecha.startsWith(fMes))):[];
   const totGastos=fil.reduce((a,g)=>a+g.monto,0);
   const totSalidas=salidasFil.reduce((a,s)=>a+s.monto,0);
   const tot=totGastos+totSalidas;
@@ -6701,6 +6706,110 @@ function TiemposRopaAdmin({ventas,eventosProduccion,cargas,maquinas,empleadas}){
         </div>
       ))}
     </Card>
+  </div>);
+}
+
+// 🧴 MARTINIZING (lavado en seco tercerizado) — hace coincidir la factura real que cobra Martinizing
+// contra las órdenes correspondientes, calcula la ganancia real (no el estimado de 20%), y registra
+// el pago como salida de caja SIN que cuente como gasto operativo (porque no lo es: es costo de venta
+// que "regresa" cuando el cliente paga).
+function MartinizingAdmin({ventas,setVentas,upsertVenta,facturasMartinizing,setFacturasMartinizing,upsertFacturaMartinizing,setSalidasCaja,upsertSalida,sesion}){
+  const [seleccion,setSeleccion]=useState({}); // {folio:true}
+  const [montoFactura,setMontoFactura]=useState("");
+  const [numeroFactura,setNumeroFactura]=useState("");
+  const [verHistorial,setVerHistorial]=useState(false);
+
+  // 📋 Órdenes con lavado en seco que TODAVÍA no tienen su factura real de Martinizing registrada
+  const pendientes=(ventas||[]).filter(v=>{
+    if(v.anulada)return false;
+    if(v.costoMartinizingReal!=null)return false;
+    return(v.items||[]).some(it=>esLavadoSeco(it.label));
+  }).map(v=>{
+    const subtotalSeco=(v.items||[]).reduce((a,it)=>a+(esLavadoSeco(it.label)?(it.precio||0)*(it.piezas||1):0),0);
+    return{...v,subtotalSeco};
+  });
+
+  const seleccionados=pendientes.filter(v=>seleccion[v.folio]);
+  const totalSubtotalSeleccionado=seleccionados.reduce((a,v)=>a+v.subtotalSeco,0);
+  const monto=parseFloat(montoFactura)||0;
+
+  const confirmarFactura=()=>{
+    if(seleccionados.length===0){alert("Selecciona al menos una orden.");return;}
+    if(!montoFactura||monto<=0){alert("Escribe el monto de la factura de Martinizing.");return;}
+    const facturaId="mtz_"+Date.now();
+    // 💰 Reparte el monto de la factura proporcionalmente entre las órdenes seleccionadas,
+    // según qué tanto pesa el lavado en seco de cada una dentro del total del lote.
+    setVentas(prev=>{
+      const next=prev.map(v=>{
+        if(!seleccion[v.folio])return v;
+        const costoAsignado=totalSubtotalSeleccionado>0?+(monto*(v.subtotalSeco||(seleccionados.find(s=>s.folio===v.folio)?.subtotalSeco||0))/totalSubtotalSeleccionado).toFixed(2):+(monto/seleccionados.length).toFixed(2);
+        const actualizada={...v,costoMartinizingReal:costoAsignado,martinizingFacturaId:facturaId};
+        if(upsertVenta)upsertVenta({...actualizada,_updatedAt:new Date().toISOString()});
+        return actualizada;
+      });
+      return next;
+    });
+    const factura={id:facturaId,fecha:new Date().toISOString(),folios:seleccionados.map(v=>v.folio),montoFactura:monto,numeroFactura:numeroFactura.trim()||null,registradoPor:sesion?.nombre||null};
+    setFacturasMartinizing(prev=>[factura,...prev]);
+    if(upsertFacturaMartinizing)upsertFacturaMartinizing({...factura,_updatedAt:new Date().toISOString()});
+    // 💸 Registra el pago como salida de caja, marcada como "costo de venta" para que NO cuente como gasto operativo
+    const salida={id:"sal_mtz_"+Date.now(),fecha:new Date().toISOString(),monto,motivo:"Pago a Martinizing"+(numeroFactura.trim()?` (factura ${numeroFactura.trim()})`:"")+" — "+seleccionados.length+" orden(es)",registradoPor:sesion?.nombre||null,esCostoVenta:true,martinizingFacturaId:facturaId};
+    setSalidasCaja(prev=>[salida,...prev]);
+    if(upsertSalida)upsertSalida({...salida,_updatedAt:new Date().toISOString()});
+    setSeleccion({});setMontoFactura("");setNumeroFactura("");
+    alert("✅ Factura registrada. Ganancia real actualizada en esas órdenes, y el pago no se cuenta como gasto.");
+  };
+
+  return(<div style={S.panel}>
+    <h2 style={S.ptitle}>🧴 Martinizing (Lavado en Seco)</h2>
+    <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ Selecciona las órdenes que corresponden a una factura de Martinizing (puede ser 1 sola o varias juntas), escribe el monto que te cobraron, y el sistema calcula la ganancia real de cada una y registra el pago sin que cuente como gasto.</div>
+
+    <Card title={`⏳ Pendientes de facturar (${pendientes.length})`}>
+      {pendientes.length===0&&<div style={S.empty}>No hay órdenes de lavado en seco pendientes de facturar.</div>}
+      {pendientes.map(v=>(
+        <label key={v.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 0",borderBottom:"1px solid #f0f4f8",cursor:"pointer"}}>
+          <input type="checkbox" checked={!!seleccion[v.folio]} onChange={e=>setSeleccion({...seleccion,[v.folio]:e.target.checked})}/>
+          <div style={{flex:1}}>
+            <div style={{fontSize:13,fontWeight:600,color:"#1a3c5e"}}>{v.clienteNombre} <span style={{color:"#aaa",fontWeight:400,fontSize:11}}>({v.folio})</span></div>
+            <div style={{fontSize:11,color:"#888"}}>{fmtD(v.fecha)}</div>
+          </div>
+          <strong style={{fontSize:13,color:"#e65100"}}>${v.subtotalSeco.toFixed(2)}</strong>
+        </label>
+      ))}
+    </Card>
+
+    {seleccionados.length>0&&(
+      <Card title={`🧾 Registrar factura (${seleccionados.length} orden${seleccionados.length!==1?"es":""} seleccionada${seleccionados.length!==1?"s":""})`}>
+        <div style={{fontSize:12,color:"#888",marginBottom:8}}>Subtotal de lavado en seco de lo seleccionado: <strong>${totalSubtotalSeleccionado.toFixed(2)}</strong></div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <div><label style={S.lbl}>Monto de la factura</label><input type="number" step="0.01" style={S.inp} placeholder="$0.00" value={montoFactura} onChange={e=>setMontoFactura(e.target.value)}/></div>
+          <div><label style={S.lbl}>N° factura (opcional)</label><input style={S.inp} value={numeroFactura} onChange={e=>setNumeroFactura(e.target.value)}/></div>
+        </div>
+        {monto>0&&(
+          <div style={{marginTop:10,background:"#e8f5e9",borderRadius:8,padding:"8px 10px"}}>
+            <div style={{fontSize:12,color:"#2e7d32",fontWeight:700}}>Ganancia real de este lote: ${(totalSubtotalSeleccionado-monto).toFixed(2)}</div>
+            <div style={{fontSize:11,color:"#888"}}>(antes se estimaba en ${(totalSubtotalSeleccionado*0.20).toFixed(2)} con el 20% aproximado)</div>
+          </div>
+        )}
+        <button style={{...S.btnP,width:"100%",marginTop:10}} onClick={confirmarFactura}>✅ Confirmar factura y registrar pago</button>
+      </Card>
+    )}
+
+    <button style={{...S.btnS,width:"100%",marginBottom:10}} onClick={()=>setVerHistorial(!verHistorial)}>{verHistorial?"Ocultar":"Ver"} historial de facturas ({(facturasMartinizing||[]).length})</button>
+    {verHistorial&&(
+      <Card title="📋 Facturas registradas">
+        {(facturasMartinizing||[]).length===0&&<div style={S.empty}>Sin facturas registradas todavía.</div>}
+        {(facturasMartinizing||[]).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha)).map(f=>(
+          <div key={f.id} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid #f0f4f8"}}>
+            <div>
+              <div style={{fontSize:13,fontWeight:600,color:"#1a3c5e"}}>{fmtD(f.fecha)} {f.numeroFactura?`· Fact. ${f.numeroFactura}`:""}</div>
+              <div style={{fontSize:11,color:"#888"}}>{f.folios.length} orden(es): {f.folios.join(", ")}</div>
+            </div>
+            <strong style={{color:"#e53935"}}>${f.montoFactura.toFixed(2)}</strong>
+          </div>
+        ))}
+      </Card>
+    )}
   </div>);
 }
 
@@ -8263,7 +8372,7 @@ function DashboardBI({ventas,empleadas,gastos}){
   const gastosMes=(gastos||[]).filter(g=>!g.eliminada&&fechaLocal(g.fecha).startsWith(mesSel)).reduce((a,g)=>a+g.monto,0);
   // 🧺 Ingreso REAL del mes: el lavado en seco solo deja el 20% de ganancia (el resto se le paga a quien hace el servicio),
   // así que no se puede contar el precio completo como ingreso propio — se usa calcGanancia() por cada venta.
-  const ingresoRealMes=vMes.reduce((a,v)=>a+calcGanancia(v.items||[]),0);
+  const ingresoRealMes=vMes.reduce((a,v)=>a+calcGanancia(v.items||[],v.costoMartinizingReal),0);
   const descuentoLavadoSeco=parseFloat((ventaMes-ingresoRealMes).toFixed(2));
   const utilidad=ingresoRealMes-gastosMes;
   // Bonos por empleada (mes seleccionado)
@@ -8520,6 +8629,8 @@ const { data: activosFijos, setData: setActivosFijos, upsert: upsertActivoFijo }
 const { data: conteosInventario, setData: setConteosInventario, upsert: upsertConteoInventario } = useCollection("conteosInventario", "ll_conteos_inventario", []);
 // 📋 EVALUACIÓN DE DESEMPEÑO — quejas registradas y configuración de pesos/metas
 const { data: quejas, setData: setQuejas, upsert: upsertQueja } = useCollection("quejas", "ll_quejas", []);
+// 🧴 Facturas de Martinizing (lavado en seco tercerizado) — cada una cubre 1 o más órdenes
+const { data: facturasMartinizing, setData: setFacturasMartinizing, upsert: upsertFacturaMartinizing } = useCollection("facturasMartinizing", "ll_facturas_martinizing", []);
 // 🎧 Calificaciones manuales de audios de atención (2 por semana, ~8 al mes)
 const { data: calificacionesAudio, setData: setCalificacionesAudio, upsert: upsertCalificacionAudio } = useCollection("calificacionesAudio", "ll_calificaciones_audio", []);
 const { data: evalConfigArr, setData: setEvalConfigArr, upsert: upsertEvalConfig } = useCollection("evalConfig", "ll_eval_config", EVAL_CONFIG_DEFAULT);
@@ -8714,7 +8825,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
     {id:"clientes",icon:"👥",l:"Clientes"},{id:"clientesAnalisis",icon:"📊",l:"Análisis clientes"},{id:"promosAdmin",icon:"🎁",l:"Promos"},{id:"cupones",icon:"🎟️",l:"Cupones"},{id:"resumen",icon:"📈",l:"Resumen día"},
     {id:"reportes",icon:"📊",l:"Reportes"},{id:"depositos",icon:"🏦",l:"Depósitos"},
     {id:"conciliacion",icon:"🏛️",l:"Conciliación"},
-    {id:"gastos",icon:"🛒",l:"Gastos"},{id:"inventario",icon:"📦",l:"Inventario"},{id:"productosAdmin",icon:"🛍️",l:"Productos"},{id:"kardexAdmin",icon:"📒",l:"Kardex"},{id:"conteosAdmin",icon:"📋",l:"Conteos"},{id:"activosFijosAdmin",icon:"📦",l:"Activos Fijos"},{id:"deudasAdmin",icon:"💳",l:"Deudas"},{id:"sorteoAdmin",icon:"🎟️",l:"Sorteo"},
+    {id:"gastos",icon:"🛒",l:"Gastos"},{id:"martinizingAdmin",icon:"🧴",l:"Martinizing"},{id:"inventario",icon:"📦",l:"Inventario"},{id:"productosAdmin",icon:"🛍️",l:"Productos"},{id:"kardexAdmin",icon:"📒",l:"Kardex"},{id:"conteosAdmin",icon:"📋",l:"Conteos"},{id:"activosFijosAdmin",icon:"📦",l:"Activos Fijos"},{id:"deudasAdmin",icon:"💳",l:"Deudas"},{id:"sorteoAdmin",icon:"🎟️",l:"Sorteo"},
     {id:"equipo",icon:"👩",l:"Equipo"},{id:"incentivosAdmin",icon:"🎯",l:"Incentivos"},{id:"maquinasAdmin",icon:"🏭",l:"Máquinas"},{id:"reporteMaquinasAdmin",icon:"⏱️",l:"Uso de máquinas"},{id:"tiemposRopaAdmin",icon:"👕",l:"Tiempos x Servicio"},{id:"pinsAdmin",icon:"🔒",l:"PINs"},{id:"produccionAdmin",icon:"🧺",l:"Producción"},{id:"tareasAdmin",icon:"📋",l:"Tareas"},{id:"notasAdmin",icon:"📝",l:"Notas"},{id:"evaluacionAdmin",icon:"📋",l:"Evaluación"},{id:"calificacionManualAdmin",icon:"🎧",l:"Calificación manual"},{id:"evaluacionConfigAdmin",icon:"⚙️",l:"Config. Evaluación"},
     {id:"config",icon:"⚙️",l:"Config"},{id:"usuarios",icon:"🔑",l:"Usuarios"},
   ];
@@ -8722,7 +8833,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
   const CATEGORIAS=[
     {id:"ventas_caja",icon:"🧾",l:"Ventas",tabIds:["ventas","historial","pendientes","depositos","conciliacion","cupones","promosAdmin","reportes","resumen"]},
     {id:"personal",icon:"👥",l:"Personal",tabIds:["equipo","pinsAdmin","usuarios","tareasAdmin","notasAdmin","incentivosAdmin","evaluacionAdmin","calificacionManualAdmin","evaluacionConfigAdmin","reporteMaquinasAdmin","tiemposRopaAdmin"]},
-    {id:"inventario_cat",icon:"📦",l:"Inventario",tabIds:["inventario","productosAdmin","kardexAdmin","conteosAdmin","gastos","maquinasAdmin","activosFijosAdmin","deudasAdmin"]},
+    {id:"inventario_cat",icon:"📦",l:"Inventario",tabIds:["inventario","productosAdmin","kardexAdmin","conteosAdmin","gastos","martinizingAdmin","maquinasAdmin","activosFijosAdmin","deudasAdmin"]},
     {id:"negocio",icon:"📊",l:"Negocio",tabIds:["bi","clientes","clientesAnalisis","sorteoAdmin","produccionAdmin","config"]},
   ];
   const categoriaDeTab=id=>CATEGORIAS.find(c=>c.tabIds.includes(id))?.id||CATEGORIAS[0].id;
@@ -8775,6 +8886,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
       {tab==="depositos"&&<Depositos depositos={depositos} setDepositos={setDepositos} ventas={ventas} salidasCaja={salidasCaja} upsertDeposito={upsertDeposito}/>}
       {tab==="conciliacion"&&<Conciliacion ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} depositos={depositos} setDepositos={setDepositos} upsertDeposito={upsertDeposito}/>}
       {tab==="gastos"&&<Gastos gastos={gastos} setGastos={setGastos} sesion={sesion} upsertGasto={upsertGasto} salidasCaja={salidasCaja} activosFijos={activosFijos} setActivosFijos={setActivosFijos} upsertActivoFijo={upsertActivoFijo} inventario={inventario} setInventario={setInventario} upsertInventario={upsertInventario} kardexInsumos={kardexInsumos} setKardexInsumos={setKardexInsumos} upsertKardexInsumo={upsertKardexInsumo}/>}
+      {tab==="martinizingAdmin"&&<MartinizingAdmin ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} facturasMartinizing={facturasMartinizing} setFacturasMartinizing={setFacturasMartinizing} upsertFacturaMartinizing={upsertFacturaMartinizing} setSalidasCaja={setSalidasCaja} upsertSalida={upsertSalida} sesion={sesion}/>}
       {tab==="inventario"&&<Inventario inventario={inventario} setInventario={setInventario} upsertInventario={upsertInventario} kardexInsumos={kardexInsumos} setKardexInsumos={setKardexInsumos} upsertKardexInsumo={upsertKardexInsumo} sesion={sesion}/>}
       {tab==="productosAdmin"&&<ProductosAdmin productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} kardexProductos={kardexProductos} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto} sesion={sesion}/>}
       {tab==="kardexAdmin"&&<KardexView productos={productos} kardexProductos={kardexProductos} inventario={inventario} kardexInsumos={kardexInsumos}/>}
