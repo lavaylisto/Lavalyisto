@@ -1,4 +1,18 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Component } from "react";
+// 🛟 Red de seguridad adicional: errores que ocurren fuera del renderizado de React
+// (ej. dentro de un botón, o una función async) no los atrapa el ErrorBoundary — este sí.
+if(typeof window!=="undefined"){
+  const mostrarErrorGlobal=msg=>{
+    if(document.getElementById("ll-error-global"))return; // no duplicar
+    const div=document.createElement("div");
+    div.id="ll-error-global";
+    div.style.cssText="position:fixed;bottom:0;left:0;right:0;background:#4e2600;color:#fff;padding:14px;font-family:monospace;font-size:12px;z-index:999999;white-space:pre-wrap;word-break:break-word;max-height:40vh;overflow:auto;";
+    div.innerHTML="⚠️ ERROR (manda captura de esto): "+String(msg);
+    document.body.appendChild(div);
+  };
+  window.addEventListener("error",e=>mostrarErrorGlobal(e.message+" ("+(e.filename||"")+":"+(e.lineno||"")+")"));
+  window.addEventListener("unhandledrejection",e=>mostrarErrorGlobal("Promesa fallida: "+(e.reason?.message||e.reason)));
+}
 import { useCollection } from "./hooks/useFirestore";
 import { storage } from "./firebase";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
@@ -7536,6 +7550,33 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
   </div>);
 }
 
+// 🛟 RED DE SEGURIDAD: si algo se rompe, en vez de pantalla en blanco se muestra el error en texto,
+// para poder mandar captura de pantalla y diagnosticar sin necesitar consola de desarrollador.
+class ErrorBoundary extends Component{
+  constructor(props){super(props);this.state={error:null,info:null};}
+  static getDerivedStateFromError(error){return{error};}
+  componentDidCatch(error,info){this.setState({info});console.error("Error capturado por ErrorBoundary:",error,info);}
+  render(){
+    if(this.state.error){
+      return(
+        <div style={{minHeight:"100vh",background:"#fff3e0",padding:20,fontFamily:"monospace",fontSize:13,color:"#4e2600"}}>
+          <div style={{fontSize:18,fontWeight:800,marginBottom:10}}>⚠️ Algo se rompió — manda captura de esto</div>
+          <div style={{background:"#fff",borderRadius:8,padding:12,marginBottom:10,whiteSpace:"pre-wrap",wordBreak:"break-word"}}>
+            <strong>Mensaje:</strong> {String(this.state.error?.message||this.state.error)}
+          </div>
+          {this.state.info?.componentStack&&(
+            <div style={{background:"#fff",borderRadius:8,padding:12,marginBottom:10,whiteSpace:"pre-wrap",wordBreak:"break-word",fontSize:11,color:"#888"}}>
+              <strong>Dónde:</strong>{this.state.info.componentStack}
+            </div>
+          )}
+          <button style={{padding:"12px 20px",borderRadius:10,border:"none",background:"#1a3c5e",color:"#fff",fontWeight:700,fontSize:14}} onClick={()=>window.location.reload()}>🔄 Volver a intentar</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function LavaListo(){
   const [ses,setSes]=useState(null);
 
@@ -7566,8 +7607,8 @@ export default function LavaListo(){
     }catch{}
   },[]);
 
-  if(!ses)return <LoginScreen onLogin={login}/>;
-  return <AppContent key={ses._sesId} sesion={ses} onLogout={logout}/>;
+  if(!ses)return <ErrorBoundary><LoginScreen onLogin={login}/></ErrorBoundary>;
+  return <ErrorBoundary><AppContent key={ses._sesId} sesion={ses} onLogout={logout}/></ErrorBoundary>;
 }
 
 // ═══════════════════════════════════════════════════════════════════
