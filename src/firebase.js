@@ -1,6 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 
 // ============================================================
 // OPCIÓN A (recomendada): variables de entorno
@@ -31,6 +32,7 @@ export const firebaseListo = Boolean(firebaseConfig.apiKey && firebaseConfig.pro
 
 let _db = null;
 let _storage = null; // 📷 Fotos de tareas (inventarios, evidencias) — mismo proyecto de Firebase, servicio Storage
+let _authReady = Promise.resolve(); // 🔒 se resuelve cuando ya se autenticó (anónimamente) contra Firebase
 if (firebaseListo) {
   try {
     const app = initializeApp(firebaseConfig);
@@ -39,6 +41,16 @@ if (firebaseListo) {
       localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
     });
     _storage = getStorage(app);
+    // 🔒 SEGURIDAD: nos autenticamos de forma anónima automáticamente (sin pedirle nada a nadie).
+    // Esto permite exigir en las reglas de Firestore "solo si el usuario está autenticado",
+    // bloqueando así cualquier acceso directo a la base de datos desde fuera de esta app.
+    const auth = getAuth(app);
+    _authReady = new Promise((resolve) => {
+      onAuthStateChanged(auth, (user) => {
+        if (user) { resolve(user); return; }
+        signInAnonymously(auth).catch((e) => console.error("No se pudo autenticar:", e.message));
+      });
+    });
   } catch (e) {
     console.error("Firebase no pudo inicializarse:", e);
   }
@@ -48,3 +60,4 @@ if (firebaseListo) {
 
 export const db = _db;
 export const storage = _storage;
+export const authReady = _authReady;
