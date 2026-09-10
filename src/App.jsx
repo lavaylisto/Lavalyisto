@@ -496,7 +496,7 @@ const semISO=d=>{const dt=new Date(d);dt.setHours(0,0,0,0);dt.setDate(dt.getDate
 const mesK=d=>{const dt=new Date(d);return dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0");};
 // 🔧 Normaliza nombres para comparar sin importar tildes, mayúsculas o espacios extra (usuario vs empleada)
 const normNombre=s=>(s||"").toString().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g," ").trim().toLowerCase();
-const saldo=v=>v.total-(v.abonos||[]).reduce((a,ab)=>a+ab.monto,0);
+const saldo=v=>(v.total||0)-(v.abonos||[]).reduce((a,ab)=>a+(ab.monto||0),0);
 const pagada=v=>saldo(v)<=0;
 const getEst=v=>ESTADOS.find(e=>e.id===(v.estado||"recibido"))||ESTADOS[0];
 const sigEst=actual=>{const i=ESTADOS.findIndex(e=>e.id===actual);return i<ESTADOS.length-1?ESTADOS[i+1]:null;};
@@ -689,13 +689,13 @@ const ETAPA_PROD={
 const expCSV=(ventas,titulo,empleadas)=>{
   const enc=["Folio","Fecha","Cliente","Servicios","Total","Pagado","Pendiente","Metodo","Estado","Notas"];
   const filas=ventas.map(v=>{
-    const p=(v.abonos||[]).reduce((a,ab)=>a+ab.monto,0);
+    const p=(v.abonos||[]).reduce((a,ab)=>a+(ab.monto||0),0);
     const m=[...new Set((v.abonos||[]).map(ab=>ab.metodo))].join("/");
-    return[v.folio,fmt(v.fecha),v.clienteNombre||"",(v.items||[]).map(it=>it.label).join("|"),"$"+(v.total||0).toFixed(2),"$"+p.toFixed(2),"$"+(v.total-p).toFixed(2),m,v.estado||"recibido",v.notas||""];
+    return[v.folio,fmt(v.fecha),v.clienteNombre||"",(v.items||[]).map(it=>it.label).join("|"),"$"+(v.total||0).toFixed(2),"$"+p.toFixed(2),"$"+((v.total||0)-p).toFixed(2),m,v.estado||"recibido",v.notas||""];
   });
   // 💰 Fila de totales al final — para cuadrar cuentas: cuánto se vendió, cuánto se cobró y cuánto queda pendiente
   const totVendido=ventas.reduce((a,v)=>a+v.total,0);
-  const totCobrado=ventas.reduce((a,v)=>a+(v.abonos||[]).reduce((x,ab)=>x+ab.monto,0),0);
+  const totCobrado=ventas.reduce((a,v)=>a+(v.abonos||[]).reduce((x,ab)=>x+(ab.monto||0),0),0);
   const totPendiente=totVendido-totCobrado;
   filas.push(["","","","","","","","","",""]);
   filas.push(["TOTALES",`${ventas.length} venta(s)`,"","","$"+totVendido.toFixed(2),"$"+totCobrado.toFixed(2),"$"+totPendiente.toFixed(2),"","",""]);
@@ -4945,7 +4945,7 @@ function Reportes({ventas,empleadas,salidasCaja}){
   const vMes=ventas.filter(v=>mesK(v.fecha)===mesS&&!v.anulada);
   const vRng=ventas.filter(v=>!v.anulada&&fechaLocal(v.fecha)>=desde&&fechaLocal(v.fecha)<=hasta);
   const sum=a=>a.reduce((x,v)=>x+v.total,0);
-  const cob=a=>a.reduce((x,v)=>x+(v.abonos||[]).reduce((y,ab)=>y+ab.monto,0),0);
+  const cob=a=>a.reduce((x,v)=>x+(v.abonos||[]).reduce((y,ab)=>y+(ab.monto||0),0),0);
   const pend=a=>a.reduce((x,v)=>x+saldo(v),0);
   const efC=vMes.flatMap(v=>(v.abonos||[]).filter(a=>a.metodo==="Efectivo")).reduce((a,ab)=>a+ab.monto,0);
   const picC=vMes.flatMap(v=>(v.abonos||[]).filter(a=>a.metodo==="Transferencia Pichincha")).reduce((a,ab)=>a+ab.monto,0);
@@ -6755,7 +6755,8 @@ function MartinizingAdmin({ventas,setVentas,upsertVenta,facturasMartinizing,setF
     setFacturasMartinizing(prev=>[factura,...prev]);
     if(upsertFacturaMartinizing)upsertFacturaMartinizing({...factura,_updatedAt:new Date().toISOString()});
     // 💸 Registra el pago como salida de caja, marcada como "costo de venta" para que NO cuente como gasto operativo
-    const salida={id:"sal_mtz_"+Date.now(),fecha:new Date().toISOString(),monto,motivo:"Pago a Martinizing"+(numeroFactura.trim()?` (factura ${numeroFactura.trim()})`:"")+" — "+seleccionados.length+" orden(es)",registradoPor:sesion?.nombre||null,esCostoVenta:true,martinizingFacturaId:facturaId};
+    // 🔧 Se usa el mismo formato que el resto de salidas de caja: fecha solo con el día (para que agrupe bien en Depósitos/Conciliación) + hora aparte
+    const salida={id:"sal_mtz_"+Date.now(),fecha:fechaHoyLocal(),hora:new Date().toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"}),monto,motivo:"Pago a Martinizing"+(numeroFactura.trim()?` (factura ${numeroFactura.trim()})`:"")+" — "+seleccionados.length+" orden(es)",registradoPor:sesion?.nombre||null,esCostoVenta:true,martinizingFacturaId:facturaId};
     setSalidasCaja(prev=>[salida,...prev]);
     if(upsertSalida)upsertSalida({...salida,_updatedAt:new Date().toISOString()});
     setSeleccion({});setMontoFactura("");setNumeroFactura("");
@@ -9125,9 +9126,11 @@ function Depositos({depositos,setDepositos,ventas,salidasCaja,upsertDeposito}){
       });
     });
     // Restar las salidas de caja de cada día — el depósito es el efectivo NETO
-    (salidasCaja||[]).filter(s=>!s.eliminada&&s.fecha&&s.fecha.startsWith(mesVer)).forEach(s=>{
-      if(!map[s.fecha])map[s.fecha]={efectivo:0,pichincha:0,jep:0,tarjeta:0,salidas:0,ventas:[]};
-      map[s.fecha].salidas+=s.monto;
+    (salidasCaja||[]).filter(s=>!s.eliminada&&s.fecha).forEach(s=>{
+      const diaS=fechaLocal(s.fecha); // 🔧 las salidas guardan fecha+hora completa; aquí se agrupa solo por el día
+      if(!diaS.startsWith(mesVer))return;
+      if(!map[diaS])map[diaS]={efectivo:0,pichincha:0,jep:0,tarjeta:0,salidas:0,ventas:[]};
+      map[diaS].salidas+=(s.monto||0);
     });
     return Object.entries(map).sort((a,b)=>b[0].localeCompare(a[0]));
   })();
@@ -9295,7 +9298,7 @@ function Conciliacion({ventas,setVentas,upsertVenta,depositos,setDepositos,upser
   const finDeMesStr=new Date(añoFinMes,mesFinMesNum,0).toISOString().split("T")[0]; // último día calendario de mesVer
   const saldoAlFinDeMes=v=>{
     const pagadoAlFinMes=(v.abonos||[]).filter(ab=>fechaLocal(ab.fecha)<=finDeMesStr).reduce((a,ab)=>a+ab.monto,0);
-    return parseFloat((v.total-pagadoAlFinMes).toFixed(2));
+    return parseFloat(((v.total||0)-pagadoAlFinMes).toFixed(2));
   };
   const pendientesMes=ventas.filter(v=>!v.anulada&&mesK(v.fecha)===mesVer&&saldoAlFinDeMes(v)>0.01).sort((a,b)=>new Date(a.fecha)-new Date(b.fecha));
   const totalPendienteMes=parseFloat(pendientesMes.reduce((a,v)=>a+saldoAlFinDeMes(v),0).toFixed(2));
