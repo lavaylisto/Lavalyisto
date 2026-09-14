@@ -2052,7 +2052,9 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
   const [buscarClienteProd,setBuscarClienteProd]=useState(""); // 🔍 buscador rápido por nombre en Ropa/Zapatos
   const [detalleEstadoZap,setDetalleEstadoZap]=useState(null); // qué categoría del resumen de zapatos está expandida (ej. "enLavado")
 
-  const activos=ventas.filter(v=>!v.anulada&&["recibido","proceso"].includes(v.estado||"recibido")).sort((a,b)=>new Date(a.fecha)-new Date(b.fecha));
+  // 🛍️ Una venta de SOLO productos (perfumes, detergentes, etc. del catálogo) no pasa por ningún proceso de producción
+  const esSoloProductos=v=>(v.items||[]).length>0&&(v.items||[]).every(it=>it.esProducto);
+  const activos=ventas.filter(v=>!v.anulada&&["recibido","proceso"].includes(v.estado||"recibido")&&!esSoloProductos(v)).sort((a,b)=>new Date(a.fecha)-new Date(b.fecha));
   const eventosDe=folio=>eventosProduccion.filter(ev=>ev.ventaFolio===folio);
   const buscarEvento=(folio,etapa)=>eventosDe(folio).filter(ev=>ev.etapa===etapa).sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp))[0];
   const nombreDe=id=>empleadas.find(e=>String(e.id)===String(id))?.nombre||"—";
@@ -2166,7 +2168,10 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
   };
   const cambiarEstadoVenta=(folio,estado)=>{
     setVentas(prev=>{
-      const next=prev.map(v=>v.folio===folio?{...v,estado}:v);
+      // 🕐 Al marcar como entregado, se guarda el momento exacto — para poder calcular después
+      // cuánto se demoró realmente cada orden (reporte de tiempos al cerrar caja).
+      const extra=estado==="entregado"?{fechaEntregado:new Date().toISOString()}:{};
+      const next=prev.map(v=>v.folio===folio?{...v,estado,...extra}:v);
       const updated=next.find(v=>v.folio===folio);
       if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
       return next;
@@ -2661,7 +2666,10 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
         const cicloLav=cLavUltimo?.ciclo;
         const lavCiclo=cicloLav?lavCargasAll.filter(c=>c.ciclo===cicloLav):[];
         const lavActivas=lavCiclo.filter(c=>!c.finReal);
-        const lavTerminadoCiclo=lavCiclo.length>0&&lavActivas.length===0;
+        // 🔧 Antes esperaba a que TODAS las lavadoras del lote terminaran (lavActivas.length===0).
+        // Ahora, en cuanto UNA lavadora del lote ya salió, se puede avanzar esa parte a secado/centrifugado
+        // sin esperar a las demás — evita tiempo muerto cuando una orden usa varias máquinas.
+        const lavTerminadoCiclo=lavCiclo.length>0&&lavCiclo.some(c=>c.finReal);
 
         const cCen=cargas.filter(c=>perteneceCarga(c)&&c.tipo==="centrifugado"&&gruposEquivalentes(grupo).includes(c.grupo||null)&&(!cLavUltimo||new Date(c.inicio)>=new Date(cLavUltimo.inicio))).sort((a,b)=>new Date(b.inicio)-new Date(a.inicio))[0];
 
@@ -4530,12 +4538,6 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
             <div style={{fontSize:11,color:"#ff9800",marginTop:4}}>🧺 Incluye lavado en seco — solo cuenta el 20% como ganancia</div>
           }
         </div>
-      </Card>
-      <Card title="📋 Protocolo de atención">
-        <label style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:protocoloCumplido?"#e8f5e9":"#ffebee",borderRadius:10,cursor:"pointer",border:"1.5px solid "+(protocoloCumplido?"#2e7d32":"#e53935")}}>
-          <input type="checkbox" checked={protocoloCumplido} onChange={e=>setProtocoloCumplido(e.target.checked)} style={{width:18,height:18}}/>
-          <span style={{fontWeight:600,fontSize:13,color:"#1a3c5e"}}>✅ Cumplí el protocolo completo (saludo, confirmar datos del cliente, explicar tiempos, despedida)</span>
-        </label>
       </Card>
       <Card title="🧽 Prendas que pueden manchar">
         <div style={{fontSize:13,color:"#1a3c5e",marginBottom:10}}>¿El cliente trae alguna prenda que pueda <strong>destiñir o manchar</strong> el resto de la carga? (ej. ropa nueva de color fuerte, prendas oscuras sin lavar antes, etc.)</div>
@@ -7478,6 +7480,27 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
       </div>
     </div>
   );
+  // 🖨️ Reporte de tiempos: las órdenes que esta colaboradora atendió HOY, con cuánto se demoraron —
+  // para dejar constancia y poder justificar por escrito si alguna se tardó de más.
+  const imprimirReporteTiempos=()=>{
+    const misOrdenesHoy=ventas.filter(v=>!v.anulada&&String(v.empleadaId)===String(uid)&&fechaLocal(v.fecha)===hoy).sort((a,b)=>new Date(a.fecha)-new Date(b.fecha));
+    const w=window.open("","_blank","width=800,height=1000");
+    if(!w)return;
+    const filas=misOrdenesHoy.map(v=>{
+      const finReal=v.estado==="entregado"?(v.fechaEntregado||v._updatedAt||new Date().toISOString()):new Date().toISOString();
+      const minutos=Math.round(minutosLaboralesEntre(v.fecha,finReal));
+      const servicio=(v.items||[]).map(it=>it.label).join(", ")||"—";
+      return"<tr><td style='padding:6px;border:1px solid #ddd'>"+v.folio+"</td><td style='padding:6px;border:1px solid #ddd'>"+(v.clienteNombre||"")+"</td><td style='padding:6px;border:1px solid #ddd;font-size:11px'>"+servicio+"</td><td style='padding:6px;border:1px solid #ddd;text-align:center'>"+fmt(v.fecha)+"</td><td style='padding:6px;border:1px solid #ddd;text-align:center'>"+(v.estado==="entregado"?"✅ Entregado":v.estado==="listo"?"📦 Listo":"🔄 En proceso")+"</td><td style='padding:6px;border:1px solid #ddd;text-align:center;font-weight:bold'>"+minutos+" min</td><td style='padding:6px;border:1px solid #ddd'>&nbsp;</td></tr>";
+    }).join("");
+    const html="<html><head><meta charset='UTF-8'><title>Reporte de tiempos</title><style>body{font-family:sans-serif;padding:20px;color:#1a3c5e}table{width:100%;border-collapse:collapse;margin-top:14px;font-size:12px}th{background:#1a3c5e;color:#fff;padding:6px;text-align:left}</style></head><body>"
+      +"<div style='text-align:center;margin-bottom:14px'><div style='font-size:20px;font-weight:800'>🫧 Lava&Listo</div><div style='font-size:12px;color:#888'>Reporte de tiempos — órdenes atendidas del día</div></div>"
+      +"<div style='display:flex;justify-content:space-between;font-size:13px;margin-bottom:10px'><div><strong>Colaboradora:</strong> "+(cg.emp||"")+"</div><div><strong>Fecha:</strong> "+fmtD(hoy)+"</div></div>"
+      +"<table><tr><th>Folio</th><th>Cliente</th><th>Servicio</th><th>Hora recibido</th><th>Estado</th><th>Minutos</th><th>Justificación (si se demoró)</th></tr>"+(filas||"<tr><td colspan='7' style='padding:10px;text-align:center;color:#888'>Sin órdenes registradas hoy</td></tr>")+"</table>"
+      +"<div style='margin-top:40px;font-size:11px;color:#888'>Anota junto a cada orden el motivo si tardó más de lo esperado, para tener mejor comprensión de los tiempos.</div>"
+      +"<scr"+"ipt>window.print();</"+"script></body></html>";
+    w.document.write(html);
+    w.document.close();
+  };
   const imprimir=d=>{
     const w=window.open("","_blank","width=420,height=700");if(!w)return;
     const rowB=BILLETES.filter(b=>(parseFloat(d.bills[b])||0)>0).map(b=>'<div class="row"><span>$'+b+"×"+d.bills[b]+"</span><span>$"+(b*d.bills[b]).toFixed(2)+"</span></div>").join("");
@@ -7539,6 +7562,7 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
           <div style={{display:"flex",justifyContent:"space-between"}}><span>💳 Tarjeta</span><strong>${(cg.totTa||0).toFixed(2)}</strong></div>
         </div>
         <button style={{width:"100%",padding:"12px",background:"#1a3c5e",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:8}} onClick={()=>imprimir(cg)}>🖨️ Reimprimir ticket</button>
+        <button style={{width:"100%",padding:"12px",background:"linear-gradient(135deg,#7b1fa2,#9c27b0)",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:8}} onClick={imprimirReporteTiempos}>🖨️ Imprimir reporte de tiempos del día</button>
         <button style={{width:"100%",padding:"12px",background:"linear-gradient(135deg,#2e7d32,#388e3c)",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:8}} onClick={()=>{setCg(null);setPaso(0);setRevisado(false);setCorreccionUsada(false);setModo("cierre");if(onResetCierre)onResetCierre();}}>🔄 Realizar otro cierre</button>
         <button style={{width:"100%",padding:"12px",background:"linear-gradient(135deg,#c62828,#e53935)",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer"}} onClick={()=>{if(onLogout)onLogout();}}>🚪 Salir</button>
       </div>
