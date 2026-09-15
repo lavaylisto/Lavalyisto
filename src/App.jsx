@@ -2074,7 +2074,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
   // 🔧 "zapatos" y "sin grupo" cuentan como la misma orden — evita cargas huérfanas si una orden de puros zapatos empezó antes de dividirse en grupos
   const gruposEquivalentes=g=>g==="zapatos"?[null,"zapatos"]:[g||null];
   const cargaDe=(folio,tipo,grupo)=>cargas.filter(c=>(c.ventaFolio===folio||(c.ventaFolios||[]).includes(folio))&&c.tipo===tipo&&gruposEquivalentes(grupo).includes(c.grupo||null)).sort((a,b)=>new Date(b.inicio)-new Date(a.inicio))[0];
-  const esZapatoLbl=lbl=>/ZAPATO|PARES?\b|TENIS|CALZADO|BOTAS?\b|SANDALIA|ZAPATILLA|MOCAS[IÍ]N|SNEAKER|TAC[OÓ]N/i.test(lbl||"");
+  const esZapatoLbl=lbl=>/ZAPATO|PAR(?:ES)?\b|TENIS|CALZADO|BOTAS?\b|SANDALIA|ZAPATILLA|MOCAS[IÍ]N|SNEAKER|TAC[OÓ]N/i.test(lbl||"");
   // 🗂️ Para las pestañas Ropa/Zapatos: a qué sección(es) pertenece cada orden
   const perteneceZapatos=v=>{
     if(v.prodGrupos)return v.prodGrupos.includes("zapatos");
@@ -2087,7 +2087,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
   // 👟 Cuenta los pares de zapatos de una orden. Si el servicio es un combo/promo con el número en el nombre
   // (ej. "MIERCOLES DE ZAPATOS (PROMO 4 PARES)"), se usa ESE número — el campo piezas no siempre refleja
   // cuántos pares trae el combo, solo cuántas veces se compró ese combo.
-  const paresDeLabel=lbl=>{const m=(lbl||"").match(/(\d+)\s*PARES?\b/i);return m?parseInt(m[1]):null;};
+  const paresDeLabel=lbl=>{const m=(lbl||"").match(/(\d+)\s*PAR(?:ES)?\b/i);return m?parseInt(m[1]):null;};
   const paresDe=folio=>{
     const v=ventas.find(vv=>vv.folio===folio);
     if(!v)return 0;
@@ -2664,7 +2664,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
     {activos.filter(v=>perteneceRopa(v)&&(v.clienteNombre||"").toLowerCase().includes(buscarClienteProd.trim().toLowerCase())).map(v=>{
       const maquinaDe=id=>maquinas.find(m=>m.id===id);
       const buscarEventoG=(folio,etapa,grupo)=>eventosDe(folio).filter(ev=>ev.etapa===etapa&&gruposEquivalentes(grupo).includes(ev.grupo||null)).sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp))[0];
-      const esZapato=lbl=>/ZAPATO|PARES?\b|TENIS|CALZADO|BOTAS?\b|SANDALIA|ZAPATILLA|MOCAS[IÍ]N|SNEAKER|TAC[OÓ]N/i.test(lbl||"");
+      const esZapato=lbl=>/ZAPATO|PAR(?:ES)?\b|TENIS|CALZADO|BOTAS?\b|SANDALIA|ZAPATILLA|MOCAS[IÍ]N|SNEAKER|TAC[OÓ]N/i.test(lbl||"");
       const tieneZapato=(v.items||[]).some(it=>esZapato(it.label));
       const tieneOtro=(v.items||[]).some(it=>!esZapato(it.label));
       const puedeDividir=!v.prodGrupos&&tieneZapato&&tieneOtro;
@@ -6569,15 +6569,20 @@ function ReporteMaquinas({cargas,maquinas,ventas,evalConfig}){
 // fechas — reutilizable tanto en la pantalla de Tiempos como en el reporte obligatorio del Cierre de Caja.
 function calcularAnalisisTiempos(ventas,eventosProduccion,cargas,maquinas,{desde,hasta,modoEmpleada=false,miEmpleadaId=null}){
   const hoy=fechaHoyLocal();
-  const esZapatoLbl=lbl=>/ZAPATO|PARES?\b|TENIS|CALZADO|BOTAS?\b|SANDALIA|ZAPATILLA|MOCAS[IÍ]N|SNEAKER|TAC[OÓ]N/i.test(lbl||"");
+  const esZapatoLbl=lbl=>/ZAPATO|PAR(?:ES)?\b|TENIS|CALZADO|BOTAS?\b|SANDALIA|ZAPATILLA|MOCAS[IÍ]N|SNEAKER|TAC[OÓ]N/i.test(lbl||"");
   const esLavadoSecoLbl=lbl=>/SECO/i.test(lbl||"");
   const eventosDeFolio=(folio,etapa,grupo)=>(eventosProduccion||[]).filter(ev=>ev.ventaFolio===folio&&ev.etapa===etapa&&(grupo?(ev.grupo||null)===grupo:!ev.grupo)).sort((a,b)=>new Date(a.timestamp)-new Date(b.timestamp));
   const cargaDeFolio=(folio,tipo,grupo)=>(cargas||[]).filter(c=>(c.ventaFolio===folio||(c.ventaFolios||[]).includes(folio))&&c.tipo===tipo&&(grupo?c.grupo===grupo:!c.grupo)).sort((a,b)=>new Date(a.inicio)-new Date(b.inicio))[0];
 
   const ordenesRopa=(ventas||[]).filter(v=>{
     if(v.anulada)return false;
-    const f=fechaLocal(v.fecha);
-    if(f<desde||f>hasta)return false;
+    // 🔧 En modo colaboradora NO se filtra por fecha de recepción — si una orden entró ayer y sigue sin
+    // terminar, debe seguir apareciendo hoy (para ver en qué proceso quedó), mientras ella haya hecho
+    // alguna etapa hoy. El filtro de "desde/hasta" solo aplica al modo admin (navegación histórica).
+    if(!modoEmpleada){
+      const f=fechaLocal(v.fecha);
+      if(f<desde||f>hasta)return false;
+    }
     const itemsNoZapato=(v.items||[]).filter(it=>!esZapatoLbl(it.label));
     const tieneRopa=v.prodGrupos?v.prodGrupos.includes("ropa"):itemsNoZapato.length>0;
     const soloLavadoSeco=itemsNoZapato.length>0&&itemsNoZapato.every(it=>esLavadoSecoLbl(it.label));
@@ -6596,6 +6601,11 @@ function calcularAnalisisTiempos(ventas,eventosProduccion,cargas,maquinas,{desde
     const evDobFin=eventosDeFolio(v.folio,"doblado_fin",grupo)[0];
 
     const etapas=[{nombre:"Recibido",min:null,tipoEspera:"info",horaInicio:v.fecha}];
+    // 🔧 Antes este tramo (desde que entra la orden hasta que se revisan las prendas) no aparecía en
+    // ningún lado — el reloj arrancaba recién en la clasificación, "perdiendo" ese tiempo del reporte.
+    const esperaRevision=minutosLaboralesEntre(v.fecha,clasifTs);
+    etapas.push({nombre:"Espera para revisar prendas",min:esperaRevision,tipoEspera:esperaRevision>5?"demora":"ok",horaInicio:v.fecha,horaFin:clasifTs}); // revisar prendas no usa máquina, si tarda es operativo
+    etapas.push({nombre:"Revisión de prendas",min:null,tipoEspera:"info",horaInicio:clasifTs,empleadaId:v.clasificacion.empleadaId});
     if(cLav){
       const esperaLav=minutosLaboralesEntre(clasifTs,cLav.inicio);
       etapas.push({nombre:"Espera para lavar",min:esperaLav,tipoEspera:esperaLav>5?(habiaMaquinaLibreEn(clasifTs,"lavadora",cargas,maquinas)?"demora":"maquina"):"ok",horaInicio:clasifTs,horaFin:cLav.inicio});
