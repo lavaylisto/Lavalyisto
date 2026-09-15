@@ -2502,7 +2502,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
     </div>
 
     {tabProd==="diagnostico"&&(()=>{
-      const encontradas=buscarClienteProd.trim()?ventas.filter(v=>v.folio.toLowerCase().includes(buscarClienteProd.trim().toLowerCase())||(v.clienteNombre||"").toLowerCase().includes(buscarClienteProd.trim().toLowerCase())):[];
+      const encontradas=buscarClienteProd.trim()?ventas.filter(v=>(v.folio||"").toLowerCase().includes(buscarClienteProd.trim().toLowerCase())||(v.clienteNombre||"").toLowerCase().includes(buscarClienteProd.trim().toLowerCase())):[];
       return(<>
         <div style={{fontSize:12,color:"#888",marginBottom:10}}>Busca por folio o nombre de cliente para ver EXACTAMENTE por qué una orden aparece o no en Producción.</div>
         <input style={S.inp} placeholder="🔍 Folio o nombre del cliente..." value={buscarClienteProd} onChange={e=>setBuscarClienteProd(e.target.value)}/>
