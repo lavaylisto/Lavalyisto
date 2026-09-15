@@ -2503,12 +2503,20 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
 
     {tabProd==="diagnostico"&&(()=>{
       const encontradas=buscarClienteProd.trim()?ventas.filter(v=>(v.folio||"").toLowerCase().includes(buscarClienteProd.trim().toLowerCase())||(v.clienteNombre||"").toLowerCase().includes(buscarClienteProd.trim().toLowerCase())):[];
-      // 🩹 Escaneo global: todas las cargas sin terminar cuya máquina ya no las referencia — quedaron atascadas
-      const cargasHuerfanas=(cargas||[]).filter(c=>{
+      // 🩹 Escaneo global: cargas sin terminar que ya NO son la actividad real de su máquina.
+      // 🔧 Antes se exigía que la máquina apuntara EXACTO a esta carga (m.cargaActualId===c.id) — pero una
+      // carga sigue genuinamente activa aunque la máquina no la referencie por id, siempre que la máquina
+      // siga ocupada y NADIE más nuevo la haya reemplazado. Solo se considera huérfana si: la máquina ya no
+      // existe, está libre, o ya hay una carga MÁS RECIENTE para esa misma máquina (o sea, sí la reemplazaron).
+      const esCargaHuerfana=c=>{
         if(c.finReal)return false;
         const m=maquinas.find(mm=>mm.id===c.maquinaId);
-        return!(m&&m.cargaActualId===c.id&&m.estado==="ocupada");
-      });
+        if(!m)return true;
+        if(m.estado!=="ocupada")return true;
+        const reemplazada=(cargas||[]).some(c2=>c2.id!==c.id&&c2.maquinaId===c.maquinaId&&c2.tipo===c.tipo&&new Date(c2.inicio)>new Date(c.inicio));
+        return reemplazada;
+      };
+      const cargasHuerfanas=(cargas||[]).filter(esCargaHuerfana);
       return(<>
         {cargasHuerfanas.length>0&&(
           <div style={{background:"#ffebee",border:"1.5px solid #c62828",borderRadius:12,padding:12,marginBottom:16}}>
@@ -2569,11 +2577,10 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
                 <div style={{fontSize:12,fontWeight:700,color:"#1a3c5e",marginBottom:4}}>🏭 Cargas de máquina encontradas para este folio ({cargasDeEsteFolio.length})</div>
                 {cargasDeEsteFolio.length===0&&<div style={{fontSize:12,color:"#888"}}>Ninguna — no se ha puesto en ninguna máquina todavía.</div>}
                 {cargasDeEsteFolio.map((c,i)=>{
-                  // 🩹 Huérfana = nunca se marcó terminada, Y la máquina que la tenía ya no la referencia
-                  // (se liberó o se le asignó otra carga sin cerrar esta). Por eso el pedido queda atascado
-                  // e invisible en todas las colas — ni cuenta como pendiente ni como activa.
-                  const maquinaQueLaTenia=maquinas.find(m=>m.id===c.maquinaId);
-                  const esHuerfana=!c.finReal&&!(maquinaQueLaTenia&&maquinaQueLaTenia.cargaActualId===c.id&&maquinaQueLaTenia.estado==="ocupada");
+                  // 🩹 Huérfana = nunca se marcó terminada, Y la máquina ya no la considera su carga actual
+                  // (se liberó, o alguien más nuevo la reemplazó). Por eso el pedido queda atascado e
+                  // invisible en todas las colas — ni cuenta como pendiente ni como activa.
+                  const esHuerfana=esCargaHuerfana(c);
                   return(
                   <div key={i} style={{fontSize:12,color:"#555",padding:"6px 0",borderBottom:i<cargasDeEsteFolio.length-1?"1px solid #f5f5f5":"none"}}>
                     <div>
@@ -2657,7 +2664,14 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
         </div>
         <div style={{fontSize:12,color:"#888",marginBottom:8}}>Toca la lavadora o la secadora de zapatos para ver el detalle completo de cada máquina.</div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(90px,1fr))",gap:8,marginBottom:16}}>
-          {maquinas.filter(m=>m.id==="1LZ"||m.id==="1SZ").map(m=><TarjetaMaquina key={m.id} m={m} cargas={cargas} ventas={ventas} onClick={m.id==="1LZ"?()=>setPanelLavadoraZap(true):()=>setPanelSecadoraZap(true)}/>)}
+          {maquinas.filter(m=>m.id==="1LZ").map(m=><TarjetaMaquina key={m.id} m={m} cargas={cargas} ventas={ventas} onClick={()=>setPanelLavadoraZap(true)}/>)}
+          <div onClick={()=>setDetalleEstadoZap(detalleEstadoZap==="enCentrifugado"?null:"enCentrifugado")} style={{background:totalesZapatos.enCentrifugado>0?"#ede7f6":"#f8fbfd",border:`2px solid ${totalesZapatos.enCentrifugado>0?"#7986cb":"#e0e8f0"}`,borderRadius:10,padding:"8px 6px",textAlign:"center",cursor:"pointer"}}>
+            <div style={{fontSize:18}}>🌀</div>
+            <div style={{fontSize:11,fontWeight:700,color:"#1a3c5e",lineHeight:1.1}}>Centrifugado</div>
+            <div style={{fontSize:9,color:totalesZapatos.enCentrifugado>0?"#5c6bc0":"#888",fontWeight:700}}>{totalesZapatos.enCentrifugado>0?`${totalesZapatos.enCentrifugado} pares`:"Libre"}</div>
+            <div style={{fontSize:8,color:"#8d6e63",marginTop:2,fontWeight:700}}>👆 Ver detalle</div>
+          </div>
+          {maquinas.filter(m=>m.id==="1SZ").map(m=><TarjetaMaquina key={m.id} m={m} cargas={cargas} ventas={ventas} onClick={()=>setPanelSecadoraZap(true)}/>)}
           <div onClick={()=>setPanelEmpaquetadoZap(true)} style={{background:empaquetandoZap.length>0?"#f3e5f5":"#f8fbfd",border:`2px solid ${empaquetandoZap.length>0?"#ab47bc":"#e0e8f0"}`,borderRadius:10,padding:"8px 6px",textAlign:"center",cursor:"pointer"}}>
             <div style={{fontSize:18}}>📦</div>
             <div style={{fontSize:11,fontWeight:700,color:"#1a3c5e",lineHeight:1.1}}>Empaquetado</div>
