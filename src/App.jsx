@@ -2503,7 +2503,34 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
 
     {tabProd==="diagnostico"&&(()=>{
       const encontradas=buscarClienteProd.trim()?ventas.filter(v=>(v.folio||"").toLowerCase().includes(buscarClienteProd.trim().toLowerCase())||(v.clienteNombre||"").toLowerCase().includes(buscarClienteProd.trim().toLowerCase())):[];
+      // 🩹 Escaneo global: todas las cargas sin terminar cuya máquina ya no las referencia — quedaron atascadas
+      const cargasHuerfanas=(cargas||[]).filter(c=>{
+        if(c.finReal)return false;
+        const m=maquinas.find(mm=>mm.id===c.maquinaId);
+        return!(m&&m.cargaActualId===c.id&&m.estado==="ocupada");
+      });
       return(<>
+        {cargasHuerfanas.length>0&&(
+          <div style={{background:"#ffebee",border:"1.5px solid #c62828",borderRadius:12,padding:12,marginBottom:16}}>
+            <div style={{fontSize:13,fontWeight:800,color:"#c62828",marginBottom:6}}>🩹 Cargas atascadas en todo el sistema ({cargasHuerfanas.length})</div>
+            <div style={{fontSize:11,color:"#a02020",marginBottom:8}}>Nunca se marcaron terminadas y la máquina ya no las referencia — por eso quedaron invisibles en las colas normales.</div>
+            {cargasHuerfanas.map((c,i)=>{
+              const folios=c.ventaFolios&&c.ventaFolios.length?c.ventaFolios:[c.ventaFolio];
+              const clientes=folios.map(f=>ventas.find(v=>v.folio===f)?.clienteNombre||f).join(", ");
+              return(
+                <div key={c.id||i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:i<cargasHuerfanas.length-1?"1px solid #ffcdd2":"none"}}>
+                  <div style={{fontSize:12,color:"#c62828"}}><strong>{c.tipo}</strong> · {clientes} · inicio: {fmt(c.inicio)}</div>
+                  <button style={{...S.btnS,background:"#c62828",color:"#fff",fontSize:11}} onClick={()=>{
+                    if(!confirm("¿Marcar esta carga como terminada ahora?"))return;
+                    const actualizada={...c,finReal:new Date().toISOString()};
+                    setCargas(prev=>prev.map(x=>x.id===c.id?actualizada:x));
+                    if(upsertCarga)upsertCarga({...actualizada,_updatedAt:new Date().toISOString()});
+                  }}>✅ Terminar ahora</button>
+                </div>
+              );
+            })}
+          </div>
+        )}
         <div style={{fontSize:12,color:"#888",marginBottom:10}}>Busca por folio o nombre de cliente para ver EXACTAMENTE por qué una orden aparece o no en Producción.</div>
         <input style={S.inp} placeholder="🔍 Folio o nombre del cliente..." value={buscarClienteProd} onChange={e=>setBuscarClienteProd(e.target.value)}/>
         {encontradas.length===0&&buscarClienteProd.trim()&&<div style={{...S.empty,marginTop:10}}>Sin resultados.</div>}
@@ -2541,11 +2568,31 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
               <div style={{marginTop:8,paddingTop:8,borderTop:"1px solid #f0f4f8"}}>
                 <div style={{fontSize:12,fontWeight:700,color:"#1a3c5e",marginBottom:4}}>🏭 Cargas de máquina encontradas para este folio ({cargasDeEsteFolio.length})</div>
                 {cargasDeEsteFolio.length===0&&<div style={{fontSize:12,color:"#888"}}>Ninguna — no se ha puesto en ninguna máquina todavía.</div>}
-                {cargasDeEsteFolio.map((c,i)=>(
-                  <div key={i} style={{fontSize:12,color:"#555",padding:"3px 0",borderBottom:i<cargasDeEsteFolio.length-1?"1px solid #f5f5f5":"none"}}>
-                    <strong>{c.tipo}</strong> · grupo: {c.grupo===undefined?"(sin definir)":c.grupo===null?"null":`"${c.grupo}"`} · máquina: {c.maquinaId||"—"} · inicio: {fmt(c.inicio)} · {c.finReal?`terminó: ${fmt(c.finReal)}`:"⏳ sin terminar"}
+                {cargasDeEsteFolio.map((c,i)=>{
+                  // 🩹 Huérfana = nunca se marcó terminada, Y la máquina que la tenía ya no la referencia
+                  // (se liberó o se le asignó otra carga sin cerrar esta). Por eso el pedido queda atascado
+                  // e invisible en todas las colas — ni cuenta como pendiente ni como activa.
+                  const maquinaQueLaTenia=maquinas.find(m=>m.id===c.maquinaId);
+                  const esHuerfana=!c.finReal&&!(maquinaQueLaTenia&&maquinaQueLaTenia.cargaActualId===c.id&&maquinaQueLaTenia.estado==="ocupada");
+                  return(
+                  <div key={i} style={{fontSize:12,color:"#555",padding:"6px 0",borderBottom:i<cargasDeEsteFolio.length-1?"1px solid #f5f5f5":"none"}}>
+                    <div>
+                      <strong>{c.tipo}</strong> · grupo: {c.grupo===undefined?"(sin definir)":c.grupo===null?"null":`"${c.grupo}"`} · máquina: {c.maquinaId||"—"} · inicio: {fmt(c.inicio)} · {c.finReal?`terminó: ${fmt(c.finReal)}`:"⏳ sin terminar"}
+                    </div>
+                    {esHuerfana&&(
+                      <div style={{marginTop:4,background:"#ffebee",borderRadius:6,padding:"6px 8px"}}>
+                        <div style={{color:"#c62828",fontWeight:700,fontSize:11,marginBottom:4}}>🩹 HUÉRFANA: la máquina ya no la referencia, por eso está atascada e invisible en las colas.</div>
+                        <button style={{...S.btnS,background:"#c62828",color:"#fff",fontSize:11}} onClick={()=>{
+                          if(!confirm("¿Marcar esta carga como terminada ahora, para que la orden pueda avanzar?"))return;
+                          const actualizada={...c,finReal:new Date().toISOString()};
+                          setCargas(prev=>prev.map(x=>x.id===c.id?actualizada:x));
+                          if(upsertCarga)upsertCarga({...actualizada,_updatedAt:new Date().toISOString()});
+                        }}>✅ Marcar como terminada ahora (desatascar)</button>
+                      </div>
+                    )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           );
