@@ -3950,9 +3950,9 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
           :tab==="conteoEmp"
             ?<ConteoProductos productos={productos} setConteos={setConteosInventario} upsertConteo={upsertConteoInventario} sesion={sesion}/>
           :tab==="martinizingEmp"
-            ?<MartinizingAdmin ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} facturasMartinizing={facturasMartinizing} setFacturasMartinizing={setFacturasMartinizing} upsertFacturaMartinizing={upsertFacturaMartinizing} setSalidasCaja={setSalidasCaja} upsertSalida={upsertSalida} sesion={sesion}/>
+            ?<MartinizingAdmin ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} facturasMartinizing={facturasMartinizing} setFacturasMartinizing={setFacturasMartinizing} upsertFacturaMartinizing={upsertFacturaMartinizing} setSalidasCaja={setSalidasCaja} upsertSalida={upsertSalida} sesion={sesion} esAdmin={false}/>
           :tab==="tiemposEmp"
-            ?<TiemposRopaAdmin ventas={ventas} eventosProduccion={eventosProduccion} cargas={cargas} maquinas={maquinas} empleadas={empleadas}/>
+            ?<TiemposRopaAdmin ventas={ventas} eventosProduccion={eventosProduccion} cargas={cargas} maquinas={maquinas} empleadas={empleadas} modoEmpleada={true} miEmpleadaId={miEmpleadaSesionPE?.id}/>
           :tab==="miEvaluacion"
             ?<EvaluacionDesempeno empleadas={empleadas} ventas={ventas} eventosProduccion={eventosProduccion} tareasDiarias={tareasDiarias} quejas={quejas} cargas={cargas} evalConfig={evalConfig||EVAL_CONFIG_DEFAULT[0]} esAdmin={false} miEmpleadaId={miEmpleadaSesionPE?.id} calificacionesAudio={calificacionesAudio} ventasPerfumeReg={ventasPerfumeReg}/>
           :tab==="clientes"
@@ -3980,7 +3980,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
               <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e"}}>💰 Caja</div>
               <button style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:"#888"}} onClick={()=>setShowCaja(false)}>✕</button>
             </div>
-            <CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={onCierreListo} onResetCierre={onResetCierre} sesion={sesion} salidasCaja={salidasCaja} setVentas={setVentas} upsertVenta={upsertVenta} upsertCaja={upsertCaja}/>
+            <CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={onCierreListo} onResetCierre={onResetCierre} sesion={sesion} salidasCaja={salidasCaja} setVentas={setVentas} upsertVenta={upsertVenta} upsertCaja={upsertCaja} eventosProduccion={eventosProduccion} cargas={cargas} maquinas={maquinas}/>
           </div>
         </div>
       )}
@@ -6565,18 +6565,15 @@ function ReporteMaquinas({cargas,maquinas,ventas,evalConfig}){
 // ⏱️ TIEMPOS DE ROPA POR LIBRAS — analiza cada orden de ropa: quién la atendió, cuánto tardó en total, y en cada
 // espera entre etapas, si fue porque las máquinas estaban ocupadas (normal) o porque nadie actuó a tiempo aunque
 // había máquina libre (demora operativa). Excluye zapatos — eso se ve en la pestaña Zapatos, no aquí.
-function TiemposRopaAdmin({ventas,eventosProduccion,cargas,maquinas,empleadas}){
+// ⏱️ Calcula el análisis de tiempos (etapa por etapa) de las órdenes de ropa/otros servicios en un rango de
+// fechas — reutilizable tanto en la pantalla de Tiempos como en el reporte obligatorio del Cierre de Caja.
+function calcularAnalisisTiempos(ventas,eventosProduccion,cargas,maquinas,{desde,hasta,modoEmpleada=false,miEmpleadaId=null}){
   const hoy=fechaHoyLocal();
-  const [desde,setDesde]=useState((()=>{const d=new Date();d.setDate(d.getDate()-30);return fechaLocal(d.toISOString());})());
-  const [hasta,setHasta]=useState(hoy);
-  const [verDetalleFolio,setVerDetalleFolio]=useState(null);
   const esZapatoLbl=lbl=>/ZAPATO|PARES?\b|TENIS|CALZADO|BOTAS?\b|SANDALIA|ZAPATILLA|MOCAS[IÍ]N|SNEAKER|TAC[OÓ]N/i.test(lbl||"");
   const esLavadoSecoLbl=lbl=>/SECO/i.test(lbl||"");
-  const nombreDe=id=>empleadas.find(e=>String(e.id)===String(id))?.nombre||"—";
   const eventosDeFolio=(folio,etapa,grupo)=>(eventosProduccion||[]).filter(ev=>ev.ventaFolio===folio&&ev.etapa===etapa&&(grupo?(ev.grupo||null)===grupo:!ev.grupo)).sort((a,b)=>new Date(a.timestamp)-new Date(b.timestamp));
   const cargaDeFolio=(folio,tipo,grupo)=>(cargas||[]).filter(c=>(c.ventaFolio===folio||(c.ventaFolios||[]).includes(folio))&&c.tipo===tipo&&(grupo?c.grupo===grupo:!c.grupo)).sort((a,b)=>new Date(a.inicio)-new Date(b.inicio))[0];
 
-  // 📋 Ordenes de ropa/edredones/otros servicios (excluye zapatos Y lavado en seco) dentro del rango, con revisión hecha
   const ordenesRopa=(ventas||[]).filter(v=>{
     if(v.anulada)return false;
     const f=fechaLocal(v.fecha);
@@ -6587,7 +6584,7 @@ function TiemposRopaAdmin({ventas,eventosProduccion,cargas,maquinas,empleadas}){
     return tieneRopa&&!soloLavadoSeco&&v.clasificacion;
   });
 
-  const analisis=ordenesRopa.map(v=>{
+  return ordenesRopa.map(v=>{
     const grupo=v.prodGrupos?"ropa":null;
     const libras=librasDeVenta(v,esZapatoLbl);
     const servicioPrincipal=(v.items||[]).find(it=>!esZapatoLbl(it.label)&&!esLavadoSecoLbl(it.label))?.label||(v.items||[])[0]?.label||"—";
@@ -6620,20 +6617,30 @@ function TiemposRopaAdmin({ventas,eventosProduccion,cargas,maquinas,empleadas}){
     if(cSec)etapas.push({nombre:"Secado",min:cSec.finReal?minutosLaboralesEntre(cSec.inicio,cSec.finReal):null,tipoEspera:"proceso",empleadaId:cSec.empleadaId,horaInicio:cSec.inicio,horaFin:cSec.finReal});
     if(cSec?.finReal&&evDobIni){
       const esperaDob=minutosLaboralesEntre(cSec.finReal,evDobIni.timestamp);
-      etapas.push({nombre:"Espera para doblar",min:esperaDob,tipoEspera:esperaDob>5?"demora":"ok",horaInicio:cSec.finReal,horaFin:evDobIni.timestamp}); // doblar no usa máquina, así que si tarda, es operativo
+      etapas.push({nombre:"Espera para doblar",min:esperaDob,tipoEspera:esperaDob>5?"demora":"ok",horaInicio:cSec.finReal,horaFin:evDobIni.timestamp});
     }
     if(evDobIni&&evDobFin)etapas.push({nombre:"Doblado",min:minutosLaboralesEntre(evDobIni.timestamp,evDobFin.timestamp),tipoEspera:"proceso",empleadaId:evDobFin.empleadaId,horaInicio:evDobIni.timestamp,horaFin:evDobFin.timestamp});
     if(evDobFin&&v.msgListo?.fecha){
       const esperaListo=minutosLaboralesEntre(evDobFin.timestamp,v.msgListo.fecha);
-      etapas.push({nombre:"Espera para confirmar Listo (WhatsApp)",min:esperaListo,tipoEspera:esperaListo>5?"demora":"ok",horaInicio:evDobFin.timestamp,horaFin:v.msgListo.fecha}); // avisar al cliente no usa máquina, si tarda es operativo
+      etapas.push({nombre:"Espera para confirmar Listo (WhatsApp)",min:esperaListo,tipoEspera:esperaListo>5?"demora":"ok",horaInicio:evDobFin.timestamp,horaFin:v.msgListo.fecha});
     }
     if(v.msgListo?.fecha)etapas.push({nombre:"🔔 Listo para retirar (WhatsApp enviado)",min:null,tipoEspera:"info",horaInicio:v.msgListo.fecha});
 
-    // 🕐 El tiempo total corre desde que entró la orden hasta que se confirma "Listo para retirar"
-    // (el momento exacto en que se envía el WhatsApp al cliente), no hasta que se termina de doblar.
     const tiempoTotalMin=v.msgListo?.fecha?minutosLaboralesEntre(v.fecha,v.msgListo.fecha):null;
     return{folio:v.folio,cliente:v.clienteNombre,libras,servicioPrincipal,atendidaPor:v.clasificacion.empleadaId,tiempoTotalMin,etapas,completa:!!v.msgListo?.fecha};
+  }).filter(a=>{
+    if(!modoEmpleada)return true;
+    return a.etapas.some(e=>e.empleadaId!=null&&String(e.empleadaId)===String(miEmpleadaId)&&e.horaInicio&&fechaLocal(e.horaInicio)===hoy);
   });
+}
+
+function TiemposRopaAdmin({ventas,eventosProduccion,cargas,maquinas,empleadas,modoEmpleada=false,miEmpleadaId=null}){
+  const hoy=fechaHoyLocal();
+  const [desde,setDesde]=useState(modoEmpleada?hoy:(()=>{const d=new Date();d.setDate(d.getDate()-30);return fechaLocal(d.toISOString());})());
+  const [hasta,setHasta]=useState(hoy);
+  const [verDetalleFolio,setVerDetalleFolio]=useState(null);
+  const nombreDe=id=>empleadas.find(e=>String(e.id)===String(id))?.nombre||"—";
+  const analisis=calcularAnalisisTiempos(ventas,eventosProduccion,cargas,maquinas,{desde,hasta,modoEmpleada,miEmpleadaId});
 
   // 📊 Agrupar por rango de libras
   const RANGOS=[[0,15,"0-15 lb"],[16,25,"16-25 lb"],[26,40,"26-40 lb"],[41,999,"41+ lb"]];
@@ -6670,8 +6677,9 @@ function TiemposRopaAdmin({ventas,eventosProduccion,cargas,maquinas,empleadas}){
   };
 
   return(<div style={S.panel}>
-    <h2 style={S.ptitle}>⏱️ Tiempos por Servicio (Ropa, edredones y otros)</h2>
-    <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ Incluye ropa, edredones y demás servicios — excluye zapatos (pestaña aparte) y lavado en seco (proceso distinto, subcontratado). El tiempo total va <strong>desde que entra la orden hasta que se confirma "Listo para retirar" (WhatsApp enviado)</strong>. Solo corre dentro del horario laboral <strong>(9:20am-6pm, lunes a sábado)</strong> — <strong>los domingos el tiempo no corre</strong>, así una orden recibida el domingo no sale con tiempo inflado hasta que abre el lunes. Cada espera se etiqueta como <strong>⏳ Máquina ocupada</strong> (había fila, es normal) o <strong>🐢 Demora operativa</strong> (había máquina libre pero nadie actuó a tiempo).</div>
+    <h2 style={S.ptitle}>{modoEmpleada?"⏱️ Mis tiempos de hoy":"⏱️ Tiempos por Servicio (Ropa, edredones y otros)"}</h2>
+    <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ {modoEmpleada?"Solo las órdenes de HOY donde tú hiciste alguna etapa (con tu código/PIN).":"Incluye ropa, edredones y demás servicios — excluye zapatos (pestaña aparte) y lavado en seco (proceso distinto, subcontratado)."} El tiempo total va <strong>desde que entra la orden hasta que se confirma "Listo para retirar" (WhatsApp enviado)</strong>. Solo corre dentro del horario laboral <strong>(9:20am-6pm, lunes a sábado)</strong> — <strong>los domingos el tiempo no corre</strong>. Cada espera se etiqueta como <strong>⏳ Máquina ocupada</strong> (había fila, es normal) o <strong>🐢 Demora operativa</strong> (había máquina libre pero nadie actuó a tiempo).</div>
+    {!modoEmpleada&&(
     <Card title="🔍 Filtros">
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
         <div><label style={S.lbl}>Desde</label><input type="date" style={S.inp} value={desde} onChange={e=>setDesde(e.target.value)}/></div>
@@ -6679,7 +6687,9 @@ function TiemposRopaAdmin({ventas,eventosProduccion,cargas,maquinas,empleadas}){
       </div>
       <button style={{...S.btnP,width:"100%",marginTop:10}} onClick={exportarCSV}>📥 Descargar CSV ({analisis.length})</button>
     </Card>
+    )}
 
+    {!modoEmpleada&&(<>
     <Card title="🧾 Promedio de tiempo total por servicio">
       {listaPorServicio.length===0&&<div style={S.empty}>Sin órdenes completas en ese rango todavía.</div>}
       {listaPorServicio.map(s=>(
@@ -6697,6 +6707,7 @@ function TiemposRopaAdmin({ventas,eventosProduccion,cargas,maquinas,empleadas}){
         </div>
       ))}
     </Card>
+    </>)}
 
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
       <div style={{...S.kpi,borderLeft:"4px solid #1565c0"}}><div style={{fontSize:20}}>⏳</div><div><div style={{fontWeight:800,fontSize:16,color:"#1565c0"}}>{(minPorMaquina/60).toFixed(1)}h</div><div style={{fontSize:11,fontWeight:600,color:"#1a3c5e"}}>Espera por máquina ocupada</div></div></div>
@@ -6746,11 +6757,12 @@ function TiemposRopaAdmin({ventas,eventosProduccion,cargas,maquinas,empleadas}){
 // contra las órdenes correspondientes, calcula la ganancia real (no el estimado de 20%), y registra
 // el pago como salida de caja SIN que cuente como gasto operativo (porque no lo es: es costo de venta
 // que "regresa" cuando el cliente paga).
-function MartinizingAdmin({ventas,setVentas,upsertVenta,facturasMartinizing,setFacturasMartinizing,upsertFacturaMartinizing,setSalidasCaja,upsertSalida,sesion}){
+function MartinizingAdmin({ventas,setVentas,upsertVenta,facturasMartinizing,setFacturasMartinizing,upsertFacturaMartinizing,setSalidasCaja,upsertSalida,sesion,esAdmin=true}){
   const [seleccion,setSeleccion]=useState({}); // {folio:true}
   const [montoFactura,setMontoFactura]=useState("");
   const [numeroFactura,setNumeroFactura]=useState("");
   const [verHistorial,setVerHistorial]=useState(false);
+  const [verDetallePrendas,setVerDetallePrendas]=useState(false);
   const [mesResumen,setMesResumen]=useState(mesK(new Date()));
   const tieneLavadoSeco=v=>(v.items||[]).some(it=>esLavadoSeco(it.label));
 
@@ -6801,6 +6813,13 @@ function MartinizingAdmin({ventas,setVentas,upsertVenta,facturasMartinizing,setF
   const totalSubtotalSeleccionado=seleccionados.reduce((a,v)=>a+v.subtotalSeco,0);
   const monto=parseFloat(montoFactura)||0;
 
+  // 📋 Detalle por prenda (solo admin) — cada orden ya facturada, con lo cobrado, lo pagado a Martinizing, y la ganancia real
+  const detallePorPrenda=(ventas||[]).filter(v=>!v.anulada&&tieneLavadoSeco(v)&&v.costoMartinizingReal!=null).map(v=>{
+    const cobrado=subtotalSecoMes(v);
+    const pagado=v.costoMartinizingReal||0;
+    return{folio:v.folio,cliente:v.clienteNombre,fecha:v.fecha,servicio:(v.items||[]).filter(it=>esLavadoSeco(it.label)).map(it=>it.label).join(", "),cobrado,pagado,ganancia:Math.max(0,cobrado-pagado)};
+  }).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha));
+
   const confirmarFactura=()=>{
     if(seleccionados.length===0){alert("Selecciona al menos una orden.");return;}
     if(!montoFactura||monto<=0){alert("Escribe el monto de la factura de Martinizing.");return;}
@@ -6826,12 +6845,13 @@ function MartinizingAdmin({ventas,setVentas,upsertVenta,facturasMartinizing,setF
     setSalidasCaja(prev=>[salida,...prev]);
     if(upsertSalida)upsertSalida({...salida,_updatedAt:new Date().toISOString()});
     setSeleccion({});setMontoFactura("");setNumeroFactura("");
-    alert("✅ Factura registrada. Ganancia real actualizada en esas órdenes, y el pago no se cuenta como gasto.");
+    alert(esAdmin?"✅ Factura registrada. Ganancia real actualizada en esas órdenes, y el pago no se cuenta como gasto.":"✅ Factura registrada correctamente.");
   };
 
   return(<div style={S.panel}>
     <h2 style={S.ptitle}>🧴 Martinizing (Lavado en Seco)</h2>
 
+    {esAdmin&&(<>
     <Card title="📊 Resumen del mes">
       <label style={S.lbl}>Mes</label>
       <input type="month" style={S.inp} value={mesResumen} onChange={e=>setMesResumen(e.target.value)}/>
@@ -6843,6 +6863,26 @@ function MartinizingAdmin({ventas,setVentas,upsertVenta,facturasMartinizing,setF
       </div>
       {ventasSecoPendientesMes.length>0&&<div style={{fontSize:11,color:"#e65100",marginTop:8,fontWeight:600}}>⚠️ {ventasSecoPendientesMes.length} venta{ventasSecoPendientesMes.length!==1?"s":""} de este mes todavía sin factura de Martinizing registrada — no cuentan todavía en "Pagado" ni en "Ganamos", hasta que las factures.</div>}
     </Card>
+
+    <button style={{...S.btnS,width:"100%",marginBottom:14}} onClick={()=>setVerDetallePrendas(!verDetallePrendas)}>{verDetallePrendas?"Ocultar":"Ver"} detalle por prenda ({detallePorPrenda.length})</button>
+    {verDetallePrendas&&(
+      <Card title="👔 Detalle por prenda — cobrado vs ganancia">
+        {detallePorPrenda.length===0&&<div style={S.empty}>Todavía no hay órdenes facturadas con Martinizing.</div>}
+        {detallePorPrenda.map(d=>(
+          <div key={d.folio} style={{padding:"8px 0",borderBottom:"1px solid #f0f4f8"}}>
+            <div style={{fontSize:13,fontWeight:600,color:"#1a3c5e"}}>{d.cliente} <span style={{color:"#aaa",fontWeight:400,fontSize:11}}>({d.folio})</span></div>
+            <div style={{fontSize:11,color:"#888",marginBottom:3}}>{d.servicio} · {fmtD(d.fecha)}</div>
+            <div style={{display:"flex",gap:12,fontSize:12}}>
+              <span>Cobrado: <strong style={{color:"#1a3c5e"}}>${d.cobrado.toFixed(2)}</strong></span>
+              <span>Pagado a Martinizing: <strong style={{color:"#e53935"}}>${d.pagado.toFixed(2)}</strong></span>
+              <span>Ganancia: <strong style={{color:"#2e7d32"}}>${d.ganancia.toFixed(2)}</strong></span>
+            </div>
+          </div>
+        ))}
+      </Card>
+    )}
+    </>)}
+
     <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ El lavado en seco es tercerizado — no pasa por lavadoras/secadoras propias. El recorrido es: 🚚 Entregar a Martinizing (se paga ahí) → 🧾 Facturar → 📥 Retirar → 🔔 Listo para retirar.</div>
 
     <Card title={`🚚 Por entregar a Martinizing (${porEntregar.length})`}>
@@ -6871,9 +6911,9 @@ function MartinizingAdmin({ventas,setVentas,upsertVenta,facturasMartinizing,setF
       ))}
     </Card>
 
-    <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ Selecciona las órdenes que corresponden a una factura de Martinizing (puede ser 1 sola o varias juntas), escribe el monto que te cobraron, y el sistema calcula la ganancia real de cada una y registra el pago sin que cuente como gasto.</div>
+    {esAdmin&&<div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ Selecciona las órdenes que corresponden a una factura de Martinizing (puede ser 1 sola o varias juntas), escribe el monto que te cobraron, y el sistema calcula la ganancia real de cada una y registra el pago sin que cuente como gasto.</div>}
 
-    <Card title={`⏳ Pendientes de facturar (${pendientes.length})`}>
+    <Card title={`🧾 Pendientes de facturar (${pendientes.length})`}>
       {pendientes.length===0&&<div style={S.empty}>No hay órdenes entregadas a Martinizing pendientes de facturar.</div>}
       {pendientes.map(v=>(
         <label key={v.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 0",borderBottom:"1px solid #f0f4f8",cursor:"pointer"}}>
@@ -6882,28 +6922,28 @@ function MartinizingAdmin({ventas,setVentas,upsertVenta,facturasMartinizing,setF
             <div style={{fontSize:13,fontWeight:600,color:"#1a3c5e"}}>{v.clienteNombre} <span style={{color:"#aaa",fontWeight:400,fontSize:11}}>({v.folio})</span></div>
             <div style={{fontSize:11,color:"#888"}}>{fmtD(v.fecha)}</div>
           </div>
-          <strong style={{fontSize:13,color:"#e65100"}}>${v.subtotalSeco.toFixed(2)}</strong>
+          {esAdmin&&<strong style={{fontSize:13,color:"#e65100"}}>${v.subtotalSeco.toFixed(2)}</strong>}
         </label>
       ))}
     </Card>
 
     {seleccionados.length>0&&(
       <Card title={`🧾 Registrar factura (${seleccionados.length} orden${seleccionados.length!==1?"es":""} seleccionada${seleccionados.length!==1?"s":""})`}>
-        <div style={{fontSize:12,color:"#888",marginBottom:8}}>Subtotal de lavado en seco de lo seleccionado: <strong>${totalSubtotalSeleccionado.toFixed(2)}</strong></div>
+        {esAdmin&&<div style={{fontSize:12,color:"#888",marginBottom:8}}>Subtotal de lavado en seco de lo seleccionado: <strong>${totalSubtotalSeleccionado.toFixed(2)}</strong></div>}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
           <div><label style={S.lbl}>Monto de la factura</label><input type="number" step="0.01" style={S.inp} placeholder="$0.00" value={montoFactura} onChange={e=>setMontoFactura(e.target.value)}/></div>
           <div><label style={S.lbl}>N° factura (opcional)</label><input style={S.inp} value={numeroFactura} onChange={e=>setNumeroFactura(e.target.value)}/></div>
         </div>
-        {monto>0&&(
+        {esAdmin&&monto>0&&(
           <div style={{marginTop:10,background:"#e8f5e9",borderRadius:8,padding:"8px 10px"}}>
             <div style={{fontSize:12,color:"#2e7d32",fontWeight:700}}>Ganancia real de este lote: ${(totalSubtotalSeleccionado-monto).toFixed(2)}</div>
-            <div style={{fontSize:11,color:"#888"}}>(antes se estimaba en ${(totalSubtotalSeleccionado*0.20).toFixed(2)} con el 20% aproximado)</div>
           </div>
         )}
         <button style={{...S.btnP,width:"100%",marginTop:10}} onClick={confirmarFactura}>✅ Confirmar factura y registrar pago</button>
       </Card>
     )}
 
+    {esAdmin&&(<>
     <button style={{...S.btnS,width:"100%",marginBottom:10}} onClick={()=>setVerHistorial(!verHistorial)}>{verHistorial?"Ocultar":"Ver"} historial de facturas ({(facturasMartinizing||[]).length})</button>
     {verHistorial&&(
       <Card title="📋 Facturas registradas">
@@ -6919,6 +6959,7 @@ function MartinizingAdmin({ventas,setVentas,upsertVenta,facturasMartinizing,setF
         ))}
       </Card>
     )}
+    </>)}
   </div>);
 }
 
@@ -7504,7 +7545,7 @@ function SalidaCaja({sesion,salidasCaja,setSalidasCaja,onClose,upsertSalida}){
 }
 
 
-function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesion,salidasCaja,setVentas,upsertVenta,upsertCaja}){
+function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesion,salidasCaja,setVentas,upsertVenta,upsertCaja,eventosProduccion,cargas,maquinas}){
   const hoy=fechaHoyLocal();
   const uid=sesion?.id||"admin";
   // AK: apertura de esta sesion especifica (sessionStorage = se borra al cerrar sesion)
@@ -7529,11 +7570,17 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
   const [correccionUsada,setCorreccionUsada]=useState(false); // 🔒 solo se permite volver a corregir una vez
   const [revisado,setRevisado]=useState(false);
   const [waRevision,setWaRevision]=useState(null); // venta a la que hay que avisar desde la revisión
+  // 🖨️ Reporte de tiempos obligatorio: debe imprimirlo antes de poder continuar con el cierre
+  const [tiemposImpreso,setTiemposImpreso]=useState(false);
+  const miEmpleadaId=empleadas.find(e=>String(e.id)===String(uid))?.id??uid;
+  const misAnalisisTiempos=calcularAnalisisTiempos(ventas,eventosProduccion,cargas,maquinas,{desde:hoy,hasta:hoy,modoEmpleada:true,miEmpleadaId});
   // ---- Revisión de órdenes antes del cierre ----
   const activas=ventas.filter(v=>!v.anulada&&(v.estado||"recibido")!=="entregado");
   const listosSinAviso=activas.filter(v=>(v.estado||"recibido")==="listo"&&!v.checkMsgRetiro&&!v.msgListo);
   const atrasadas=activas.filter(v=>["recibido","proceso"].includes(v.estado||"recibido")&&fechaLocal(v.entrega)<hoy);
-  const puedeContinuar=listosSinAviso.length===0&&revisado;
+  // 🖨️ Solo se exige imprimir el reporte de tiempos si tuvo al menos una orden hoy con alguna etapa suya
+  const necesitaImprimirTiempos=misAnalisisTiempos.length>0;
+  const puedeContinuar=listosSinAviso.length===0&&revisado&&(!necesitaImprimirTiempos||tiemposImpreso);
   const marcarAvisada=(venta,info)=>{
     if(setVentas)setVentas(prev=>{const next=prev.map(vv=>vv.folio===venta.folio?{...vv,checkMsgRetiro:info.enviado,msgListo:info}:vv);const updated=next.find(vv=>vv.folio===venta.folio);if(updated&&upsertVenta)upsertVenta(updated);return next;});
     setWaRevision(null);
@@ -7584,23 +7631,27 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
       </div>
     </div>
   );
-  // 🖨️ Reporte de tiempos: las órdenes que esta colaboradora atendió HOY, con cuánto se demoraron —
-  // para dejar constancia y poder justificar por escrito si alguna se tardó de más.
-  const imprimirReporteTiempos=()=>{
-    const misOrdenesHoy=ventas.filter(v=>!v.anulada&&String(v.empleadaId)===String(uid)&&fechaLocal(v.fecha)===hoy).sort((a,b)=>new Date(a.fecha)-new Date(b.fecha));
+  // 🖨️ Reporte de tiempos DETALLADO por etapa: solo las órdenes de HOY donde ELLA participó (con su
+  // PIN/código), con la hora exacta de cada paso — para justificar por escrito dónde hubo demora.
+  const imprimirMisTiempos=()=>{
     const w=window.open("","_blank","width=800,height=1000");
     if(!w)return;
-    const filas=misOrdenesHoy.map(v=>{
-      const finReal=v.estado==="entregado"?(v.fechaEntregado||v._updatedAt||new Date().toISOString()):new Date().toISOString();
-      const minutos=Math.round(minutosLaboralesEntre(v.fecha,finReal));
-      const servicio=(v.items||[]).map(it=>it.label).join(", ")||"—";
-      return"<tr><td style='padding:6px;border:1px solid #ddd'>"+v.folio+"</td><td style='padding:6px;border:1px solid #ddd'>"+(v.clienteNombre||"")+"</td><td style='padding:6px;border:1px solid #ddd;font-size:11px'>"+servicio+"</td><td style='padding:6px;border:1px solid #ddd;text-align:center'>"+fmt(v.fecha)+"</td><td style='padding:6px;border:1px solid #ddd;text-align:center'>"+(v.estado==="entregado"?"✅ Entregado":v.estado==="listo"?"📦 Listo":"🔄 En proceso")+"</td><td style='padding:6px;border:1px solid #ddd;text-align:center;font-weight:bold'>"+minutos+" min</td><td style='padding:6px;border:1px solid #ddd'>&nbsp;</td></tr>";
+    const filas=misAnalisisTiempos.map(a=>{
+      const etapasHtml=a.etapas.map(e=>{
+        const horas=e.horaInicio?fmt(e.horaInicio)+(e.horaFin?` → ${fmt(e.horaFin)}`:""):"";
+        const icono=e.tipoEspera==="maquina"?"⏳ ":e.tipoEspera==="demora"?"🐢 ":"";
+        return`<div style="margin-bottom:2px">${icono}${e.nombre}${e.min!=null?` — ${e.min.toFixed(0)} min`:""} <span style="color:#888">${horas}</span></div>`;
+      }).join("");
+      return"<tr><td style='padding:6px;border:1px solid #ddd;vertical-align:top'>"+a.folio+"<br/><span style='font-size:11px;color:#888'>"+(a.cliente||"")+"</span></td>"
+        +"<td style='padding:6px;border:1px solid #ddd;font-size:11px;vertical-align:top'>"+etapasHtml+"</td>"
+        +"<td style='padding:6px;border:1px solid #ddd;text-align:center;font-weight:bold;vertical-align:top'>"+(a.tiempoTotalMin!=null?a.tiempoTotalMin.toFixed(0)+" min":"—")+"</td>"
+        +"<td style='padding:6px;border:1px solid #ddd;vertical-align:top'>&nbsp;</td></tr>";
     }).join("");
-    const html="<html><head><meta charset='UTF-8'><title>Reporte de tiempos</title><style>body{font-family:sans-serif;padding:20px;color:#1a3c5e}table{width:100%;border-collapse:collapse;margin-top:14px;font-size:12px}th{background:#1a3c5e;color:#fff;padding:6px;text-align:left}</style></head><body>"
-      +"<div style='text-align:center;margin-bottom:14px'><div style='font-size:20px;font-weight:800'>🫧 Lava&Listo</div><div style='font-size:12px;color:#888'>Reporte de tiempos — órdenes atendidas del día</div></div>"
-      +"<div style='display:flex;justify-content:space-between;font-size:13px;margin-bottom:10px'><div><strong>Colaboradora:</strong> "+(cg.emp||"")+"</div><div><strong>Fecha:</strong> "+fmtD(hoy)+"</div></div>"
-      +"<table><tr><th>Folio</th><th>Cliente</th><th>Servicio</th><th>Hora recibido</th><th>Estado</th><th>Minutos</th><th>Justificación (si se demoró)</th></tr>"+(filas||"<tr><td colspan='7' style='padding:10px;text-align:center;color:#888'>Sin órdenes registradas hoy</td></tr>")+"</table>"
-      +"<div style='margin-top:40px;font-size:11px;color:#888'>Anota junto a cada orden el motivo si tardó más de lo esperado, para tener mejor comprensión de los tiempos.</div>"
+    const html="<html><head><meta charset='UTF-8'><title>Mi reporte de tiempos</title><style>body{font-family:sans-serif;padding:20px;color:#1a3c5e}table{width:100%;border-collapse:collapse;margin-top:14px;font-size:12px}th{background:#1a3c5e;color:#fff;padding:6px;text-align:left}</style></head><body>"
+      +"<div style='text-align:center;margin-bottom:14px'><div style='font-size:20px;font-weight:800'>🫧 Lava&Listo</div><div style='font-size:12px;color:#888'>Mi reporte de tiempos — solo mis órdenes de hoy</div></div>"
+      +"<div style='display:flex;justify-content:space-between;font-size:13px;margin-bottom:10px'><div><strong>Colaboradora:</strong> "+(sesion?.nombre||"")+"</div><div><strong>Fecha:</strong> "+fmtD(hoy)+"</div></div>"
+      +"<table><tr><th>Orden</th><th>Etapas (hora de cada paso)</th><th>Tiempo total</th><th>Observación (si hubo demora)</th></tr>"+(filas||"<tr><td colspan='4' style='padding:10px;text-align:center;color:#888'>Sin órdenes propias hoy</td></tr>")+"</table>"
+      +"<div style='margin-top:40px;font-size:11px;color:#888'>Revisa cada etapa marcada con 🐢 (demora operativa) y anota el motivo en la columna de observaciones.</div>"
       +"<scr"+"ipt>window.print();</"+"script></body></html>";
     w.document.write(html);
     w.document.close();
@@ -7666,7 +7717,7 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
           <div style={{display:"flex",justifyContent:"space-between"}}><span>💳 Tarjeta</span><strong>${(cg.totTa||0).toFixed(2)}</strong></div>
         </div>
         <button style={{width:"100%",padding:"12px",background:"#1a3c5e",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:8}} onClick={()=>imprimir(cg)}>🖨️ Reimprimir ticket</button>
-        <button style={{width:"100%",padding:"12px",background:"linear-gradient(135deg,#7b1fa2,#9c27b0)",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:8}} onClick={imprimirReporteTiempos}>🖨️ Imprimir reporte de tiempos del día</button>
+        <button style={{width:"100%",padding:"12px",background:"linear-gradient(135deg,#7b1fa2,#9c27b0)",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:8}} onClick={imprimirMisTiempos}>🖨️ Reimprimir mi reporte de tiempos</button>
         <button style={{width:"100%",padding:"12px",background:"linear-gradient(135deg,#2e7d32,#388e3c)",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:8}} onClick={()=>{setCg(null);setPaso(0);setRevisado(false);setCorreccionUsada(false);setModo("cierre");if(onResetCierre)onResetCierre();}}>🔄 Realizar otro cierre</button>
         <button style={{width:"100%",padding:"12px",background:"linear-gradient(135deg,#c62828,#e53935)",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer"}} onClick={()=>{if(onLogout)onLogout();}}>🚪 Salir</button>
       </div>
@@ -7727,12 +7778,19 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
           {atrasadas.map(v=><div key={v.folio} style={{fontSize:12,color:"#555",marginBottom:2}}>• {v.clienteNombre} · {v.folio} · {getEst(v).icon} {getEst(v).label} · entrega {fmtD(v.entrega)}</div>)}
         </div>}
         {listosSinAviso.length===0&&atrasadas.length===0&&<div style={{background:"#e8f5e9",borderRadius:10,padding:"10px 12px",marginBottom:10,fontSize:13,color:"#2e7d32",fontWeight:600}}>✅ Sin pendientes críticos: todas las órdenes listas tienen aviso enviado.</div>}
+        {necesitaImprimirTiempos&&(
+          <div style={{background:tiemposImpreso?"#e8f5e9":"#fff3e0",borderRadius:10,padding:"10px 12px",marginBottom:10,border:"1.5px solid "+(tiemposImpreso?"#2e7d32":"#e65100")}}>
+            <div style={{fontSize:13,fontWeight:700,color:tiemposImpreso?"#2e7d32":"#e65100",marginBottom:6}}>{tiemposImpreso?"✅":"🖨️"} Reporte de tiempos de hoy ({misAnalisisTiempos.length} orden{misAnalisisTiempos.length!==1?"es":""})</div>
+            <div style={{fontSize:12,color:"#555",marginBottom:8}}>Antes de cerrar caja debes imprimir tu reporte de tiempos de hoy, revisarlo, y anotar a mano la observación donde haya demora.</div>
+            <button style={{...S.btnP,width:"100%"}} onClick={()=>{imprimirMisTiempos();setTiemposImpreso(true);}}>🖨️ Imprimir mi reporte de tiempos de hoy</button>
+          </div>
+        )}
         <label style={{...S.chk,fontSize:13,background:"#f0f4f8",borderRadius:8,padding:"10px 12px",marginBottom:10}}>
           <input type="checkbox" checked={revisado} onChange={()=>setRevisado(!revisado)}/>
           <span>He revisado el estado de <strong>todas</strong> las órdenes y son correctos.</span>
         </label>
         <button disabled={!puedeContinuar} style={{...S.btnP,background:puedeContinuar?undefined:"#e0e0e0",color:puedeContinuar?undefined:"#999",cursor:puedeContinuar?"pointer":"not-allowed"}} onClick={()=>{if(puedeContinuar)setPaso(1);}}>Continuar al conteo de billetes →</button>
-        {!puedeContinuar&&<div style={{fontSize:11,color:"#c62828",textAlign:"center",marginTop:6}}>{listosSinAviso.length>0?"Envía los avisos pendientes y marca la casilla de revisión.":"Marca la casilla de revisión para continuar."}</div>}
+        {!puedeContinuar&&<div style={{fontSize:11,color:"#c62828",textAlign:"center",marginTop:6}}>{listosSinAviso.length>0?"Envía los avisos pendientes y marca la casilla de revisión.":necesitaImprimirTiempos&&!tiemposImpreso?"Imprime tu reporte de tiempos de hoy para continuar.":"Marca la casilla de revisión para continuar."}</div>}
         {waRevision&&<WhatsAppObligatorio venta={waRevision} tipo="listo" onConfirm={info=>marcarAvisada(waRevision,info)} onCancel={()=>setWaRevision(null)}/>}
       </Card>}
       {paso===1&&<Card title="💵 Paso 1 — Billetes">
@@ -9041,7 +9099,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
       {tab==="evaluacionConfigAdmin"&&<EvaluacionConfigAdmin evalConfig={evalConfig} setEvalConfigArr={setEvalConfigArr} upsertEvalConfig={upsertEvalConfig}/>}
       {tab==="reporteMaquinasAdmin"&&<ReporteMaquinas cargas={cargas} maquinas={maquinas} ventas={ventas} evalConfig={evalConfig}/>}
       {tab==="tiemposRopaAdmin"&&<TiemposRopaAdmin ventas={ventas} eventosProduccion={eventosProduccion} cargas={cargas} maquinas={maquinas} empleadas={empleadas}/>}
-      {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={handleCierreListo} onResetCierre={()=>setCierreOk(false)} sesion={sesion} salidasCaja={salidasCaja} setVentas={setVentas} upsertVenta={upsertVenta} upsertCaja={upsertCaja}/>}
+      {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={handleCierreListo} onResetCierre={()=>setCierreOk(false)} sesion={sesion} salidasCaja={salidasCaja} setVentas={setVentas} upsertVenta={upsertVenta} upsertCaja={upsertCaja} eventosProduccion={eventosProduccion} cargas={cargas} maquinas={maquinas}/>}
       {tab==="config"&&<Configuracion servicios={servicios} setServicios={setServicios} exportarDatos={exportarDatos} importarDatos={importarDatos} upsertVenta={upsertVenta} upsertServicio={upsertServicio}/>}
       {tab==="usuarios"&&<GestionUsuarios/>}
     </div>
