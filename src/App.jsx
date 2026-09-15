@@ -2496,10 +2496,49 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
     {!notifOn&&<button onClick={activarNotificaciones} style={{...S.btnS,width:"100%",marginBottom:12,background:"#fff3e0",color:"#e65100"}}>🔔 Activar notificaciones en esta pantalla</button>}
 
     <div style={{display:"flex",gap:8,marginBottom:14}}>
-      {[["maquinas","🏭 Máquinas"],["ropa","👕 Ropa"],["zapatos","👟 Zapatos"]].map(([val,l])=>(
+      {[["maquinas","🏭 Máquinas"],["ropa","👕 Ropa"],["zapatos","👟 Zapatos"],["diagnostico","🔍 Diagnóstico"]].map(([val,l])=>(
         <button key={val} onClick={()=>setTabProd(val)} style={{flex:1,padding:"9px 6px",borderRadius:10,border:tabProd===val?"2px solid #1a3c5e":"1.5px solid #e0e8f0",background:tabProd===val?"#eaf3fb":"#fff",color:"#1a3c5e",fontWeight:700,fontSize:12,cursor:"pointer"}}>{l}</button>
       ))}
     </div>
+
+    {tabProd==="diagnostico"&&(()=>{
+      const encontradas=buscarClienteProd.trim()?ventas.filter(v=>v.folio.toLowerCase().includes(buscarClienteProd.trim().toLowerCase())||(v.clienteNombre||"").toLowerCase().includes(buscarClienteProd.trim().toLowerCase())):[];
+      return(<>
+        <div style={{fontSize:12,color:"#888",marginBottom:10}}>Busca por folio o nombre de cliente para ver EXACTAMENTE por qué una orden aparece o no en Producción.</div>
+        <input style={S.inp} placeholder="🔍 Folio o nombre del cliente..." value={buscarClienteProd} onChange={e=>setBuscarClienteProd(e.target.value)}/>
+        {encontradas.length===0&&buscarClienteProd.trim()&&<div style={{...S.empty,marginTop:10}}>Sin resultados.</div>}
+        {encontradas.map(v=>{
+          const tieneZapD=(v.items||[]).some(it=>esZapatoLbl(it.label));
+          const tieneOtroD=(v.items||[]).some(it=>!esZapatoLbl(it.label));
+          const soloProductosD=(v.items||[]).length>0&&(v.items||[]).every(it=>it.esProducto);
+          const soloLavadoSecoD=(v.items||[]).length>0&&(v.items||[]).every(it=>esLavadoSeco(it.label));
+          const enActivos=!v.anulada&&["recibido","proceso"].includes(v.estado||"recibido")&&!soloProductosD&&!soloLavadoSecoD;
+          const enFlujosZapatos=enActivos&&((v.prodGrupos&&v.prodGrupos.includes("zapatos"))||(!v.prodGrupos&&tieneZapD&&!tieneOtroD));
+          const enRopa=enActivos&&((v.prodGrupos&&v.prodGrupos.includes("ropa"))||(!v.prodGrupos&&tieneOtroD));
+          return(
+            <div key={v.folio} style={{background:"#fff",border:"1.5px solid #e0e8f0",borderRadius:10,padding:12,marginTop:10}}>
+              <div style={{fontWeight:800,color:"#1a3c5e",marginBottom:2}}>{v.clienteNombre} <span style={{color:"#aaa",fontWeight:400,fontSize:11}}>({v.folio})</span></div>
+              <div style={{fontSize:11,color:"#888",marginBottom:8}}>{(v.items||[]).map(it=>it.label).join(" · ")}</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4,fontSize:12}}>
+                <div>anulada: <strong style={{color:v.anulada?"#c62828":"#2e7d32"}}>{v.anulada?"SÍ":"no"}</strong></div>
+                <div>estado: <strong>{v.estado||"recibido"}</strong></div>
+                <div>tiene zapatos: <strong>{tieneZapD?"sí":"no"}</strong></div>
+                <div>tiene otro (ropa): <strong>{tieneOtroD?"sí":"no"}</strong></div>
+                <div>solo productos: <strong style={{color:soloProductosD?"#c62828":"#2e7d32"}}>{soloProductosD?"SÍ":"no"}</strong></div>
+                <div>solo lavado seco: <strong style={{color:soloLavadoSecoD?"#c62828":"#2e7d32"}}>{soloLavadoSecoD?"SÍ":"no"}</strong></div>
+                <div>prodGrupos: <strong>{v.prodGrupos?JSON.stringify(v.prodGrupos):"(no dividida)"}</strong></div>
+                <div>clasificación: <strong>{v.clasificacion?"sí, "+fmt(v.clasificacion.timestamp):"no"}</strong></div>
+              </div>
+              <div style={{marginTop:8,paddingTop:8,borderTop:"1px solid #f0f4f8"}}>
+                <div style={{fontSize:13,fontWeight:700,color:enActivos?"#2e7d32":"#c62828"}}>{enActivos?"✅":"❌"} {enActivos?"Sí está":"NO está"} en la lista de activos de Producción</div>
+                <div style={{fontSize:13,fontWeight:700,color:enFlujosZapatos?"#2e7d32":"#c62828"}}>{enFlujosZapatos?"✅":"❌"} {enFlujosZapatos?"Sí debería aparecer":"NO aparece"} en la pestaña Zapatos</div>
+                <div style={{fontSize:13,fontWeight:700,color:enRopa?"#2e7d32":"#c62828"}}>{enRopa?"✅":"❌"} {enRopa?"Sí debería aparecer":"NO aparece"} en la pestaña Ropa</div>
+              </div>
+            </div>
+          );
+        })}
+      </>);
+    })()}
 
     {tabProd==="maquinas"&&(
       <>
