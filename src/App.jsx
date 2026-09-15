@@ -516,7 +516,9 @@ const esLavadoSeco = label => label && label.toUpperCase().includes("SECO");
 const calcGanancia = (items, costoMartinizingReal) => {
   const subtotalSeco = items.reduce((acc, it) => acc + (esLavadoSeco(it.label) ? (it.precio||0)*(it.piezas||1) : 0), 0);
   const subtotalResto = items.reduce((acc, it) => acc + (esLavadoSeco(it.label) ? 0 : (it.precio||0)*(it.piezas||1)), 0);
-  const gananciaSeco = costoMartinizingReal!=null ? Math.max(0, subtotalSeco - costoMartinizingReal) : subtotalSeco*0.20;
+  // 🧴 Ya no se usa el 20% estimado — mientras no se registre la factura real de Martinizing para esta
+  // orden, esa parte de lavado en seco no suma nada a "ventas" ni a "ganancia". Solo cuenta lo confirmado.
+  const gananciaSeco = costoMartinizingReal!=null ? Math.max(0, subtotalSeco - costoMartinizingReal) : 0;
   return subtotalResto + gananciaSeco;
 };
 
@@ -6753,11 +6755,14 @@ function MartinizingAdmin({ventas,setVentas,upsertVenta,facturasMartinizing,setF
   const tieneLavadoSeco=v=>(v.items||[]).some(it=>esLavadoSeco(it.label));
 
   // 📊 Resumen del mes: cuántas ventas de lavado en seco hubo, cuánto se le pagó a Martinizing, y cuánto se ganó de verdad
+  // 🔧 Ya no se usa ningún estimado — "pagado" y "ganancia" solo cuentan las órdenes YA facturadas con Martinizing.
   const ventasSecoMes=(ventas||[]).filter(v=>!v.anulada&&tieneLavadoSeco(v)&&mesK(new Date(v.fecha))===mesResumen);
   const subtotalSecoMes=v=>(v.items||[]).reduce((a,it)=>a+(esLavadoSeco(it.label)?(it.precio||0)*(it.piezas||1):0),0);
+  const ventasSecoConfirmadasMes=ventasSecoMes.filter(v=>v.costoMartinizingReal!=null);
+  const ventasSecoPendientesMes=ventasSecoMes.filter(v=>v.costoMartinizingReal==null);
   const totalVentasSecoMes=ventasSecoMes.reduce((a,v)=>a+subtotalSecoMes(v),0);
-  const totalPagadoMartinizingMes=ventasSecoMes.reduce((a,v)=>a+(v.costoMartinizingReal!=null?v.costoMartinizingReal:subtotalSecoMes(v)*0.80),0);
-  const totalGananciaMes=totalVentasSecoMes-totalPagadoMartinizingMes;
+  const totalPagadoMartinizingMes=ventasSecoConfirmadasMes.reduce((a,v)=>a+(v.costoMartinizingReal||0),0);
+  const totalGananciaMes=ventasSecoConfirmadasMes.reduce((a,v)=>a+Math.max(0,subtotalSecoMes(v)-(v.costoMartinizingReal||0)),0);
 
   // 🚚 Órdenes con lavado en seco que ya se recibieron pero TODAVÍA no se le llevan a Martinizing
   const porEntregar=(ventas||[]).filter(v=>!v.anulada&&tieneLavadoSeco(v)&&!v.martinizingEntregadoEn);
@@ -6836,7 +6841,7 @@ function MartinizingAdmin({ventas,setVentas,upsertVenta,facturasMartinizing,setF
         <div style={{...S.kpi,borderLeft:"4px solid #888",gridColumn:"1/-1"}}><div style={{fontSize:18}}>🏪</div><div><div style={{fontWeight:800,fontSize:16,color:"#1a3c5e"}}>${totalVentasSecoMes.toFixed(2)}</div><div style={{fontSize:10,fontWeight:600,color:"#1a3c5e"}}>Total cobrado al cliente por este servicio</div></div></div>
         <div style={{...S.kpi,borderLeft:"4px solid #2e7d32",gridColumn:"1/-1"}}><div style={{fontSize:18}}>✅</div><div><div style={{fontWeight:800,fontSize:16,color:"#2e7d32"}}>${totalGananciaMes.toFixed(2)}</div><div style={{fontSize:10,fontWeight:600,color:"#1a3c5e"}}>Lo que ganamos nosotros de verdad</div></div></div>
       </div>
-      <div style={{fontSize:10,color:"#888",marginTop:8}}>Para las que aún no tienen la factura real registrada, se usa el 20% estimado de ganancia (80% pagado a Martinizing) hasta que se registre el monto exacto.</div>
+      {ventasSecoPendientesMes.length>0&&<div style={{fontSize:11,color:"#e65100",marginTop:8,fontWeight:600}}>⚠️ {ventasSecoPendientesMes.length} venta{ventasSecoPendientesMes.length!==1?"s":""} de este mes todavía sin factura de Martinizing registrada — no cuentan todavía en "Pagado" ni en "Ganamos", hasta que las factures.</div>}
     </Card>
     <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ El lavado en seco es tercerizado — no pasa por lavadoras/secadoras propias. El recorrido es: 🚚 Entregar a Martinizing (se paga ahí) → 🧾 Facturar → 📥 Retirar → 🔔 Listo para retirar.</div>
 
