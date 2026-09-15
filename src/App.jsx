@@ -103,16 +103,20 @@ const habiaMaquinaLibreEn=(instante,tipoMaquina,cargas,maquinas)=>{
     return !ocupadaEnT;
   });
 };
-// ⏰ Calcula los minutos transcurridos entre dos fechas contando SOLO horario laboral (9:15am-8pm por defecto).
-// Las máquinas no trabajan después de las 8pm, así que si una orden queda de un día para otro, esas horas
-// nocturnas no cuentan como demora — solo se descuentan las horas reales dentro del horario de atención.
-const minutosLaboralesEntre=(inicioIso,finIso,horaAbre=9,minAbre=15,horaCierra=20,minCierra=0)=>{
+// ⏰ Calcula los minutos transcurridos entre dos fechas contando SOLO horario laboral (9:20am-6pm, lunes a sábado).
+// Los domingos el tiempo NUNCA corre — las órdenes que entran ese día quedan "en espera" hasta que
+// abre el lunes a las 9:20am, sin que se les cuente ninguna demora por el domingo.
+const minutosLaboralesEntre=(inicioIso,finIso,horaAbre=9,minAbre=20,horaCierra=18,minCierra=0)=>{
   const fin=new Date(finIso);
   let cursor=new Date(inicioIso);
   if(fin<=cursor)return 0;
   let total=0,guard=0;
   while(cursor<fin&&guard<90){
     guard++;
+    if(cursor.getDay()===0){ // 🚫 domingo: no se trabaja, se salta directo al lunes de apertura
+      cursor=new Date(cursor.getFullYear(),cursor.getMonth(),cursor.getDate()+1,horaAbre,minAbre,0,0);
+      continue;
+    }
     const apertura=new Date(cursor.getFullYear(),cursor.getMonth(),cursor.getDate(),horaAbre,minAbre,0,0);
     const cierre=new Date(cursor.getFullYear(),cursor.getMonth(),cursor.getDate(),horaCierra,minCierra,0,0);
     if(cursor<apertura)cursor=new Date(apertura);
@@ -362,10 +366,14 @@ const EVAL_INDICADORES=[
 // Calcula la meta $ del mes (mismo criterio que el Dashboard BI: promedio ponderado de últimos 3 meses +10%)
 function calcMetaMes(ventas,mesSel){
   const vOk=ventas.filter(v=>!v.anulada);
-  const porMes={};vOk.forEach(v=>{const k=mesK(v.fecha);porMes[k]=(porMes[k]||0)+v.total;});
+  // 🧴 Para lavado en seco, "venta" cuenta solo la ganancia real (o el 20% estimado si aún no se factura
+  // con Martinizing) — no el valor completo cobrado al cliente, ya que gran parte de eso se le paga a
+  // Martinizing y no es ingreso real del negocio. El resto de servicios (ropa, zapatos) no cambia.
+  const valorVenta=v=>calcGanancia(v.items||[],v.costoMartinizingReal);
+  const porMes={};vOk.forEach(v=>{const k=mesK(v.fecha);porMes[k]=(porMes[k]||0)+valorVenta(v);});
   const hoyD=new Date();const diaMes=hoyD.getDate();const diasMes=new Date(hoyD.getFullYear(),hoyD.getMonth()+1,0).getDate();
   const vMes=vOk.filter(v=>mesK(v.fecha)===mesSel);
-  const ventaMes=vMes.reduce((a,v)=>a+v.total,0);
+  const ventaMes=vMes.reduce((a,v)=>a+valorVenta(v),0);
   const cerrados=Object.keys(porMes).filter(k=>k<mesSel).sort();
   const ult3=cerrados.slice(-3).map(k=>porMes[k]);
   let meta;
@@ -2054,7 +2062,10 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
 
   // 🛍️ Una venta de SOLO productos (perfumes, detergentes, etc. del catálogo) no pasa por ningún proceso de producción
   const esSoloProductos=v=>(v.items||[]).length>0&&(v.items||[]).every(it=>it.esProducto);
-  const activos=ventas.filter(v=>!v.anulada&&["recibido","proceso"].includes(v.estado||"recibido")&&!esSoloProductos(v)).sort((a,b)=>new Date(a.fecha)-new Date(b.fecha));
+  // 🧴 Lavado en seco es tercerizado (Martinizing) — no pasa por lavadoras/secadoras propias.
+  // Solo se excluye del flujo de máquinas si TODA la orden es lavado en seco (no mixta con ropa normal).
+  const esSoloLavadoSeco=v=>(v.items||[]).length>0&&(v.items||[]).every(it=>esLavadoSeco(it.label));
+  const activos=ventas.filter(v=>!v.anulada&&["recibido","proceso"].includes(v.estado||"recibido")&&!esSoloProductos(v)&&!esSoloLavadoSeco(v)).sort((a,b)=>new Date(a.fecha)-new Date(b.fecha));
   const eventosDe=folio=>eventosProduccion.filter(ev=>ev.ventaFolio===folio);
   const buscarEvento=(folio,etapa)=>eventosDe(folio).filter(ev=>ev.etapa===etapa).sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp))[0];
   const nombreDe=id=>empleadas.find(e=>String(e.id)===String(id))?.nombre||"—";
@@ -3896,7 +3907,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         </div>
       )}
       <div style={{background:"#fff",display:"flex",borderBottom:"2px solid #e8f0f7",position:"sticky",top:0,zIndex:10}}>
-        {[{id:"hoy",l:"📋 Ordenes",c:pendientesRaw.length},{id:"cobrar",l:"💸 Recibido",c:porCob.length},{id:"proceso",l:"🔄 En proceso",c:porProc.length},{id:"entregar",l:"📦 Listo para retirar",c:porEnt.length},{id:"clientes",l:"👥 Clientes"},...(puedeFacturarAqui?[{id:"resumen",l:"📊 Resumen"},{id:"depositosEmp",l:"🏦 Depósitos"},{id:"conteoEmp",l:"📋 Conteo inventario"}]:[]),{id:"martinizingEmp",l:"🧴 Martinizing"},{id:"miEvaluacion",l:"📋 Mi Evaluación"},{id:"bonos",l:"📈 Bonos"},{id:"nueva",l:"➕ Nuevo"}].map(t=>(
+        {[{id:"hoy",l:"📋 Ordenes",c:pendientesRaw.length},{id:"cobrar",l:"💸 Recibido",c:porCob.length},{id:"proceso",l:"🔄 En proceso",c:porProc.length},{id:"entregar",l:"📦 Listo para retirar",c:porEnt.length},{id:"clientes",l:"👥 Clientes"},...(puedeFacturarAqui?[{id:"resumen",l:"📊 Resumen"},{id:"depositosEmp",l:"🏦 Depósitos"},{id:"conteoEmp",l:"📋 Conteo inventario"}]:[]),{id:"martinizingEmp",l:"🧴 Martinizing"},{id:"tiemposEmp",l:"⏱️ Tiempos"},{id:"miEvaluacion",l:"📋 Mi Evaluación"},{id:"bonos",l:"📈 Bonos"},{id:"nueva",l:"➕ Nuevo"}].map(t=>(
           <button key={t.id} style={{flex:1,padding:"12px 4px",border:"none",background:"transparent",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:tab===t.id?700:500,color:tab===t.id?"#1a3c5e":"#888",borderBottom:tab===t.id?"2px solid #4db6e4":"none",marginBottom:-2,fontSize:11,position:"relative"}}
             onClick={()=>t.id==="nueva"?setShowNueva(true):setTab(t.id)}>
             {t.l}{t.c>0&&<span style={{position:"absolute",top:5,right:3,background:"#e53935",color:"#fff",borderRadius:10,fontSize:9,fontWeight:800,padding:"1px 4px"}}>{t.c}</span>}
@@ -3904,7 +3915,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         ))}
       </div>
       <div style={{padding:12}}>
-        {tab!=="bonos"&&tab!=="resumen"&&tab!=="clientes"&&tab!=="depositosEmp"&&tab!=="conteoEmp"&&tab!=="miEvaluacion"&&tab!=="martinizingEmp"&&(<div style={{display:"flex",gap:8,marginBottom:12}}>
+        {tab!=="bonos"&&tab!=="resumen"&&tab!=="clientes"&&tab!=="depositosEmp"&&tab!=="conteoEmp"&&tab!=="miEvaluacion"&&tab!=="martinizingEmp"&&tab!=="tiemposEmp"&&(<div style={{display:"flex",gap:8,marginBottom:12}}>
           <input style={{...S.inp,flex:1}} placeholder="🔍 Buscar cliente o folio..." value={busq} onChange={e=>setBusq(e.target.value)}/>
         </div>)}
         {tab==="hoy"&&(<>
@@ -3938,6 +3949,8 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
             ?<ConteoProductos productos={productos} setConteos={setConteosInventario} upsertConteo={upsertConteoInventario} sesion={sesion}/>
           :tab==="martinizingEmp"
             ?<MartinizingAdmin ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} facturasMartinizing={facturasMartinizing} setFacturasMartinizing={setFacturasMartinizing} upsertFacturaMartinizing={upsertFacturaMartinizing} setSalidasCaja={setSalidasCaja} upsertSalida={upsertSalida} sesion={sesion}/>
+          :tab==="tiemposEmp"
+            ?<TiemposRopaAdmin ventas={ventas} eventosProduccion={eventosProduccion} cargas={cargas} maquinas={maquinas} empleadas={empleadas}/>
           :tab==="miEvaluacion"
             ?<EvaluacionDesempeno empleadas={empleadas} ventas={ventas} eventosProduccion={eventosProduccion} tareasDiarias={tareasDiarias} quejas={quejas} cargas={cargas} evalConfig={evalConfig||EVAL_CONFIG_DEFAULT[0]} esAdmin={false} miEmpleadaId={miEmpleadaSesionPE?.id} calificacionesAudio={calificacionesAudio} ventasPerfumeReg={ventasPerfumeReg}/>
           :tab==="clientes"
@@ -4956,7 +4969,7 @@ function Reportes({ventas,empleadas,salidasCaja}){
   const totCob=efC+picC+jepC+tarC;const pendMes=pend(vMes);const totV=sum(vMes);
   const cuadre=Math.abs(totV-(totCob+pendMes))<0.01;
   const xMes=(()=>{const m={};ventas.filter(v=>!v.anulada).forEach(v=>{const k=mesK(v.fecha);m[k]=(m[k]||0)+v.total;});return Object.entries(m).sort().slice(-6).map(([k,v])=>({l:k.slice(5)+"/"+k.slice(0,4),v}));})();
-  const eStats=empleadas.map(e=>{const mv=ventas.filter(v=>v.empleadaId===e.id&&mesK(v.fecha)===mesS&&!v.anulada);return{...e,cnt:mv.length,tot:mv.reduce((a,v)=>a+v.total,0)};}).sort((a,b)=>b.cnt-a.cnt);
+  const eStats=empleadas.map(e=>{const mv=ventas.filter(v=>v.empleadaId===e.id&&mesK(v.fecha)===mesS&&!v.anulada);return{...e,cnt:mv.length,tot:mv.reduce((a,v)=>a+calcGanancia(v.items||[],v.costoMartinizingReal),0)};}).sort((a,b)=>b.cnt-a.cnt);
   const KPI=({icon,label,val,sub,color})=>(<div style={{...S.kpi,borderLeft:`4px solid ${color}`}}><div style={{fontSize:22}}>{icon}</div><div><div style={{fontWeight:800,fontSize:18,color}}>{val}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>{label}</div>{sub&&<div style={{fontSize:11,color:"#888"}}>{sub}</div>}</div></div>);
   return(
     <div style={S.panel}>
@@ -5429,7 +5442,7 @@ function Equipo({empleadas,setEmpleadas,ventas,esAdmin,upsertEmpleada}){
   const add=()=>{if(!nv.nombre.trim())return;const ne={id:Date.now(),nombre:nv.nombre,activa:true,metaVentas:parseInt(nv.metaVentas)||20,montoBonus:parseFloat(nv.montoBonus)||0,bonoGrupal:!!nv.bonoGrupal,rolFuncional:nv.rolFuncional||"general"};setEmpleadas(prev=>[...prev,ne]);if(upsertEmpleada)upsertEmpleada({...ne,_updatedAt:new Date().toISOString()});setNv({nombre:"",metaVentas:20,montoBonus:20,bonoGrupal:false,rolFuncional:"general"});};
   const tog=id=>setEmpleadas(prev=>{const next=prev.map(e=>e.id===id?{...e,activa:!e.activa}:e);const updated=next.find(e=>e.id===id);if(updated&&upsertEmpleada)upsertEmpleada({...updated,_updatedAt:new Date().toISOString()});return next;});
   const save2=()=>{setEmpleadas(prev=>{const next=prev.map(e=>e.id===editId?{...e,...ed,metaVentas:parseInt(ed.metaVentas)||20,montoBonus:parseFloat(ed.montoBonus)||0,bonoGrupal:!!ed.bonoGrupal,rolFuncional:ed.rolFuncional||"general"}:e);const updated=next.find(e=>e.id===editId);if(updated&&upsertEmpleada)upsertEmpleada({...updated,_updatedAt:new Date().toISOString()});return next;});setEditId(null);};
-  const stats=empleadas.map(e=>{const mv=ventas.filter(v=>v.empleadaId===e.id&&mesK(v.fecha)===mes);return{...e,vm:mv.length,tm:mv.reduce((a,v)=>a+v.total,0)};});
+  const stats=empleadas.map(e=>{const mv=ventas.filter(v=>v.empleadaId===e.id&&mesK(v.fecha)===mes);return{...e,vm:mv.length,tm:mv.reduce((a,v)=>a+calcGanancia(v.items||[],v.costoMartinizingReal),0)};});
   return(<div style={S.panel}>
     <h2 style={S.ptitle}>👩 Equipo & Bonos</h2>
     <Card title="👩 Empleadas">
@@ -6583,34 +6596,41 @@ function TiemposRopaAdmin({ventas,eventosProduccion,cargas,maquinas,empleadas}){
     const evDobIni=eventosDeFolio(v.folio,"doblado_inicio",grupo)[0];
     const evDobFin=eventosDeFolio(v.folio,"doblado_fin",grupo)[0];
 
-    const etapas=[];
+    const etapas=[{nombre:"Recibido",min:null,tipoEspera:"info",horaInicio:v.fecha}];
     if(cLav){
       const esperaLav=minutosLaboralesEntre(clasifTs,cLav.inicio);
-      etapas.push({nombre:"Espera para lavar",min:esperaLav,tipoEspera:esperaLav>5?(habiaMaquinaLibreEn(clasifTs,"lavadora",cargas,maquinas)?"demora":"maquina"):"ok"});
-      etapas.push({nombre:"Lavado",min:cLav.finReal?minutosLaboralesEntre(cLav.inicio,cLav.finReal):null,tipoEspera:"proceso",empleadaId:cLav.empleadaId});
+      etapas.push({nombre:"Espera para lavar",min:esperaLav,tipoEspera:esperaLav>5?(habiaMaquinaLibreEn(clasifTs,"lavadora",cargas,maquinas)?"demora":"maquina"):"ok",horaInicio:clasifTs,horaFin:cLav.inicio});
+      etapas.push({nombre:"Lavado",min:cLav.finReal?minutosLaboralesEntre(cLav.inicio,cLav.finReal):null,tipoEspera:"proceso",empleadaId:cLav.empleadaId,horaInicio:cLav.inicio,horaFin:cLav.finReal});
     }
     const finLav=cLav?.finReal;
     const inicioSiguiente=cCen?.inicio||cSec?.inicio;
     if(finLav&&inicioSiguiente){
       const esperaSig=minutosLaboralesEntre(finLav,inicioSiguiente);
       const tipoMaq=cCen?"lavadora":"secadora";
-      etapas.push({nombre:cCen?"Espera para centrifugar":"Espera para secar",min:esperaSig,tipoEspera:esperaSig>5?(habiaMaquinaLibreEn(finLav,tipoMaq,cargas,maquinas)?"demora":"maquina"):"ok"});
+      etapas.push({nombre:cCen?"Espera para centrifugar":"Espera para secar",min:esperaSig,tipoEspera:esperaSig>5?(habiaMaquinaLibreEn(finLav,tipoMaq,cargas,maquinas)?"demora":"maquina"):"ok",horaInicio:finLav,horaFin:inicioSiguiente});
     }
-    if(cCen)etapas.push({nombre:"Centrifugado",min:cCen.finReal?minutosLaboralesEntre(cCen.inicio,cCen.finReal):null,tipoEspera:"proceso",empleadaId:cCen.empleadaId});
+    if(cCen)etapas.push({nombre:"Centrifugado",min:cCen.finReal?minutosLaboralesEntre(cCen.inicio,cCen.finReal):null,tipoEspera:"proceso",empleadaId:cCen.empleadaId,horaInicio:cCen.inicio,horaFin:cCen.finReal});
     const finCen=cCen?.finReal;
     if(finCen&&cSec){
       const esperaSec=minutosLaboralesEntre(finCen,cSec.inicio);
-      etapas.push({nombre:"Espera para secar",min:esperaSec,tipoEspera:esperaSec>5?(habiaMaquinaLibreEn(finCen,"secadora",cargas,maquinas)?"demora":"maquina"):"ok"});
+      etapas.push({nombre:"Espera para secar",min:esperaSec,tipoEspera:esperaSec>5?(habiaMaquinaLibreEn(finCen,"secadora",cargas,maquinas)?"demora":"maquina"):"ok",horaInicio:finCen,horaFin:cSec.inicio});
     }
-    if(cSec)etapas.push({nombre:"Secado",min:cSec.finReal?minutosLaboralesEntre(cSec.inicio,cSec.finReal):null,tipoEspera:"proceso",empleadaId:cSec.empleadaId});
+    if(cSec)etapas.push({nombre:"Secado",min:cSec.finReal?minutosLaboralesEntre(cSec.inicio,cSec.finReal):null,tipoEspera:"proceso",empleadaId:cSec.empleadaId,horaInicio:cSec.inicio,horaFin:cSec.finReal});
     if(cSec?.finReal&&evDobIni){
       const esperaDob=minutosLaboralesEntre(cSec.finReal,evDobIni.timestamp);
-      etapas.push({nombre:"Espera para doblar",min:esperaDob,tipoEspera:esperaDob>5?"demora":"ok"}); // doblar no usa máquina, así que si tarda, es operativo
+      etapas.push({nombre:"Espera para doblar",min:esperaDob,tipoEspera:esperaDob>5?"demora":"ok",horaInicio:cSec.finReal,horaFin:evDobIni.timestamp}); // doblar no usa máquina, así que si tarda, es operativo
     }
-    if(evDobIni&&evDobFin)etapas.push({nombre:"Doblado",min:minutosLaboralesEntre(evDobIni.timestamp,evDobFin.timestamp),tipoEspera:"proceso",empleadaId:evDobFin.empleadaId});
+    if(evDobIni&&evDobFin)etapas.push({nombre:"Doblado",min:minutosLaboralesEntre(evDobIni.timestamp,evDobFin.timestamp),tipoEspera:"proceso",empleadaId:evDobFin.empleadaId,horaInicio:evDobIni.timestamp,horaFin:evDobFin.timestamp});
+    if(evDobFin&&v.msgListo?.fecha){
+      const esperaListo=minutosLaboralesEntre(evDobFin.timestamp,v.msgListo.fecha);
+      etapas.push({nombre:"Espera para confirmar Listo (WhatsApp)",min:esperaListo,tipoEspera:esperaListo>5?"demora":"ok",horaInicio:evDobFin.timestamp,horaFin:v.msgListo.fecha}); // avisar al cliente no usa máquina, si tarda es operativo
+    }
+    if(v.msgListo?.fecha)etapas.push({nombre:"🔔 Listo para retirar (WhatsApp enviado)",min:null,tipoEspera:"info",horaInicio:v.msgListo.fecha});
 
-    const tiempoTotalMin=evDobFin?minutosLaboralesEntre(v.fecha,evDobFin.timestamp):null;
-    return{folio:v.folio,cliente:v.clienteNombre,libras,servicioPrincipal,atendidaPor:v.clasificacion.empleadaId,tiempoTotalMin,etapas,completa:!!evDobFin};
+    // 🕐 El tiempo total corre desde que entró la orden hasta que se confirma "Listo para retirar"
+    // (el momento exacto en que se envía el WhatsApp al cliente), no hasta que se termina de doblar.
+    const tiempoTotalMin=v.msgListo?.fecha?minutosLaboralesEntre(v.fecha,v.msgListo.fecha):null;
+    return{folio:v.folio,cliente:v.clienteNombre,libras,servicioPrincipal,atendidaPor:v.clasificacion.empleadaId,tiempoTotalMin,etapas,completa:!!v.msgListo?.fecha};
   });
 
   // 📊 Agrupar por rango de libras
@@ -6649,7 +6669,7 @@ function TiemposRopaAdmin({ventas,eventosProduccion,cargas,maquinas,empleadas}){
 
   return(<div style={S.panel}>
     <h2 style={S.ptitle}>⏱️ Tiempos por Servicio (Ropa, edredones y otros)</h2>
-    <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ Incluye ropa, edredones y demás servicios — excluye zapatos (pestaña aparte) y lavado en seco (proceso distinto, subcontratado). Los tiempos <strong>ya descuentan las horas fuera de atención (después de las 8pm hasta que abre al día siguiente)</strong>, así una orden que queda de un día para otro no sale con tiempos inflados. Cada espera se etiqueta como <strong>⏳ Máquina ocupada</strong> (había fila, es normal) o <strong>🐢 Demora operativa</strong> (había máquina libre pero nadie actuó a tiempo).</div>
+    <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ Incluye ropa, edredones y demás servicios — excluye zapatos (pestaña aparte) y lavado en seco (proceso distinto, subcontratado). El tiempo total va <strong>desde que entra la orden hasta que se confirma "Listo para retirar" (WhatsApp enviado)</strong>. Solo corre dentro del horario laboral <strong>(9:20am-6pm, lunes a sábado)</strong> — <strong>los domingos el tiempo no corre</strong>, así una orden recibida el domingo no sale con tiempo inflado hasta que abre el lunes. Cada espera se etiqueta como <strong>⏳ Máquina ocupada</strong> (había fila, es normal) o <strong>🐢 Demora operativa</strong> (había máquina libre pero nadie actuó a tiempo).</div>
     <Card title="🔍 Filtros">
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
         <div><label style={S.lbl}>Desde</label><input type="date" style={S.inp} value={desde} onChange={e=>setDesde(e.target.value)}/></div>
@@ -6698,11 +6718,18 @@ function TiemposRopaAdmin({ventas,eventosProduccion,cargas,maquinas,empleadas}){
           {verDetalleFolio===a.folio&&(
             <div style={{marginTop:10,background:"#f8fbfd",borderRadius:8,padding:"8px 10px"}}>
               {a.etapas.map((e,i)=>(
-                <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:i<a.etapas.length-1?"1px solid #f0f4f8":"none"}}>
-                  <span style={{color:e.tipoEspera==="maquina"?"#1565c0":e.tipoEspera==="demora"?"#c62828":"#1a3c5e"}}>
-                    {e.tipoEspera==="maquina"?"⏳ ":e.tipoEspera==="demora"?"🐢 ":""}{e.nombre}{e.empleadaId?` (${nombreDe(e.empleadaId)})`:""}
-                  </span>
-                  <strong>{e.min!=null?e.min.toFixed(0)+" min":"—"}</strong>
+                <div key={i} style={{padding:"6px 0",borderBottom:i<a.etapas.length-1?"1px solid #f0f4f8":"none"}}>
+                  <div style={{display:"flex",justifyContent:"space-between"}}>
+                    <span style={{color:e.tipoEspera==="maquina"?"#1565c0":e.tipoEspera==="demora"?"#c62828":"#1a3c5e",fontWeight:600}}>
+                      {e.tipoEspera==="maquina"?"⏳ ":e.tipoEspera==="demora"?"🐢 ":""}{e.nombre}{e.empleadaId?` (${nombreDe(e.empleadaId)})`:""}
+                    </span>
+                    <strong>{e.min!=null?e.min.toFixed(0)+" min":""}</strong>
+                  </div>
+                  {(e.horaInicio||e.horaFin)&&(
+                    <div style={{fontSize:10,color:"#888",marginTop:2}}>
+                      {e.horaInicio&&fmt(e.horaInicio)}{e.horaFin?` → ${fmt(e.horaFin)}`:""}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -6722,12 +6749,44 @@ function MartinizingAdmin({ventas,setVentas,upsertVenta,facturasMartinizing,setF
   const [montoFactura,setMontoFactura]=useState("");
   const [numeroFactura,setNumeroFactura]=useState("");
   const [verHistorial,setVerHistorial]=useState(false);
+  const [mesResumen,setMesResumen]=useState(mesK(new Date()));
+  const tieneLavadoSeco=v=>(v.items||[]).some(it=>esLavadoSeco(it.label));
 
-  // 📋 Órdenes con lavado en seco que TODAVÍA no tienen su factura real de Martinizing registrada
+  // 📊 Resumen del mes: cuántas ventas de lavado en seco hubo, cuánto se le pagó a Martinizing, y cuánto se ganó de verdad
+  const ventasSecoMes=(ventas||[]).filter(v=>!v.anulada&&tieneLavadoSeco(v)&&mesK(new Date(v.fecha))===mesResumen);
+  const subtotalSecoMes=v=>(v.items||[]).reduce((a,it)=>a+(esLavadoSeco(it.label)?(it.precio||0)*(it.piezas||1):0),0);
+  const totalVentasSecoMes=ventasSecoMes.reduce((a,v)=>a+subtotalSecoMes(v),0);
+  const totalPagadoMartinizingMes=ventasSecoMes.reduce((a,v)=>a+(v.costoMartinizingReal!=null?v.costoMartinizingReal:subtotalSecoMes(v)*0.80),0);
+  const totalGananciaMes=totalVentasSecoMes-totalPagadoMartinizingMes;
+
+  // 🚚 Órdenes con lavado en seco que ya se recibieron pero TODAVÍA no se le llevan a Martinizing
+  const porEntregar=(ventas||[]).filter(v=>!v.anulada&&tieneLavadoSeco(v)&&!v.martinizingEntregadoEn);
+  // ⏳ Ya se entregaron a Martinizing, esperando ir a retirarlas
+  const enMartinizing=(ventas||[]).filter(v=>!v.anulada&&tieneLavadoSeco(v)&&v.martinizingEntregadoEn&&!v.martinizingRetiradoEn);
+
+  const marcarEntregado=folio=>{
+    setVentas(prev=>{
+      const next=prev.map(v=>v.folio===folio?{...v,martinizingEntregadoEn:{fecha:new Date().toISOString(),empleada:sesion?.nombre||null}}:v);
+      const updated=next.find(v=>v.folio===folio);
+      if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+  };
+  const marcarRetirado=folio=>{
+    setVentas(prev=>{
+      const next=prev.map(v=>v.folio===folio?{...v,martinizingRetiradoEn:{fecha:new Date().toISOString(),empleada:sesion?.nombre||null}}:v);
+      const updated=next.find(v=>v.folio===folio);
+      if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+  };
+
+  // 📋 Órdenes con lavado en seco YA RETIRADAS de Martinizing, que todavía no tienen su factura real registrada
   const pendientes=(ventas||[]).filter(v=>{
     if(v.anulada)return false;
     if(v.costoMartinizingReal!=null)return false;
-    return(v.items||[]).some(it=>esLavadoSeco(it.label));
+    if(!v.martinizingEntregadoEn)return false; // 🔧 se factura/paga apenas se deja en Martinizing, no hace falta esperar el retiro
+    return tieneLavadoSeco(v);
   }).map(v=>{
     const subtotalSeco=(v.items||[]).reduce((a,it)=>a+(esLavadoSeco(it.label)?(it.precio||0)*(it.piezas||1):0),0);
     return{...v,subtotalSeco};
@@ -6767,10 +6826,50 @@ function MartinizingAdmin({ventas,setVentas,upsertVenta,facturasMartinizing,setF
 
   return(<div style={S.panel}>
     <h2 style={S.ptitle}>🧴 Martinizing (Lavado en Seco)</h2>
+
+    <Card title="📊 Resumen del mes">
+      <label style={S.lbl}>Mes</label>
+      <input type="month" style={S.inp} value={mesResumen} onChange={e=>setMesResumen(e.target.value)}/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:10}}>
+        <div style={{...S.kpi,borderLeft:"4px solid #1a3c5e"}}><div style={{fontSize:18}}>🧾</div><div><div style={{fontWeight:800,fontSize:16,color:"#1a3c5e"}}>{ventasSecoMes.length}</div><div style={{fontSize:10,fontWeight:600,color:"#1a3c5e"}}>Ventas de Martinizing</div></div></div>
+        <div style={{...S.kpi,borderLeft:"4px solid #e53935"}}><div style={{fontSize:18}}>💸</div><div><div style={{fontWeight:800,fontSize:16,color:"#e53935"}}>${totalPagadoMartinizingMes.toFixed(2)}</div><div style={{fontSize:10,fontWeight:600,color:"#1a3c5e"}}>Pagado a Martinizing</div></div></div>
+        <div style={{...S.kpi,borderLeft:"4px solid #888",gridColumn:"1/-1"}}><div style={{fontSize:18}}>🏪</div><div><div style={{fontWeight:800,fontSize:16,color:"#1a3c5e"}}>${totalVentasSecoMes.toFixed(2)}</div><div style={{fontSize:10,fontWeight:600,color:"#1a3c5e"}}>Total cobrado al cliente por este servicio</div></div></div>
+        <div style={{...S.kpi,borderLeft:"4px solid #2e7d32",gridColumn:"1/-1"}}><div style={{fontSize:18}}>✅</div><div><div style={{fontWeight:800,fontSize:16,color:"#2e7d32"}}>${totalGananciaMes.toFixed(2)}</div><div style={{fontSize:10,fontWeight:600,color:"#1a3c5e"}}>Lo que ganamos nosotros de verdad</div></div></div>
+      </div>
+      <div style={{fontSize:10,color:"#888",marginTop:8}}>Para las que aún no tienen la factura real registrada, se usa el 20% estimado de ganancia (80% pagado a Martinizing) hasta que se registre el monto exacto.</div>
+    </Card>
+    <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ El lavado en seco es tercerizado — no pasa por lavadoras/secadoras propias. El recorrido es: 🚚 Entregar a Martinizing (se paga ahí) → 🧾 Facturar → 📥 Retirar → 🔔 Listo para retirar.</div>
+
+    <Card title={`🚚 Por entregar a Martinizing (${porEntregar.length})`}>
+      {porEntregar.length===0&&<div style={S.empty}>No hay órdenes esperando llevarse a Martinizing.</div>}
+      {porEntregar.map(v=>(
+        <div key={v.folio} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid #f0f4f8"}}>
+          <div>
+            <div style={{fontSize:13,fontWeight:600,color:"#1a3c5e"}}>{v.clienteNombre} <span style={{color:"#aaa",fontWeight:400,fontSize:11}}>({v.folio})</span></div>
+            <div style={{fontSize:11,color:"#888"}}>Recibida: {fmt(v.fecha)}</div>
+          </div>
+          <button style={{...S.btnS,background:"#1565c0",color:"#fff"}} onClick={()=>marcarEntregado(v.folio)}>🚚 Marcar entregado</button>
+        </div>
+      ))}
+    </Card>
+
+    <Card title={`⏳ En Martinizing, esperando retiro (${enMartinizing.length})`}>
+      {enMartinizing.length===0&&<div style={S.empty}>No hay órdenes en Martinizing ahora mismo.</div>}
+      {enMartinizing.map(v=>(
+        <div key={v.folio} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid #f0f4f8"}}>
+          <div>
+            <div style={{fontSize:13,fontWeight:600,color:"#1a3c5e"}}>{v.clienteNombre} <span style={{color:"#aaa",fontWeight:400,fontSize:11}}>({v.folio})</span></div>
+            <div style={{fontSize:11,color:"#888"}}>Entregada a Martinizing: {fmt(v.martinizingEntregadoEn.fecha)}{v.martinizingEntregadoEn.empleada?` · ${v.martinizingEntregadoEn.empleada}`:""}</div>
+          </div>
+          <button style={{...S.btnS,background:"#2e7d32",color:"#fff"}} onClick={()=>marcarRetirado(v.folio)}>📥 Marcar retirado</button>
+        </div>
+      ))}
+    </Card>
+
     <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ Selecciona las órdenes que corresponden a una factura de Martinizing (puede ser 1 sola o varias juntas), escribe el monto que te cobraron, y el sistema calcula la ganancia real de cada una y registra el pago sin que cuente como gasto.</div>
 
     <Card title={`⏳ Pendientes de facturar (${pendientes.length})`}>
-      {pendientes.length===0&&<div style={S.empty}>No hay órdenes de lavado en seco pendientes de facturar.</div>}
+      {pendientes.length===0&&<div style={S.empty}>No hay órdenes entregadas a Martinizing pendientes de facturar.</div>}
       {pendientes.map(v=>(
         <label key={v.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 0",borderBottom:"1px solid #f0f4f8",cursor:"pointer"}}>
           <input type="checkbox" checked={!!seleccion[v.folio]} onChange={e=>setSeleccion({...seleccion,[v.folio]:e.target.checked})}/>
@@ -6958,7 +7057,7 @@ function AnalisisClientes({clientes,ventas}){
     const ventasMes=(ventas||[]).filter(v=>!v.anulada&&mesK(new Date(v.fecha))===clave);
     const clientesUnicos=new Set(ventasMes.map(v=>v.clienteId)).size;
     const nuevosDelMes=clientesConDatos.filter(c=>mesK(new Date(c.primera))===clave).length;
-    const totalVentasMes=ventasMes.reduce((a,v)=>a+v.total,0);
+    const totalVentasMes=ventasMes.reduce((a,v)=>a+calcGanancia(v.items||[],v.costoMartinizingReal),0);
     mesesComparativa.push({
       clave,
       label:d.toLocaleDateString("es-EC",{month:"short",year:"2-digit"}),
@@ -8307,10 +8406,13 @@ function DashboardBI({ventas,empleadas,gastos}){
   const [mesSel,setMesSel]=useState(mesAct);
   const esMesActual=mesSel===mesAct;
   const vOk=ventas.filter(v=>!v.anulada);
+  // 🧴 Para lavado en seco, "venta" cuenta solo la ganancia real (o 20% estimado sin facturar aún) —
+  // no el valor completo cobrado, porque buena parte va para Martinizing y no es ingreso real.
+  const valorVenta=v=>calcGanancia(v.items||[],v.costoMartinizingReal);
   // Totales por mes (historial completo)
-  const porMes={};vOk.forEach(v=>{const k=mesK(v.fecha);porMes[k]={tot:(porMes[k]?.tot||0)+v.total,cnt:(porMes[k]?.cnt||0)+1};});
+  const porMes={};vOk.forEach(v=>{const k=mesK(v.fecha);porMes[k]={tot:(porMes[k]?.tot||0)+valorVenta(v),cnt:(porMes[k]?.cnt||0)+1};});
   const vMes=vOk.filter(v=>mesK(v.fecha)===mesSel);
-  const ventaMes=vMes.reduce((a,v)=>a+v.total,0);
+  const ventaMes=vMes.reduce((a,v)=>a+valorVenta(v),0);
   const cobradoMes=vOk.flatMap(v=>(v.abonos||[]).filter(ab=>mesK(ab.fecha)===mesSel)).reduce((a,ab)=>a+ab.monto,0);
   // Meta automática: promedio de últimos 3 meses cerrados anteriores al mes seleccionado, +10%
   const cerrados=Object.keys(porMes).filter(k=>k<mesSel).sort();
@@ -8337,7 +8439,7 @@ function DashboardBI({ventas,empleadas,gastos}){
   const adelantada=pctReal>=pctEsperado;
   const ritmoActual=ventaMes/Math.max(1,diasTranscurridos);
   // ── Patrón por día de la semana (últimos 90 días, incluye días en cero) ──
-  const diario={};vOk.forEach(v=>{const f=fechaLocal(v.fecha);diario[f]=(diario[f]||0)+v.total;});
+  const diario={};vOk.forEach(v=>{const f=fechaLocal(v.fecha);diario[f]=(diario[f]||0)+valorVenta(v);});
   const fechasCon=Object.keys(diario).sort();
   const sumDow=[0,0,0,0,0,0,0],cntDow=[0,0,0,0,0,0,0];
   if(fechasCon.length){
@@ -8373,7 +8475,7 @@ function DashboardBI({ventas,empleadas,gastos}){
   // Comparativa vs mes pasado a la misma altura + mejor día
   const [aY,aM]=mesSel.split("-").map(Number);
   const prevK=`${aM===1?aY-1:aY}-${String(aM===1?12:aM-1).padStart(2,"0")}`;
-  const prevMTD=vOk.filter(v=>{const f=fechaLocal(v.fecha);return f.startsWith(prevK)&&parseInt(f.slice(8))<=diasTranscurridos;}).reduce((a,v)=>a+v.total,0);
+  const prevMTD=vOk.filter(v=>{const f=fechaLocal(v.fecha);return f.startsWith(prevK)&&parseInt(f.slice(8))<=diasTranscurridos;}).reduce((a,v)=>a+valorVenta(v),0);
   const varMTD=prevMTD>0?((ventaMes-prevMTD)/prevMTD)*100:null;
   const DOWN=["domingo","lunes","martes","miércoles","jueves","viernes","sábado"];
   const mejorDow=promDow.some(x=>x>0)?promDow.indexOf(Math.max(...promDow)):null;
@@ -8399,15 +8501,14 @@ function DashboardBI({ventas,empleadas,gastos}){
   const gastosMes=(gastos||[]).filter(g=>!g.eliminada&&fechaLocal(g.fecha).startsWith(mesSel)).reduce((a,g)=>a+g.monto,0);
   // 🧺 Ingreso REAL del mes: el lavado en seco solo deja el 20% de ganancia (el resto se le paga a quien hace el servicio),
   // así que no se puede contar el precio completo como ingreso propio — se usa calcGanancia() por cada venta.
-  const ingresoRealMes=vMes.reduce((a,v)=>a+calcGanancia(v.items||[],v.costoMartinizingReal),0);
-  const descuentoLavadoSeco=parseFloat((ventaMes-ingresoRealMes).toFixed(2));
-  const utilidad=ingresoRealMes-gastosMes;
+  // 🧴 "Ventas" ya viene neta de Martinizing (ver valorVenta arriba), así que utilidad se calcula directo sobre eso
+  const utilidad=ventaMes-gastosMes;
   // Bonos por empleada (mes seleccionado)
   const bonos=empleadas.filter(e=>e.activa||vMes.some(v=>v.empleadaId===e.id)).map(e=>{
     const mv=vMes.filter(v=>v.empleadaId===e.id);
     const metaE=e.metaVentas||20;
     const cumple=mv.length>=metaE;
-    return{...e,cnt:mv.length,tot:mv.reduce((a,v)=>a+v.total,0),metaE,cumple,pctE:Math.min(100,(mv.length/metaE)*100)};
+    return{...e,cnt:mv.length,tot:mv.reduce((a,v)=>a+calcGanancia(v.items||[],v.costoMartinizingReal),0),metaE,cumple,pctE:Math.min(100,(mv.length/metaE)*100)};
   }).sort((a,b)=>b.cnt-a.cnt);
   const totBonos=bonos.filter(b=>b.cumple).reduce((a,b)=>a+(b.montoBonus||0),0);
   const semColor=pctReal>=100?"#4caf50":adelantada?"#4db6e4":"#e53935";
@@ -8492,7 +8593,7 @@ function DashboardBI({ventas,empleadas,gastos}){
       <div style={{...S.kpi,borderLeft:"4px solid #4caf50"}}><div style={{fontSize:22}}>💚</div><div><div style={{fontWeight:800,fontSize:18,color:"#2e7d32"}}>${cobradoMes.toFixed(2)}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Cobrado en el mes</div></div></div>
       <div style={{...S.kpi,borderLeft:"4px solid #4db6e4"}}><div style={{fontSize:22}}>🧾</div><div><div style={{fontWeight:800,fontSize:18,color:"#1a3c5e"}}>{vMes.length}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Ventas · ticket ${vMes.length?(ventaMes/vMes.length).toFixed(2):"0.00"}</div></div></div>
       <div style={{...S.kpi,borderLeft:"4px solid #e53935"}}><div style={{fontSize:22}}>🛒</div><div><div style={{fontWeight:800,fontSize:18,color:"#e53935"}}>-${gastosMes.toFixed(2)}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Gastos del mes</div></div></div>
-      <div style={{...S.kpi,borderLeft:`4px solid ${utilidad>=0?"#4caf50":"#e53935"}`}}><div style={{fontSize:22}}>{utilidad>=0?"📈":"📉"}</div><div><div style={{fontWeight:800,fontSize:18,color:utilidad>=0?"#2e7d32":"#c62828"}}>${utilidad.toFixed(2)}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Utilidad estimada</div>{descuentoLavadoSeco>0.01&&<div style={{fontSize:10,color:"#e65100"}}>🧺 -${descuentoLavadoSeco.toFixed(2)} no es tuyo (lavado en seco, 80%)</div>}</div></div>
+      <div style={{...S.kpi,borderLeft:`4px solid ${utilidad>=0?"#4caf50":"#e53935"}`}}><div style={{fontSize:22}}>{utilidad>=0?"📈":"📉"}</div><div><div style={{fontWeight:800,fontSize:18,color:utilidad>=0?"#2e7d32":"#c62828"}}>${utilidad.toFixed(2)}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Utilidad estimada</div></div></div>
     </div>
 
     <Card title="📊 Evolución mensual vs meta">
