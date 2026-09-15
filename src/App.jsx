@@ -2519,8 +2519,28 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
       const hoyZ=fechaHoyLocal();
       const entreganHoyZap=flujosZapatos.filter(f=>fechaLocal(f.v.entrega)===hoyZ&&(f.v.estado||"recibido")!=="entregado");
       const coincideBusquedaProd=f=>!buscarClienteProd.trim()||(f.cliente||"").toLowerCase().includes(buscarClienteProd.trim().toLowerCase());
+      // 🔀 Órdenes MIXTAS (ropa + zapatos) que TODAVÍA no se clasifican — por eso no aparecen abajo en las
+      // colas de zapatos (esas colas solo tienen órdenes ya divididas). Se muestran aquí como aviso, para
+      // que se sepa que ya viene trabajo de zapatos apenas alguien las revise/clasifique.
+      const mixtasSinClasificar=activos.filter(v=>{
+        if(v.prodGrupos)return false; // ya clasificada y dividida
+        const tieneZap=(v.items||[]).some(it=>esZapatoLbl(it.label));
+        const tieneOtro=(v.items||[]).some(it=>!esZapatoLbl(it.label));
+        return tieneZap&&tieneOtro;
+      });
       return(
       <>
+        {mixtasSinClasificar.length>0&&(
+          <div style={{background:"#fff3e0",border:"1.5px solid #e65100",borderRadius:12,padding:12,marginBottom:16}}>
+            <div style={{fontSize:13,fontWeight:800,color:"#e65100",marginBottom:6}}>🔀 Órdenes mixtas (ropa + zapatos) pendientes de clasificar ({mixtasSinClasificar.length})</div>
+            <div style={{fontSize:11,color:"#a05a00",marginBottom:8}}>Estas todavía no aparecen abajo porque falta clasificarlas — al hacerlo, la parte de zapatos se separa sola.</div>
+            {mixtasSinClasificar.map(v=>(
+              <div key={v.folio} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"4px 0",borderBottom:"1px solid #ffe0b2"}}>
+                <span style={{color:"#e65100",fontWeight:600}}>{v.clienteNombre} <span style={{color:"#aaa",fontWeight:400,fontSize:11}}>({v.folio})</span></span>
+              </div>
+            ))}
+          </div>
+        )}
         {entreganHoyZap.length>0&&(
           <div style={{background:"#ffebee",border:"1.5px solid #e53935",borderRadius:12,padding:12,marginBottom:16}}>
             <div style={{fontSize:13,fontWeight:800,color:"#c62828",marginBottom:6}}>🔴 Zapatos que se entregan HOY — dar prioridad ({entreganHoyZap.length})</div>
