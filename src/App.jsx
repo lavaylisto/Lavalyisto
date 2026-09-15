@@ -2515,6 +2515,10 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
           const enActivos=!v.anulada&&["recibido","proceso"].includes(v.estado||"recibido")&&!soloProductosD&&!soloLavadoSecoD;
           const enFlujosZapatos=enActivos&&((v.prodGrupos&&v.prodGrupos.includes("zapatos"))||(!v.prodGrupos&&tieneZapD&&!tieneOtroD));
           const enRopa=enActivos&&((v.prodGrupos&&v.prodGrupos.includes("ropa"))||(!v.prodGrupos&&tieneOtroD));
+          // 🔎 Revisa directamente si ya existe alguna carga de máquina (lavado/centrifugado/secado) para este folio —
+          // aunque la orden "debería" aparecer en la cola de pendientes, si ya tiene una carga puesta, sale de esa
+          // cola específica y pasa a la siguiente etapa (o puede estar "atascada" si el dato de la carga está mal).
+          const cargasDeEsteFolio=(cargas||[]).filter(c=>c.ventaFolio===v.folio||(c.ventaFolios||[]).includes(v.folio));
           return(
             <div key={v.folio} style={{background:"#fff",border:"1.5px solid #e0e8f0",borderRadius:10,padding:12,marginTop:10}}>
               <div style={{fontWeight:800,color:"#1a3c5e",marginBottom:2}}>{v.clienteNombre} <span style={{color:"#aaa",fontWeight:400,fontSize:11}}>({v.folio})</span></div>
@@ -2533,6 +2537,15 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
                 <div style={{fontSize:13,fontWeight:700,color:enActivos?"#2e7d32":"#c62828"}}>{enActivos?"✅":"❌"} {enActivos?"Sí está":"NO está"} en la lista de activos de Producción</div>
                 <div style={{fontSize:13,fontWeight:700,color:enFlujosZapatos?"#2e7d32":"#c62828"}}>{enFlujosZapatos?"✅":"❌"} {enFlujosZapatos?"Sí debería aparecer":"NO aparece"} en la pestaña Zapatos</div>
                 <div style={{fontSize:13,fontWeight:700,color:enRopa?"#2e7d32":"#c62828"}}>{enRopa?"✅":"❌"} {enRopa?"Sí debería aparecer":"NO aparece"} en la pestaña Ropa</div>
+              </div>
+              <div style={{marginTop:8,paddingTop:8,borderTop:"1px solid #f0f4f8"}}>
+                <div style={{fontSize:12,fontWeight:700,color:"#1a3c5e",marginBottom:4}}>🏭 Cargas de máquina encontradas para este folio ({cargasDeEsteFolio.length})</div>
+                {cargasDeEsteFolio.length===0&&<div style={{fontSize:12,color:"#888"}}>Ninguna — no se ha puesto en ninguna máquina todavía.</div>}
+                {cargasDeEsteFolio.map((c,i)=>(
+                  <div key={i} style={{fontSize:12,color:"#555",padding:"3px 0",borderBottom:i<cargasDeEsteFolio.length-1?"1px solid #f5f5f5":"none"}}>
+                    <strong>{c.tipo}</strong> · grupo: {c.grupo===undefined?"(sin definir)":c.grupo===null?"null":`"${c.grupo}"`} · máquina: {c.maquinaId||"—"} · inicio: {fmt(c.inicio)} · {c.finReal?`terminó: ${fmt(c.finReal)}`:"⏳ sin terminar"}
+                  </div>
+                ))}
               </div>
             </div>
           );
