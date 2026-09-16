@@ -2142,7 +2142,19 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
   const paresSeleccionadosCentrifugado=Object.values(selCentrifugadoZap).reduce((a,p)=>a+(parseInt(p)||0),0);
   // 📊 Totales de pares en cada etapa, para tener claro cuántos van por lavar, en lavado, esperando/en centrifugado, y esperando/en secado
   // 🔧 Una carga solo cuenta como "activa" si la máquina TODAVÍA la referencia y está ocupada — evita cargas huérfanas (ej. máquina liberada a mano) que se quedan mostrando pares fantasma para siempre
-  const cargaEsActivaEnMaquina=c=>maquinas.some(m=>m.cargaActualId===c.id&&m.estado==="ocupada");
+  // 🔧 Antes exigía que la máquina apuntara EXACTO a esta carga por su id (m.cargaActualId===c.id) — pero
+  // una carga sigue siendo la actividad real de la máquina aunque no la referencie por ese id exacto,
+  // mientras la máquina siga ocupada y nadie más nuevo la haya reemplazado. Con el chequeo estricto
+  // anterior, cualquier carga que perdiera esa referencia (ej. al pasar la medianoche, o cualquier otro
+  // cambio de estado de la máquina) desaparecía para siempre: ni contaba como activa ni como terminada,
+  // dejando la orden atascada e invisible — exactamente el bug de las secadoras de zapatos "desapareciendo".
+  const cargaEsActivaEnMaquina=c=>{
+    const m=maquinas.find(mm=>mm.id===c.maquinaId);
+    if(!m)return false;
+    if(m.estado!=="ocupada")return false;
+    const reemplazada=cargas.some(c2=>c2.id!==c.id&&c2.maquinaId===c.maquinaId&&c2.tipo===c.tipo&&new Date(c2.inicio)>new Date(c.inicio));
+    return!reemplazada;
+  };
   const cargasZapActivas=tipo=>cargas.filter(c=>c.grupo==="zapatos"&&c.tipo===tipo&&!c.finReal&&cargaEsActivaEnMaquina(c));
   const paresEnCarga=c=>c.pares!=null?c.pares:(c.ventaFolios&&c.ventaFolios.length?c.ventaFolios:[c.ventaFolio]).reduce((a,f)=>a+paresDe(f),0);
   const totalesZapatos={
@@ -4883,6 +4895,7 @@ function NotaCreditoModal({venta,productos,onConfirmar,onCancelar}){
 function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertVenta,sesion,productos,setProductos,upsertProducto,setKardexProductos,upsertKardexProducto,setQuejas,upsertQueja}){
   const [showAb,setShowAb]=useState(false);
   const [waListo,setWaListo]=useState(false);
+  const [motivoListoManual,setMotivoListoManual]=useState(null); // 🔒 motivo del salto manual a "Listo" sin pasar por Producción
   const [showNotaCredito,setShowNotaCredito]=useState(false);
   const tieneProductos=(v.items||[]).some(it=>it.esProducto&&it.productoId);
   const confirmarNotaCredito=(devoluciones,motivo)=>{
@@ -4918,7 +4931,16 @@ function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertV
   const toggle=f=>setVentas&&setVentas(prev=>{const next=prev.map(vv=>vv.folio===v.folio?{...vv,[f]:!vv[f]}:vv);const updated=next.find(vv=>vv.folio===v.folio);if(updated&&upsertVenta)upsertVenta(updated);return next;});
   const aplicarEstado=(nv,extra={})=>setVentas&&setVentas(prev=>{const next=prev.map(vv=>vv.folio===v.folio?{...vv,estado:nv,...extra}:vv);const updated=next.find(vv=>vv.folio===v.folio);if(updated&&upsertVenta)upsertVenta(updated);return next;});
   const cambEst=nv=>{
-    if(nv==="listo"&&(v.estado||"recibido")!=="listo"){setWaListo(true);return;} // WhatsApp obligatorio
+    // 🔒 Este botón permite saltar el estado manualmente sin pasar por Producción — solo debe usarse en
+    // casos excepcionales (ej. corregir un error). Por eso, al saltar a "Listo" así, se exige un motivo
+    // que queda guardado en la orden, para poder revisar después por qué se usó este atajo.
+    if(nv==="listo"&&(v.estado||"recibido")!=="listo"){
+      const motivo=window.prompt("⚠️ Esto marca la orden como 'Listo' MANUALMENTE, sin pasar por Producción.\nUsa esto solo si es realmente necesario (ej. corregir un error).\n\n¿Por qué se está marcando así?");
+      if(motivo===null||!motivo.trim())return;
+      setMotivoListoManual(motivo.trim());
+      setWaListo(true);
+      return;
+    }
     aplicarEstado(nv);
   };
   return(
@@ -4969,6 +4991,12 @@ function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertV
             alert("Queja registrada.");
           }}>📢 Registrar queja</button>}
         </div>
+        {v.listoManualMotivo&&(
+          <div style={{marginTop:8,background:"#fff3e0",border:"1px solid #e65100",borderRadius:8,padding:"8px 10px"}}>
+            <div style={{fontSize:11,color:"#e65100",fontWeight:700}}>⚠️ Se marcó "Listo" manualmente (sin pasar por Producción)</div>
+            <div style={{fontSize:11,color:"#a05a00"}}>{v.listoManualPor?`${v.listoManualPor} · `:""}{v.listoManualEn?fmt(v.listoManualEn):""} — "{v.listoManualMotivo}"</div>
+          </div>
+        )}
         {(v.notasCredito||[]).length>0&&(
           <div style={{marginTop:8,background:"#e8f5e9",borderRadius:8,padding:"8px 10px"}}>
             {v.notasCredito.map((nc,i)=>(
@@ -4978,7 +5006,7 @@ function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertV
         )}
       </div>
       {showAb&&<AbonoModal venta={v} onSave={ab=>{addAbono(v.folio,ab);setShowAb(false);}} onClose={()=>setShowAb(false)}/>}
-      {waListo&&<WhatsAppObligatorio venta={v} tipo="listo" onConfirm={info=>{aplicarEstado("listo",{checkMsgRetiro:info.enviado,msgListo:info});setWaListo(false);}} onCancel={()=>setWaListo(false)}/>}
+      {waListo&&<WhatsAppObligatorio venta={v} tipo="listo" onConfirm={info=>{aplicarEstado("listo",{checkMsgRetiro:info.enviado,msgListo:info,...(motivoListoManual?{listoManualMotivo:motivoListoManual,listoManualPor:sesion?.nombre||null,listoManualEn:new Date().toISOString()}:{})});setWaListo(false);setMotivoListoManual(null);}} onCancel={()=>{setWaListo(false);setMotivoListoManual(null);}}/>}
       {showNotaCredito&&<NotaCreditoModal venta={v} productos={productos} onConfirmar={confirmarNotaCredito} onCancelar={()=>setShowNotaCredito(false)}/>}
     </>
   );
@@ -5832,6 +5860,8 @@ function MaquinasAdmin({maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upse
 
 const CATS=["Insumos/Suministros","Servicios","Arriendo","Sueldos","Mantenimiento","Publicidad","Equipos","Pago de deuda","Otros"];
 function Gastos({gastos,setGastos,sesion,upsertGasto,salidasCaja,activosFijos,setActivosFijos,upsertActivoFijo,inventario,setInventario,upsertInventario,kardexInsumos,setKardexInsumos,upsertKardexInsumo}){
+  // 🏪 Proveedores ya usados antes (de facturas de gastos e insumos) — para autocompletar al escribir
+  const proveedoresConocidos=[...new Set([...(gastos||[]).map(g=>g.proveedor),...(kardexInsumos||[]).map(k=>k.proveedor)].filter(Boolean))].sort();
   const [nv,setNv]=useState({descripcion:"",categoria:"Insumos/Suministros",proveedor:"",numeroFactura:"",monto:"",fecha:fechaHoyLocal(),metodoPago:"Efectivo",notas:""});
   const [modoMonto,setModoMonto]=useState("subtotal"); // "subtotal" (calculamos el IVA) | "total" (ya viene con IVA incluido)
   const [subtotalFactura,setSubtotalFactura]=useState(""); // subtotal que SÍ lleva IVA (15%)
@@ -5963,7 +5993,7 @@ function Gastos({gastos,setGastos,sesion,upsertGasto,salidasCaja,activosFijos,se
         ):(
           <div><label style={S.lbl}>Categoria</label><select style={S.inp} value={nv.categoria} onChange={e=>setNv({...nv,categoria:e.target.value})}>{CATS.map(c=><option key={c}>{c}</option>)}</select></div>
         )}
-        <div><label style={S.lbl}>Proveedor</label><input style={S.inp} value={nv.proveedor} onChange={e=>setNv({...nv,proveedor:e.target.value})}/></div>
+        <div><label style={S.lbl}>Proveedor</label><input style={S.inp} list="lista-proveedores" value={nv.proveedor} onChange={e=>setNv({...nv,proveedor:e.target.value})}/><datalist id="lista-proveedores">{proveedoresConocidos.map(p=><option key={p} value={p}/>)}</datalist></div>
         <div><label style={S.lbl}>N° Factura</label><input style={S.inp} value={nv.numeroFactura} onChange={e=>setNv({...nv,numeroFactura:e.target.value})}/></div>
         <div><label style={S.lbl}>Fecha</label><input type="date" style={S.inp} value={nv.fecha} onChange={e=>setNv({...nv,fecha:e.target.value})}/></div>
         <div><label style={S.lbl}>Metodo</label><select style={S.inp} value={nv.metodoPago} onChange={e=>setNv({...nv,metodoPago:e.target.value})}>{PAGOS.map(p=><option key={p}>{p}</option>)}</select></div>
@@ -6003,7 +6033,8 @@ function Gastos({gastos,setGastos,sesion,upsertGasto,salidasCaja,activosFijos,se
           <div style={{fontSize:13,fontWeight:700,color:"#1a3c5e",marginBottom:6}}>📦 Detalla cada insumo por código</div>
           <div style={{fontSize:11,color:"#888",marginBottom:8}}>Se suman solos al stock de Inventario, y con el precio unitario y proveedor quedan guardados para comparar costos en el tiempo.</div>
           <div style={{display:"flex",gap:6,marginBottom:6}}>
-            <input style={{...S.inp,flex:2}} placeholder="Código o nombre del insumo" value={buscarCod} onChange={e=>setBuscarCod(e.target.value)}/>
+            <input style={{...S.inp,flex:2}} list="lista-insumos" placeholder="Código o nombre del insumo" value={buscarCod} onChange={e=>setBuscarCod(e.target.value)}/>
+            <datalist id="lista-insumos">{(inventario||[]).filter(i=>!i.eliminada).map(i=><option key={i.id} value={i.nombre}>{i.codigo?`Cód: ${i.codigo}`:""}</option>)}</datalist>
             <input type="number" style={{...S.inp,width:60}} placeholder="Cant." value={cantCod} onChange={e=>setCantCod(e.target.value)}/>
             <input type="number" style={{...S.inp,width:75}} placeholder="P. unit." value={precioCod} onChange={e=>setPrecioCod(e.target.value)}/>
             <button style={{...S.btnS,background:"#2e7d32",color:"#fff"}} onClick={agregarItemCompra}>➕</button>
@@ -6770,7 +6801,7 @@ function calcularAnalisisTiempos(ventas,eventosProduccion,cargas,maquinas,{desde
     if(v.msgListo?.fecha)etapas.push({nombre:"🔔 Listo para retirar (WhatsApp enviado)",min:null,tipoEspera:"info",horaInicio:v.msgListo.fecha});
 
     const tiempoTotalMin=v.msgListo?.fecha?minutosLaboralesEntre(v.fecha,v.msgListo.fecha):null;
-    return{folio:v.folio,cliente:v.clienteNombre,libras,servicioPrincipal,atendidaPor:v.clasificacion.empleadaId,tiempoTotalMin,etapas,completa:!!v.msgListo?.fecha};
+    return{folio:v.folio,cliente:v.clienteNombre,libras,servicioPrincipal,atendidaPor:v.clasificacion.empleadaId,tiempoTotalMin,etapas,completa:!!v.msgListo?.fecha,estado:v.estado||"recibido"};
   }).filter(a=>{
     if(!modoEmpleada)return true;
     return a.etapas.some(e=>e.empleadaId!=null&&String(e.empleadaId)===String(miEmpleadaId)&&e.horaInicio&&fechaLocal(e.horaInicio)===hoy);
@@ -6867,7 +6898,7 @@ function TiemposRopaAdmin({ventas,eventosProduccion,cargas,maquinas,empleadas,mo
               <div style={{fontSize:11,color:"#888"}}>{a.servicioPrincipal}{a.libras?` · ${a.libras} lb`:""} · Atendida por {nombreDe(a.atendidaPor)}</div>
             </div>
             <div style={{textAlign:"right"}}>
-              <div style={{fontWeight:800,color:"#1a3c5e"}}>{a.tiempoTotalMin!=null?(a.tiempoTotalMin/60).toFixed(1)+"h":"En proceso"}</div>
+              <div style={{fontWeight:800,color:"#1a3c5e"}}>{a.tiempoTotalMin!=null?(a.tiempoTotalMin/60).toFixed(1)+"h":a.estado==="entregado"?"✅ Entregado":a.estado==="listo"?"🔔 Listo (sin confirmar WhatsApp)":"🔄 En proceso"}</div>
               <button style={{...S.btnS,marginTop:4}} onClick={()=>setVerDetalleFolio(verDetalleFolio===a.folio?null:a.folio)}>{verDetalleFolio===a.folio?"Ocultar":"Ver etapas"}</button>
             </div>
           </div>
