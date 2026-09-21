@@ -582,7 +582,7 @@ const msgWa = (v, tipo) => {
     return `${E.burbuja} *LAVA & LISTO* ${E.burbuja}\n_Lavanderia & Limpieza Especializada_\n${L}\n¡Hola *${v.clienteNombre}*! ${E.saludo}\nTu orden fue *RECIBIDA* ${E.check}\n\n${E.folio} *Folio:* ${v.folio}\n${L}\n*DETALLE DEL SERVICIO:*\n${items}\n${L}${manchaLinea}\n${E.dinero} *Total:* $${(v.total||0).toFixed(2)}\n${pend>0?`${E.reloj} *Saldo pendiente:* $${pend.toFixed(2)}`:`${E.check} *Pagado en su totalidad*`}\n${E.fecha} *Entrega estimada:* ${fmtD(v.entrega)}\n${L}\n¡Gracias por confiar en nosotros! ${E.corazon}\n${E.pin} Ricaurte, Cuenca\n\n_No nos hacemos responsables por daños, manchas o decoloración en su ropa si la información sobre prendas que destiñen o manchan no fue proporcionada correctamente al momento de dejar la orden._`;
   }
   if(tipo==="entregado"){
-    return `${E.burbuja} *LAVA & LISTO* ${E.burbuja}\n_Lavanderia & Limpieza Especializada_\n${L}\n¡Hola *${v.clienteNombre}*! ${E.corazon}\n\nGracias por retirar tu pedido *${v.folio}* ${E.check}\n${L}\nNos encantaría saber cómo te pareció el servicio. Del 1 al 5, ¿cómo calificarías tu experiencia? ⭐\n\nAl final, tu comentario nos ayuda a perfeccionar nuestro servicio, porque queremos brindarte el mejor de los servicios.\n${L}\n${E.pin} Ricaurte, Cuenca`;
+    return `💙 *${v.clienteNombre}, NOS IMPORTA TU OPINIÓN*\n\n¿Cómo estuvo tu experiencia con nosotros? 🫧\n\n1️⃣ Muy malo\n2️⃣ Malo\n3️⃣ Regular\n4️⃣ Bueno\n5️⃣ Excelente\n\nTu opinión nos ayuda muchísimo a seguir mejorando. 🫶🏻`;
   }
   // 🧽 Detalle del restregado extra (si se solicitó), para que el cliente vea siempre qué se incluyó o no en su cuenta final
   const rEstado=v.clasificacion?.restregadoEstado;
@@ -1578,7 +1578,6 @@ function TareasScreen({sesion,onVolver,onIrFacturacion,onIrProduccion,onLogout,t
 function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta,clientes,setClientes,upsertCliente,sesion}){
   const [showAb,setShowAb]=useState(false);
   const [waListo,setWaListo]=useState(false);
-  const [waEntregado,setWaEntregado]=useState(false);
   const [showEditCliente,setShowEditCliente]=useState(false);
   const est=getEst(v);const sig=sigEst(v.estado||"recibido");
   const esPag=pagada(v);const pend=saldo(v);
@@ -1586,7 +1585,7 @@ function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta,clientes,setClien
   const cambiar=()=>{
     if(!sig)return;
     if(sig.id==="listo"){setWaListo(true);return;} // WhatsApp obligatorio antes de "listo"
-    if(sig.id==="entregado"){setWaEntregado(true);return;} // Pedir calificación por WhatsApp antes de marcar entregado
+    if(sig.id==="entregado"){aplicarEstado("entregado",{fechaEntregado:new Date().toISOString()});return;} // el mensaje de calificación se pide al cerrar caja, no aquí
     aplicarEstado(sig.id);
   };
   const reenviarWa=tipo=>{
@@ -1653,7 +1652,6 @@ function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta,clientes,setClien
       </div>
       {showAb&&<AbonoModal venta={v} onSave={ab=>{addAbono(v.folio,ab);setShowAb(false);}} onClose={()=>setShowAb(false)}/>}
       {waListo&&<WhatsAppObligatorio venta={v} tipo="listo" onConfirm={info=>{aplicarEstado("listo",{checkMsgRetiro:info.enviado,msgListo:info});setWaListo(false);}} onCancel={()=>setWaListo(false)}/>}
-      {waEntregado&&<WhatsAppObligatorio venta={v} tipo="entregado" onConfirm={info=>{aplicarEstado("entregado",{fechaEntregado:new Date().toISOString(),msgSatisfaccion:info});setWaEntregado(false);}} onCancel={()=>setWaEntregado(false)}/>}
       {showEditCliente&&<EditarClienteModal v={v} clientes={clientes} onGuardar={guardarEdicionCliente} onCancelar={()=>setShowEditCliente(false)}/>}
     </div>
   );
@@ -4073,7 +4071,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         </div>
       )}
       <div style={{background:"#fff",display:"flex",borderBottom:"2px solid #e8f0f7",position:"sticky",top:0,zIndex:10}}>
-        {[{id:"hoy",l:"📋 Ordenes",c:pendientesRaw.length},{id:"cobrar",l:"💸 Recibido",c:porCob.length},{id:"proceso",l:"🔄 En proceso",c:porProc.length},{id:"entregar",l:"📦 Listo para retirar",c:porEnt.length},{id:"clientes",l:"👥 Clientes"},...(puedeFacturarAqui?[{id:"resumen",l:"📊 Resumen"},{id:"depositosEmp",l:"🏦 Depósitos"},{id:"conteoEmp",l:"📋 Conteo inventario"}]:[]),{id:"martinizingEmp",l:"🧴 Martinizing"},{id:"tiemposEmp",l:"⏱️ Tiempos"},{id:"miEvaluacion",l:"📋 Mi Evaluación"},{id:"bonos",l:"📈 Bonos"},{id:"nueva",l:"➕ Nuevo"}].map(t=>(
+        {[{id:"hoy",l:"📋 Ordenes",c:pendientesRaw.length},{id:"cobrar",l:"💸 Recibido",c:porCob.length},{id:"proceso",l:"🔄 En proceso",c:porProc.length},{id:"entregar",l:"📦 Listo para retirar",c:porEnt.length},{id:"clientes",l:"👥 Clientes"},...(puedeFacturarAqui?[{id:"resumen",l:"📊 Resumen"},{id:"depositosEmp",l:"🏦 Depósitos"},{id:"conteoEmp",l:"📋 Conteo inventario"}]:[]),{id:"martinizingEmp",l:"🧴 Martinizing"},{id:"tiemposEmp",l:"⏱️ Tiempos"},{id:"satisfaccionEmp",l:"😊 Satisfacción"},{id:"miEvaluacion",l:"📋 Mi Evaluación"},{id:"bonos",l:"📈 Bonos"},{id:"nueva",l:"➕ Nuevo"}].map(t=>(
           <button key={t.id} style={{flex:1,padding:"12px 4px",border:"none",background:"transparent",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:tab===t.id?700:500,color:tab===t.id?"#1a3c5e":"#888",borderBottom:tab===t.id?"2px solid #4db6e4":"none",marginBottom:-2,fontSize:11,position:"relative"}}
             onClick={()=>t.id==="nueva"?setShowNueva(true):setTab(t.id)}>
             {t.l}{t.c>0&&<span style={{position:"absolute",top:5,right:3,background:"#e53935",color:"#fff",borderRadius:10,fontSize:9,fontWeight:800,padding:"1px 4px"}}>{t.c}</span>}
@@ -4081,7 +4079,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         ))}
       </div>
       <div style={{padding:12}}>
-        {tab!=="bonos"&&tab!=="resumen"&&tab!=="clientes"&&tab!=="depositosEmp"&&tab!=="conteoEmp"&&tab!=="miEvaluacion"&&tab!=="martinizingEmp"&&tab!=="tiemposEmp"&&(<div style={{display:"flex",gap:8,marginBottom:12}}>
+        {tab!=="bonos"&&tab!=="resumen"&&tab!=="clientes"&&tab!=="depositosEmp"&&tab!=="conteoEmp"&&tab!=="miEvaluacion"&&tab!=="martinizingEmp"&&tab!=="tiemposEmp"&&tab!=="satisfaccionEmp"&&(<div style={{display:"flex",gap:8,marginBottom:12}}>
           <input style={{...S.inp,flex:1}} placeholder="🔍 Buscar cliente o folio..." value={busq} onChange={e=>setBusq(e.target.value)}/>
         </div>)}
         {tab==="hoy"&&(<>
@@ -4117,6 +4115,8 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
             ?<MartinizingAdmin ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} facturasMartinizing={facturasMartinizing} setFacturasMartinizing={setFacturasMartinizing} upsertFacturaMartinizing={upsertFacturaMartinizing} setSalidasCaja={setSalidasCaja} upsertSalida={upsertSalida} sesion={sesion} esAdmin={false}/>
           :tab==="tiemposEmp"
             ?<TiemposRopaAdmin ventas={ventas} eventosProduccion={eventosProduccion} cargas={cargas} maquinas={maquinas} empleadas={empleadas} modoEmpleada={true} miEmpleadaId={miEmpleadaSesionPE?.id}/>
+          :tab==="satisfaccionEmp"
+            ?<SatisfaccionClientes ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta}/>
           :tab==="miEvaluacion"
             ?<EvaluacionDesempeno empleadas={empleadas} ventas={ventas} eventosProduccion={eventosProduccion} tareasDiarias={tareasDiarias} quejas={quejas} cargas={cargas} evalConfig={evalConfig||EVAL_CONFIG_DEFAULT[0]} esAdmin={false} miEmpleadaId={miEmpleadaSesionPE?.id} calificacionesAudio={calificacionesAudio} ventasPerfumeReg={ventasPerfumeReg}/>
           :tab==="clientes"
@@ -4915,7 +4915,6 @@ function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertV
   const [showAb,setShowAb]=useState(false);
   const [waListo,setWaListo]=useState(false);
   const [motivoListoManual,setMotivoListoManual]=useState(null); // 🔒 motivo del salto manual a "Listo" sin pasar por Producción
-  const [waEntregado,setWaEntregado]=useState(false);
   const [showNotaCredito,setShowNotaCredito]=useState(false);
   const tieneProductos=(v.items||[]).some(it=>it.esProducto&&it.productoId);
   const confirmarNotaCredito=(devoluciones,motivo)=>{
@@ -4961,7 +4960,7 @@ function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertV
       setWaListo(true);
       return;
     }
-    if(nv==="entregado"&&(v.estado||"recibido")!=="entregado"){setWaEntregado(true);return;} // pedir calificación antes de marcar entregado
+    if(nv==="entregado"&&(v.estado||"recibido")!=="entregado"){aplicarEstado("entregado",{fechaEntregado:new Date().toISOString()});return;} // el mensaje de calificación se pide al cerrar caja, no aquí
     aplicarEstado(nv);
   };
   return(
@@ -5027,7 +5026,6 @@ function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertV
       </div>
       {showAb&&<AbonoModal venta={v} onSave={ab=>{addAbono(v.folio,ab);setShowAb(false);}} onClose={()=>setShowAb(false)}/>}
       {waListo&&<WhatsAppObligatorio venta={v} tipo="listo" onConfirm={info=>{aplicarEstado("listo",{checkMsgRetiro:info.enviado,msgListo:info,...(motivoListoManual?{listoManualMotivo:motivoListoManual,listoManualPor:sesion?.nombre||null,listoManualEn:new Date().toISOString()}:{})});setWaListo(false);setMotivoListoManual(null);}} onCancel={()=>{setWaListo(false);setMotivoListoManual(null);}}/>}
-      {waEntregado&&<WhatsAppObligatorio venta={v} tipo="entregado" onConfirm={info=>{aplicarEstado("entregado",{fechaEntregado:new Date().toISOString(),msgSatisfaccion:info});setWaEntregado(false);}} onCancel={()=>setWaEntregado(false)}/>}
       {showNotaCredito&&<NotaCreditoModal venta={v} productos={productos} onConfirmar={confirmarNotaCredito} onCancelar={()=>setShowNotaCredito(false)}/>}
     </>
   );
@@ -5065,7 +5063,6 @@ function Historial({ventas,setVentas,empleadas,setTicket,addAbono,esAdmin,upsert
 
 function PendienteItem({v,empleadas,setTicket,addAbono,setVentas,upsertVenta}){
   const [showAb,setShowAb]=useState(false);
-  const [waEntregado,setWaEntregado]=useState(false);
   const emp=empleadas.find(e=>e.id===v.empleadaId);
   const pend=saldo(v);const esPag=pagada(v);
   const abs=v.abonos||[];const totAb=abs.reduce((a,ab)=>a+ab.monto,0);
@@ -5100,12 +5097,11 @@ function PendienteItem({v,empleadas,setTicket,addAbono,setVentas,upsertVenta}){
         <div style={{display:"flex",gap:6,marginTop:8}}>
           <button style={S.btnT} onClick={()=>setTicket(v)}>🧾 Ticket</button>
           {!esPag&&<button style={{...S.btnT,background:"#e8f5e9",color:"#2e7d32",fontWeight:700}} onClick={()=>setShowAb(true)}>💰 Cobrar</button>}
-          {esPag&&!yaEntregado&&<button style={{...S.btnT,background:"#e65100",color:"#fff",fontWeight:700}} onClick={()=>setWaEntregado(true)}>✅ Marcar entregado</button>}
+          {esPag&&!yaEntregado&&<button style={{...S.btnT,background:"#e65100",color:"#fff",fontWeight:700}} onClick={()=>aplicarEstado("entregado",{fechaEntregado:new Date().toISOString()})}>✅ Marcar entregado</button>}
           {yaEntregado&&<div style={{...S.btnT,background:"#e8f5e9",color:"#2e7d32",fontWeight:700,textAlign:"center"}}>✅ Entregado</div>}
         </div>
       </div>
       {showAb&&<AbonoModal venta={v} onSave={ab=>{addAbono(v.folio,ab);setShowAb(false);}} onClose={()=>setShowAb(false)}/>}
-      {waEntregado&&<WhatsAppObligatorio venta={v} tipo="entregado" onConfirm={info=>{aplicarEstado("entregado",{fechaEntregado:new Date().toISOString(),msgSatisfaccion:info});setWaEntregado(false);}} onCancel={()=>setWaEntregado(false)}/>}
     </div>
   );
 }
@@ -6957,6 +6953,70 @@ function TiemposRopaAdmin({ventas,eventosProduccion,cargas,maquinas,empleadas,mo
 // contra las órdenes correspondientes, calcula la ganancia real (no el estimado de 20%), y registra
 // el pago como salida de caja SIN que cuente como gasto operativo (porque no lo es: es costo de venta
 // que "regresa" cuando el cliente paga).
+// 😊 SATISFACCIÓN — lista de clientes despachados (entregados) para registrar la calificación que dieron
+// por WhatsApp (el mensaje se envía al cerrar caja; aquí se anota después lo que respondió cada uno).
+function SatisfaccionClientes({ventas,setVentas,upsertVenta}){
+  const [desde,setDesde]=useState((()=>{const d=new Date();d.setDate(d.getDate()-30);return fechaLocal(d.toISOString());})());
+  const [hasta,setHasta]=useState(fechaHoyLocal());
+  const [soloSinCalificar,setSoloSinCalificar]=useState(true);
+
+  const despachados=(ventas||[]).filter(v=>{
+    if(v.anulada)return false;
+    if((v.estado||"recibido")!=="entregado")return false;
+    const f=fechaLocal(v.fechaEntregado||v.fecha);
+    if(f<desde||f>hasta)return false;
+    if(soloSinCalificar&&v.calificacionCliente!=null)return false;
+    return true;
+  }).sort((a,b)=>new Date(b.fechaEntregado||b.fecha)-new Date(a.fechaEntregado||a.fecha));
+
+  const calificar=(folio,valor)=>{ // valor: 1-5, o "sin" para "sin calificación"
+    setVentas(prev=>{
+      const next=prev.map(v=>v.folio===folio?{...v,calificacionCliente:valor}:v);
+      const updated=next.find(v=>v.folio===folio);
+      if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+  };
+
+  return(<div style={S.panel}>
+    <h2 style={S.ptitle}>😊 Satisfacción de clientes</h2>
+    <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ Aquí van los clientes ya despachados. Cuando el cliente responda al mensaje de calificación (se envía al cerrar caja), anota aquí qué te respondió — o marca "Sin calificación" si no contestó.</div>
+
+    <Card title="🔍 Filtros">
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <div><label style={S.lbl}>Desde</label><input type="date" style={S.inp} value={desde} onChange={e=>setDesde(e.target.value)}/></div>
+        <div><label style={S.lbl}>Hasta</label><input type="date" style={S.inp} value={hasta} onChange={e=>setHasta(e.target.value)}/></div>
+      </div>
+      <label style={{...S.chk,marginTop:8}}><input type="checkbox" checked={soloSinCalificar} onChange={e=>setSoloSinCalificar(e.target.checked)}/><span>Mostrar solo los que faltan por calificar</span></label>
+    </Card>
+
+    <Card title={`📋 Clientes despachados (${despachados.length})`}>
+      {despachados.length===0&&<div style={S.empty}>No hay clientes en este filtro.</div>}
+      {despachados.map(v=>(
+        <div key={v.folio} style={{padding:"10px 0",borderBottom:"1px solid #f0f4f8"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+            <div>
+              <div style={{fontSize:13,fontWeight:700,color:"#1a3c5e"}}>{v.clienteNombre} <span style={{color:"#aaa",fontWeight:400,fontSize:11}}>({v.folio})</span></div>
+              <div style={{fontSize:11,color:"#888"}}>Entregado: {fmt(v.fechaEntregado||v.fecha)}</div>
+            </div>
+            {v.calificacionCliente!=null&&(
+              <div style={{...S.badge,background:v.calificacionCliente==="sin"?"#eee":"#e8f5e9",color:v.calificacionCliente==="sin"?"#888":"#2e7d32"}}>
+                {v.calificacionCliente==="sin"?"Sin calificación":"⭐".repeat(v.calificacionCliente)+" ("+v.calificacionCliente+"/5)"}
+              </div>
+            )}
+          </div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            {[1,2,3,4,5].map(n=>(
+              <button key={n} onClick={()=>calificar(v.folio,n)} style={{padding:"6px 12px",borderRadius:8,border:v.calificacionCliente===n?"2px solid #2e7d32":"1.5px solid #e0e8f0",background:v.calificacionCliente===n?"#e8f5e9":"#fff",fontWeight:700,fontSize:13,cursor:"pointer"}}>{n}⭐</button>
+            ))}
+            <button onClick={()=>calificar(v.folio,"sin")} style={{padding:"6px 12px",borderRadius:8,border:v.calificacionCliente==="sin"?"2px solid #888":"1.5px solid #e0e8f0",background:v.calificacionCliente==="sin"?"#eee":"#fff",fontWeight:700,fontSize:12,cursor:"pointer",color:"#888"}}>Sin calificación</button>
+          </div>
+        </div>
+      ))}
+    </Card>
+  </div>);
+}
+
 function MartinizingAdmin({ventas,setVentas,upsertVenta,facturasMartinizing,setFacturasMartinizing,upsertFacturaMartinizing,setSalidasCaja,upsertSalida,sesion,esAdmin=true}){
   const [seleccion,setSeleccion]=useState({}); // {folio:true}
   const [montoFactura,setMontoFactura]=useState("");
@@ -7779,6 +7839,7 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
   const [correccionUsada,setCorreccionUsada]=useState(false); // 🔒 solo se permite volver a corregir una vez
   const [revisado,setRevisado]=useState(false);
   const [waRevision,setWaRevision]=useState(null); // venta a la que hay que avisar desde la revisión
+  const [waRevisionEntrega,setWaRevisionEntrega]=useState(null); // venta a la que hay que pedir calificación desde la revisión
   // 🖨️ Reporte de tiempos obligatorio: debe imprimirlo antes de poder continuar con el cierre
   const [tiemposImpreso,setTiemposImpreso]=useState(false);
   const miEmpleadaId=empleadas.find(e=>String(e.id)===String(uid))?.id??uid;
@@ -7786,13 +7847,21 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
   // ---- Revisión de órdenes antes del cierre ----
   const activas=ventas.filter(v=>!v.anulada&&(v.estado||"recibido")!=="entregado");
   const listosSinAviso=activas.filter(v=>(v.estado||"recibido")==="listo"&&!v.checkMsgRetiro&&!v.msgListo);
+  // 💙 Órdenes entregadas HOY a las que todavía no se les envió el mensaje de satisfacción — se exige
+  // antes de cerrar caja, igual que el aviso de "Listo". Se limita a las de hoy para no acumular un
+  // pendiente de órdenes viejas de antes de que existiera este mensaje.
+  const entregadosSinSatisfaccion=ventas.filter(v=>!v.anulada&&(v.estado||"recibido")==="entregado"&&fechaLocal(v.fechaEntregado||v.fecha)===hoy&&!v.msgSatisfaccion);
   const atrasadas=activas.filter(v=>["recibido","proceso"].includes(v.estado||"recibido")&&fechaLocal(v.entrega)<hoy);
   // 🖨️ Solo se exige imprimir el reporte de tiempos si tuvo al menos una orden hoy con alguna etapa suya
   const necesitaImprimirTiempos=misAnalisisTiempos.length>0;
-  const puedeContinuar=listosSinAviso.length===0&&revisado&&(!necesitaImprimirTiempos||tiemposImpreso);
+  const puedeContinuar=listosSinAviso.length===0&&entregadosSinSatisfaccion.length===0&&revisado&&(!necesitaImprimirTiempos||tiemposImpreso);
   const marcarAvisada=(venta,info)=>{
     if(setVentas)setVentas(prev=>{const next=prev.map(vv=>vv.folio===venta.folio?{...vv,checkMsgRetiro:info.enviado,msgListo:info}:vv);const updated=next.find(vv=>vv.folio===venta.folio);if(updated&&upsertVenta)upsertVenta(updated);return next;});
     setWaRevision(null);
+  };
+  const marcarSatisfaccionEnviada=(venta,info)=>{
+    if(setVentas)setVentas(prev=>{const next=prev.map(vv=>vv.folio===venta.folio?{...vv,msgSatisfaccion:info}:vv);const updated=next.find(vv=>vv.folio===venta.folio);if(updated&&upsertVenta)upsertVenta(updated);return next;});
+    setWaRevisionEntrega(null);
   };
   const todosAbonos=ventas.filter(v=>!v.anulada).flatMap(v=>(v.abonos||[]).filter(ab=>{
     const tieneId=ab.cobradoPorId!=null;
@@ -7982,11 +8051,23 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
             </div>
           ))}
         </div>}
+        {entregadosSinSatisfaccion.length>0&&<div style={{background:"#e3f2fd",borderRadius:10,padding:"10px 12px",marginBottom:10}}>
+          <div style={{fontSize:13,fontWeight:800,color:"#1565c0",marginBottom:6}}>💙 {entregadosSinSatisfaccion.length} orden(es) ENTREGADAS hoy sin pedir calificación — debes enviarlo para poder cerrar:</div>
+          {entregadosSinSatisfaccion.map(v=>(
+            <div key={v.folio} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"#fff",borderRadius:8,padding:"8px 10px",marginBottom:6}}>
+              <div>
+                <div style={{fontSize:13,fontWeight:700,color:"#1a3c5e"}}>{v.clienteNombre}</div>
+                <div style={{fontSize:11,color:"#888"}}>{v.folio}</div>
+              </div>
+              <button style={{padding:"8px 12px",background:"linear-gradient(135deg,#25d366,#128c7e)",color:"#fff",border:"none",borderRadius:8,fontSize:12,fontWeight:700,cursor:"pointer"}} onClick={()=>setWaRevisionEntrega(v)}>📲 Pedir calificación</button>
+            </div>
+          ))}
+        </div>}
         {atrasadas.length>0&&<div style={{background:"#fff3e0",borderRadius:10,padding:"10px 12px",marginBottom:10}}>
           <div style={{fontSize:13,fontWeight:700,color:"#e65100",marginBottom:6}}>⚠️ {atrasadas.length} orden(es) con fecha de entrega vencida y aún sin terminar — revisa si el estado es correcto:</div>
           {atrasadas.map(v=><div key={v.folio} style={{fontSize:12,color:"#555",marginBottom:2}}>• {v.clienteNombre} · {v.folio} · {getEst(v).icon} {getEst(v).label} · entrega {fmtD(v.entrega)}</div>)}
         </div>}
-        {listosSinAviso.length===0&&atrasadas.length===0&&<div style={{background:"#e8f5e9",borderRadius:10,padding:"10px 12px",marginBottom:10,fontSize:13,color:"#2e7d32",fontWeight:600}}>✅ Sin pendientes críticos: todas las órdenes listas tienen aviso enviado.</div>}
+        {listosSinAviso.length===0&&entregadosSinSatisfaccion.length===0&&atrasadas.length===0&&<div style={{background:"#e8f5e9",borderRadius:10,padding:"10px 12px",marginBottom:10,fontSize:13,color:"#2e7d32",fontWeight:600}}>✅ Sin pendientes críticos: todas las órdenes listas tienen aviso enviado.</div>}
         {necesitaImprimirTiempos&&(
           <div style={{background:tiemposImpreso?"#e8f5e9":"#fff3e0",borderRadius:10,padding:"10px 12px",marginBottom:10,border:"1.5px solid "+(tiemposImpreso?"#2e7d32":"#e65100")}}>
             <div style={{fontSize:13,fontWeight:700,color:tiemposImpreso?"#2e7d32":"#e65100",marginBottom:6}}>{tiemposImpreso?"✅":"🖨️"} Reporte de tiempos de hoy ({misAnalisisTiempos.length} orden{misAnalisisTiempos.length!==1?"es":""})</div>
@@ -7999,7 +8080,8 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
           <span>He revisado el estado de <strong>todas</strong> las órdenes y son correctos.</span>
         </label>
         <button disabled={!puedeContinuar} style={{...S.btnP,background:puedeContinuar?undefined:"#e0e0e0",color:puedeContinuar?undefined:"#999",cursor:puedeContinuar?"pointer":"not-allowed"}} onClick={()=>{if(puedeContinuar)setPaso(1);}}>Continuar al conteo de billetes →</button>
-        {!puedeContinuar&&<div style={{fontSize:11,color:"#c62828",textAlign:"center",marginTop:6}}>{listosSinAviso.length>0?"Envía los avisos pendientes y marca la casilla de revisión.":necesitaImprimirTiempos&&!tiemposImpreso?"Imprime tu reporte de tiempos de hoy para continuar.":"Marca la casilla de revisión para continuar."}</div>}
+        {!puedeContinuar&&<div style={{fontSize:11,color:"#c62828",textAlign:"center",marginTop:6}}>{listosSinAviso.length>0?"Envía los avisos pendientes y marca la casilla de revisión.":entregadosSinSatisfaccion.length>0?"Envía los mensajes de calificación pendientes y marca la casilla de revisión.":necesitaImprimirTiempos&&!tiemposImpreso?"Imprime tu reporte de tiempos de hoy para continuar.":"Marca la casilla de revisión para continuar."}</div>}
+        {waRevisionEntrega&&<WhatsAppObligatorio venta={waRevisionEntrega} tipo="entregado" onConfirm={info=>marcarSatisfaccionEnviada(waRevisionEntrega,info)} onCancel={()=>setWaRevisionEntrega(null)}/>}
         {waRevision&&<WhatsAppObligatorio venta={waRevision} tipo="listo" onConfirm={info=>marcarAvisada(waRevision,info)} onCancel={()=>setWaRevision(null)}/>}
       </Card>}
       {paso===1&&<Card title="💵 Paso 1 — Billetes">
