@@ -68,13 +68,13 @@ const PRODUCTOS_DEFAULT = [];
 // 📒 KARDEX — ficha de movimientos de cada producto/insumo: fecha/hora, tipo, cantidad, folio de referencia y saldo resultante
 const KARDEX_PRODUCTOS_DEFAULT = [];
 const KARDEX_INSUMOS_DEFAULT = [];
-const registrarKardex=({itemId,itemNombre,tipo,cantidad,folio,motivo,saldoResultante,registradoPor,precioUnitario,proveedor},{setKardex,upsertKardex}) => {
-  const entry={id:"kx_"+Date.now()+"_"+Math.random().toString(36).slice(2,7),itemId,itemNombre:itemNombre||"",tipo,cantidad,folio:folio||null,motivo:motivo||null,saldoResultante,registradoPor:registradoPor||null,precioUnitario:precioUnitario!=null?precioUnitario:null,proveedor:proveedor||null,fecha:new Date().toISOString()};
+const registrarKardex=({itemId,itemNombre,tipo,cantidad,folio,motivo,saldoResultante,registradoPor,precioUnitario,proveedor,cliente},{setKardex,upsertKardex}) => {
+  const entry={id:"kx_"+Date.now()+"_"+Math.random().toString(36).slice(2,7),itemId,itemNombre:itemNombre||"",tipo,cantidad,folio:folio||null,motivo:motivo||null,saldoResultante,registradoPor:registradoPor||null,precioUnitario:precioUnitario!=null?precioUnitario:null,proveedor:proveedor||null,cliente:cliente||null,fecha:new Date().toISOString()};
   if(setKardex)setKardex(prev=>[entry,...prev]);
   if(upsertKardex)upsertKardex(entry);
   return entry;
 };
-const TIPO_KARDEX_LBL={venta:{label:"Venta",icon:"🛍️",color:"#c62828"},nota_credito:{label:"Nota de crédito",icon:"↩️",color:"#2e7d32"},ajuste_manual:{label:"Ajuste manual",icon:"✏️",color:"#1565c0"},ingreso_inicial:{label:"Ingreso inicial",icon:"🆕",color:"#7b1fa2"},entrada_factura:{label:"Entrada por factura",icon:"🧾",color:"#2e7d32"},consumo:{label:"Consumo/uso",icon:"📉",color:"#c62828"}};
+const TIPO_KARDEX_LBL={venta:{label:"Venta",icon:"🛍️",color:"#c62828"},nota_credito:{label:"Nota de crédito",icon:"↩️",color:"#2e7d32"},ajuste_manual:{label:"Ajuste manual",icon:"✏️",color:"#1565c0"},ingreso_inicial:{label:"Ingreso inicial",icon:"🆕",color:"#7b1fa2"},entrada_factura:{label:"Entrada por factura",icon:"🧾",color:"#2e7d32"},consumo:{label:"Consumo/uso",icon:"📉",color:"#c62828"},reposicion:{label:"Reposición",icon:"📦",color:"#2e7d32"}};
 // 🆕 Genera un código correlativo nuevo para un insumo (INS-0001, INS-0002...) buscando el mayor número ya usado
 const generarCodigoInsumo=inventario=>{
   const nums=(inventario||[]).map(i=>{const m=(i.codigo||"").match(/INS-(\d+)/i);return m?parseInt(m[1]):0;});
@@ -358,8 +358,8 @@ const INCENTIVOS_DEFAULT = [{id:"config",comisionImpulso:0.40,bonoMetaPct:1,bono
 // 📋 EVALUACIÓN DE DESEMPEÑO — pesos (deben sumar 100), metas, y tiempos estándar por etapa (minutos)
 const EVAL_CONFIG_DEFAULT=[{
   id:"config",
-  pesos:{protocolo:15,ticket:5,quejas:10,tiempoOrdenes:20,registroTiempo:15,reprocesos:10,tareas:15,asistencia:10,ventaPerfumes:0},
-  metas:{protocolo:90,ticket:8,quejas:1,tiempoOrdenes:90,registroTiempo:90,reprocesos:1,tareas:95,asistencia:95,ventaPerfumes:5},
+  pesos:{protocolo:15,ticket:5,quejas:10,tiempoOrdenes:20,registroTiempo:15,reprocesos:10,tareas:15,asistencia:10,ventaPerfumes:0,satisfaccion:0},
+  metas:{protocolo:90,ticket:8,quejas:1,tiempoOrdenes:90,registroTiempo:90,reprocesos:1,tareas:95,asistencia:95,ventaPerfumes:5,satisfaccion:4.5},
   // ⏱️ Tiempos estándar reales (minutos) — ropa vs zapatos son distintos procesos con distinta duración
   tiemposEstandar:{lavado:67,centrifugado:15,secado:70,doblado:20},
   tiemposEstandarZapatos:{lavado:78,centrifugado:15,secado:90}, // 1.3h lavado, 15min centrifugado (6-7 pares), 1.5h secado (20 pares)
@@ -375,6 +375,7 @@ const EVAL_INDICADORES=[
   {key:"tareas",label:"% de tareas diarias cumplidas",unidad:"%",grupo:"Tareas"},
   {key:"asistencia",label:"% de asistencia/puntualidad",unidad:"%",grupo:"Tareas"},
   {key:"ventaPerfumes",label:"Venta de aromatizadores/perfumes (meta 5 al mes)",unidad:"#",grupo:"Atención y ventas"},
+  {key:"satisfaccion",label:"Calificación promedio de satisfacción del cliente (1-5)",unidad:"★",grupo:"Atención y ventas"},
 ];
 // Calcula la meta $ del mes (mismo criterio que el Dashboard BI: promedio ponderado de últimos 3 meses +10%)
 function calcMetaMes(ventas,mesSel){
@@ -415,6 +416,10 @@ function calcularKPIsEmpleada(empleadaId,mes,{ventas,eventosProduccion,tareasDia
   const quejasMes=(quejas||[]).filter(q=>String(q.empleadaId)===empId&&enMes(q.fecha)).length;
   // 🧴 Ventas de aromatizador/perfume registradas manualmente este mes
   const perfumesMes=(ventasPerfumeReg||[]).filter(r=>String(r.empleadaId)===empId&&enMes(r.fecha)).length;
+  // 😊 Satisfacción: promedio de las calificaciones (1-5) que dejaron los clientes en órdenes de esta
+  // empleada este mes — solo cuenta las que ya tienen número (se excluyen "sin calificación" y las sin calificar aún)
+  const calificacionesMes=ventasMes.filter(v=>typeof v.calificacionCliente==="number");
+  const pctSatisfaccion=calificacionesMes.length>0?calificacionesMes.reduce((a,v)=>a+v.calificacionCliente,0)/calificacionesMes.length:null;
 
   // --- TIEMPOS DE PROCESO ---
   // Cargas (lavado/centrifugado/secado) que ELLA inició y ya se retiraron, dentro del mes
@@ -467,7 +472,7 @@ function calcularKPIsEmpleada(empleadaId,mes,{ventas,eventosProduccion,tareasDia
   const pctAsistencia=diasConActividad.length>0?(diasATiempo.length/diasConActividad.length)*100:null;
 
   // --- Arma la tabla final: por cada indicador, meta/real/% cumplimiento/peso/puntaje ---
-  const valores={protocolo:pctProtocolo,ticket:ticketProm,quejas:quejasMes,tiempoOrdenes:pctTiempoOrdenes,registroTiempo:pctRegistroTiempo,reprocesos:reprocesosMes,tareas:pctTareas,asistencia:pctAsistencia,ventaPerfumes:perfumesMes};
+  const valores={protocolo:pctProtocolo,ticket:ticketProm,quejas:quejasMes,tiempoOrdenes:pctTiempoOrdenes,registroTiempo:pctRegistroTiempo,reprocesos:reprocesosMes,tareas:pctTareas,asistencia:pctAsistencia,ventaPerfumes:perfumesMes,satisfaccion:pctSatisfaccion};
   const filas=EVAL_INDICADORES.map(ind=>{
     const real=valores[ind.key];
     const meta=config.metas[ind.key];
@@ -811,7 +816,7 @@ const S={
   hdrI:{maxWidth:700,margin:"0 auto",display:"flex",justifyContent:"space-between",alignItems:"center"},
   logo:{fontFamily:"'Playfair Display',serif",fontSize:22,color:"#fff",fontWeight:700},
   tabBar:{background:"#fff",display:"flex",overflowX:"auto",borderBottom:"2px solid #e8f0f7",maxWidth:700,margin:"0 auto",position:"sticky",top:0,zIndex:10},
-  tabBtn:{display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"10px 10px",border:"none",background:"transparent",cursor:"pointer",color:"#888",fontFamily:"'DM Sans',sans-serif",fontWeight:500,whiteSpace:"nowrap",minWidth:60,fontSize:11},
+  tabBtn:{display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"10px 10px",border:"none",background:"transparent",cursor:"pointer",color:"#888",fontFamily:"'DM Sans',sans-serif",fontWeight:500,whiteSpace:"nowrap",minWidth:60,flexShrink:0,fontSize:11},
   tabAct:{color:"#1a3c5e",borderBottom:"2px solid #4db6e4",marginBottom:-2,fontWeight:700},
   content:{maxWidth:700,margin:"0 auto",padding:"14px 12px"},
   panel:{},
@@ -4070,9 +4075,9 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
           🧽 {restregadosPendientes.length} orden(es) con extras esperando respuesta del cliente: {restregadosPendientes.map(v=>`${v.clienteNombre} (${v.folio})`).join(" · ")}
         </div>
       )}
-      <div style={{background:"#fff",display:"flex",borderBottom:"2px solid #e8f0f7",position:"sticky",top:0,zIndex:10}}>
+      <div style={{background:"#fff",display:"flex",overflowX:"auto",borderBottom:"2px solid #e8f0f7",position:"sticky",top:0,zIndex:10}}>
         {[{id:"hoy",l:"📋 Ordenes",c:pendientesRaw.length},{id:"cobrar",l:"💸 Recibido",c:porCob.length},{id:"proceso",l:"🔄 En proceso",c:porProc.length},{id:"entregar",l:"📦 Listo para retirar",c:porEnt.length},{id:"clientes",l:"👥 Clientes"},...(puedeFacturarAqui?[{id:"resumen",l:"📊 Resumen"},{id:"depositosEmp",l:"🏦 Depósitos"},{id:"conteoEmp",l:"📋 Conteo inventario"}]:[]),{id:"martinizingEmp",l:"🧴 Martinizing"},{id:"tiemposEmp",l:"⏱️ Tiempos"},{id:"satisfaccionEmp",l:"😊 Satisfacción"},{id:"miEvaluacion",l:"📋 Mi Evaluación"},{id:"bonos",l:"📈 Bonos"},{id:"nueva",l:"➕ Nuevo"}].map(t=>(
-          <button key={t.id} style={{flex:1,padding:"12px 4px",border:"none",background:"transparent",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:tab===t.id?700:500,color:tab===t.id?"#1a3c5e":"#888",borderBottom:tab===t.id?"2px solid #4db6e4":"none",marginBottom:-2,fontSize:11,position:"relative"}}
+          <button key={t.id} style={{flexShrink:0,minWidth:76,padding:"12px 8px",border:"none",background:"transparent",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:tab===t.id?700:500,color:tab===t.id?"#1a3c5e":"#888",borderBottom:tab===t.id?"2px solid #4db6e4":"none",marginBottom:-2,fontSize:11,whiteSpace:"nowrap",position:"relative"}}
             onClick={()=>t.id==="nueva"?setShowNueva(true):setTab(t.id)}>
             {t.l}{t.c>0&&<span style={{position:"absolute",top:5,right:3,background:"#e53935",color:"#fff",borderRadius:10,fontSize:9,fontWeight:800,padding:"1px 4px"}}>{t.c}</span>}
           </button>
@@ -4596,7 +4601,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
         prodsVendidos.forEach(it=>{
           const updated=next.find(p=>p.id===it.productoId);
           if(updated&&upsertProducto)upsertProducto({...updated,_updatedAt:new Date().toISOString()});
-          if(updated&&setKardexProductos)registrarKardex({itemId:it.productoId,itemNombre:updated.nombre,tipo:"venta",cantidad:-(it.piezas||1),folio:v.folio,saldoResultante:updated.stock,registradoPor:sesion?.nombre},{setKardex:setKardexProductos,upsertKardex:upsertKardexProducto});
+          if(updated&&setKardexProductos)registrarKardex({itemId:it.productoId,itemNombre:updated.nombre,tipo:"venta",cantidad:-(it.piezas||1),folio:v.folio,cliente:v.clienteNombre,saldoResultante:updated.stock,registradoPor:sesion?.nombre},{setKardex:setKardexProductos,upsertKardex:upsertKardexProducto});
         });
         return next;
       });
@@ -4928,7 +4933,7 @@ function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertV
         devoluciones.forEach(dev=>{
           const updated=next.find(p=>p.id===dev.productoId);
           if(updated&&upsertProducto)upsertProducto({...updated,_updatedAt:new Date().toISOString()});
-          if(updated)registrarKardex({itemId:dev.productoId,itemNombre:updated.nombre,tipo:"nota_credito",cantidad:dev.cantidad,folio:v.folio,motivo,saldoResultante:updated.stock,registradoPor:sesion?.nombre},{setKardex:setKardexProductos,upsertKardex:upsertKardexProducto});
+          if(updated)registrarKardex({itemId:dev.productoId,itemNombre:updated.nombre,tipo:"nota_credito",cantidad:dev.cantidad,folio:v.folio,motivo,cliente:v.clienteNombre,saldoResultante:updated.stock,registradoPor:sesion?.nombre},{setKardex:setKardexProductos,upsertKardex:upsertKardexProducto});
         });
         return next;
       });
@@ -4998,7 +5003,28 @@ function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertV
         <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
           <button style={S.btnT} onClick={()=>setTicket(v)}>🧾 Ticket</button>
           {!esPag&&!v.anulada&&<button style={{...S.btnT,background:"#fff3e0",color:"#e65100"}} onClick={()=>setShowAb(true)}>💰 Pago</button>}
-          {!v.anulada&&esAdmin&&setVentas&&<button style={{...S.btnT,background:"#ffebee",color:"#c62828"}} onClick={()=>{const m=window.prompt("Motivo de anulacion:");if(m===null||!m.trim())return;setVentas(prev=>{const next=prev.map(vv=>vv.folio===v.folio?{...vv,anulada:true,motivoAnulacion:m,anuladaPor:sesion?.nombre||"Administrador",anuladaEn:new Date().toISOString()}:vv);const updated=next.find(vv=>vv.folio===v.folio);if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});return next;});}}>❌ Anular</button>}
+          {!v.anulada&&esAdmin&&setVentas&&<button style={{...S.btnT,background:"#ffebee",color:"#c62828"}} onClick={()=>{
+            const m=window.prompt("Motivo de anulacion:");
+            if(m===null||!m.trim())return;
+            // 📦 Si la venta incluía productos (ej. aromatizantes), al anularla vuelven a entrar al
+            // inventario — el cliente ya no se lleva lo que se le iba a vender, así que ese stock regresa.
+            const itemsProd=(v.items||[]).filter(it=>it.esProducto&&it.productoId);
+            if(itemsProd.length>0&&setProductos){
+              setProductos(prev=>{
+                const next=prev.map(p=>{
+                  const it=itemsProd.find(x=>x.productoId===p.id);
+                  if(!it)return p;
+                  const nuevoStock=(p.stock||0)+(it.piezas||1);
+                  const actualizado={...p,stock:nuevoStock};
+                  if(upsertProducto)upsertProducto({...actualizado,_updatedAt:new Date().toISOString()});
+                  if(setKardexProductos)registrarKardex({itemId:p.id,itemNombre:p.nombre,tipo:"nota_credito",cantidad:it.piezas||1,folio:v.folio,motivo:"Venta anulada: "+m.trim(),cliente:v.clienteNombre,saldoResultante:nuevoStock,registradoPor:sesion?.nombre},{setKardex:setKardexProductos,upsertKardex:upsertKardexProducto});
+                  return actualizado;
+                });
+                return next;
+              });
+            }
+            setVentas(prev=>{const next=prev.map(vv=>vv.folio===v.folio?{...vv,anulada:true,motivoAnulacion:m,anuladaPor:sesion?.nombre||"Administrador",anuladaEn:new Date().toISOString()}:vv);const updated=next.find(vv=>vv.folio===v.folio);if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});return next;});
+          }}>❌ Anular</button>}
           {!v.anulada&&esAdmin&&tieneProductos&&setProductos&&<button style={{...S.btnT,background:"#e8f5e9",color:"#2e7d32"}} onClick={()=>setShowNotaCredito(true)}>↩️ Nota de crédito</button>}
           {!v.anulada&&esAdmin&&setQuejas&&<button style={{...S.btnT,background:"#fff3e0",color:"#e65100"}} onClick={()=>{
             const emp=empleadas.find(e=>e.id===v.empleadaId);
@@ -5386,6 +5412,7 @@ function Reportes({ventas,empleadas,salidasCaja}){
 function ProductosAdmin({productos,setProductos,upsertProducto,kardexProductos,setKardexProductos,upsertKardexProducto,sesion}){
   const [nv,setNv]=useState({nombre:"",precio:"",stock:"",min:"1",categoria:""});
   const [verKardexDe,setVerKardexDe]=useState(null); // id del producto cuyo kardex está expandido
+  const [cantRepo,setCantRepo]=useState({}); // {productoId: "10"} — cantidad a reponer, por producto
   const activos=productos.filter(p=>!p.eliminada);
   const kardexDe=id=>(kardexProductos||[]).filter(k=>k.itemId===id).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha));
   const add=()=>{
@@ -5396,6 +5423,41 @@ function ProductosAdmin({productos,setProductos,upsertProducto,kardexProductos,s
     if(upsertProducto)upsertProducto({...np,_updatedAt:new Date().toISOString()});
     if(stockInicial>0)registrarKardex({itemId:np.id,itemNombre:np.nombre,tipo:"ingreso_inicial",cantidad:stockInicial,saldoResultante:stockInicial,registradoPor:sesion?.nombre},{setKardex:setKardexProductos,upsertKardex:upsertKardexProducto});
     setNv({nombre:"",precio:"",stock:"",min:"1",categoria:""});
+  };
+  // 📦 Reposición en bloque: agrega de una sola vez la cantidad que llegó (ej. 10), en vez de 1 por 1.
+  // Queda como un movimiento propio de kardex (tipo "reposicion") que después se puede anular con su
+  // nota de crédito, revirtiendo exactamente esa cantidad del stock.
+  const registrarReposicion=p=>{
+    const cantidad=parseFloat(cantRepo[p.id]);
+    if(!cantidad||cantidad<=0){alert("Escribe cuántas unidades llegaron.");return;}
+    const nuevoStock=(p.stock||0)+cantidad;
+    setProductos(prev=>{
+      const next=prev.map(x=>x.id===p.id?{...x,stock:nuevoStock}:x);
+      const updated=next.find(x=>x.id===p.id);
+      if(updated&&upsertProducto)upsertProducto({...updated,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+    registrarKardex({itemId:p.id,itemNombre:p.nombre,tipo:"reposicion",cantidad,saldoResultante:nuevoStock,registradoPor:sesion?.nombre},{setKardex:setKardexProductos,upsertKardex:upsertKardexProducto});
+    setCantRepo({...cantRepo,[p.id]:""});
+  };
+  // ↩️ Anular una reposición: crea la nota de crédito (movimiento negativo) y revierte el stock que había sumado
+  const anularReposicion=(p,entry)=>{
+    if(!window.confirm(`¿Anular esta reposición de ${entry.cantidad} unidad(es) de "${p.nombre}"? Se genera la nota de crédito y el stock vuelve para atrás.`))return;
+    const nuevoStock=Math.max(0,(p.stock||0)-entry.cantidad);
+    setProductos(prev=>{
+      const next=prev.map(x=>x.id===p.id?{...x,stock:nuevoStock}:x);
+      const updated=next.find(x=>x.id===p.id);
+      if(updated&&upsertProducto)upsertProducto({...updated,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+    registrarKardex({itemId:p.id,itemNombre:p.nombre,tipo:"nota_credito",cantidad:-entry.cantidad,motivo:`Anulación de reposición del ${fmt(entry.fecha)}`,saldoResultante:nuevoStock,registradoPor:sesion?.nombre},{setKardex:setKardexProductos,upsertKardex:upsertKardexProducto});
+    // Marca la reposición original como anulada, para no poder anularla dos veces
+    setKardexProductos(prev=>{
+      const next=prev.map(k=>k.id===entry.id?{...k,anulada:true}:k);
+      const updated=next.find(k=>k.id===entry.id);
+      if(updated&&upsertKardexProducto)upsertKardexProducto({...updated,_updatedAt:new Date().toISOString()});
+      return next;
+    });
   };
   // ✏️ Ajuste manual de stock (+/−), con motivo obligatorio y registro en el kardex
   const ajustarStock=(p,delta)=>{
@@ -5444,6 +5506,8 @@ function ProductosAdmin({productos,setProductos,upsertProducto,kardexProductos,s
           <button style={S.btnS} onClick={()=>ajustarStock(p,-1)}>−</button>
           <div style={{...S.inp,width:70,textAlign:"center",padding:"4px 6px",background:"#f0f4f8"}}>{p.stock}</div>
           <button style={S.btnS} onClick={()=>ajustarStock(p,1)}>+</button>
+          <input type="number" min="1" style={{...S.inp,width:60,padding:"4px 6px"}} placeholder="Cant." value={cantRepo[p.id]||""} onChange={e=>setCantRepo({...cantRepo,[p.id]:e.target.value})}/>
+          <button style={{...S.btnS,background:"#2e7d32",color:"#fff"}} onClick={()=>registrarReposicion(p)}>📦 Reponer</button>
           <label style={{fontSize:11,color:"#888"}}>Precio:</label>
           <input type="number" style={{...S.inp,width:80,padding:"4px 6px"}} value={p.precio} onChange={e=>upd(p.id,"precio",parseFloat(e.target.value)||0)}/>
           <label style={{fontSize:11,color:"#888"}}>Mín:</label>
@@ -5461,15 +5525,20 @@ function ProductosAdmin({productos,setProductos,upsertProducto,kardexProductos,s
             {kardexDe(p.id).map(k=>{
               const t=TIPO_KARDEX_LBL[k.tipo]||{label:k.tipo,icon:"•",color:"#888"};
               return(
-                <div key={k.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderBottom:"1px solid #f0f4f8"}}>
-                  <div style={{minWidth:0}}>
-                    <div style={{fontSize:12,fontWeight:600,color:t.color}}>{t.icon} {t.label}{k.folio?` · ${k.folio}`:""}</div>
-                    <div style={{fontSize:10,color:"#888"}}>{fmt(k.fecha)}{k.registradoPor?` · ${k.registradoPor}`:""}{k.motivo?` · ${k.motivo}`:""}</div>
+                <div key={k.id} style={{padding:"5px 0",borderBottom:"1px solid #f0f4f8"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div style={{minWidth:0}}>
+                      <div style={{fontSize:12,fontWeight:600,color:t.color}}>{t.icon} {t.label}{k.folio?` · ${k.folio}`:""}{k.anulada?" · ⛔ ANULADA":""}</div>
+                      <div style={{fontSize:10,color:"#888"}}>{fmt(k.fecha)}{k.registradoPor?` · ${k.registradoPor}`:""}{k.motivo?` · ${k.motivo}`:""}</div>
+                    </div>
+                    <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
+                      <div style={{fontSize:13,fontWeight:800,color:k.cantidad>=0?"#2e7d32":"#c62828"}}>{k.cantidad>=0?"+":""}{k.cantidad}</div>
+                      <div style={{fontSize:9,color:"#aaa"}}>saldo: {k.saldoResultante}</div>
+                    </div>
                   </div>
-                  <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
-                    <div style={{fontSize:13,fontWeight:800,color:k.cantidad>=0?"#2e7d32":"#c62828"}}>{k.cantidad>=0?"+":""}{k.cantidad}</div>
-                    <div style={{fontSize:9,color:"#aaa"}}>saldo: {k.saldoResultante}</div>
-                  </div>
+                  {k.tipo==="reposicion"&&!k.anulada&&(
+                    <button style={{...S.btnS,marginTop:4,fontSize:10,background:"#ffebee",color:"#c62828"}} onClick={()=>anularReposicion(p,k)}>↩️ Anular (nota de crédito)</button>
+                  )}
                 </div>
               );
             })}
@@ -7229,16 +7298,18 @@ function KardexView({productos,kardexProductos,inventario,kardexInsumos}){
   const [desde,setDesde]=useState((()=>{const d=new Date();d.setDate(d.getDate()-30);return fechaLocal(d.toISOString());})());
   const [hasta,setHasta]=useState(hoy);
   const [buscar,setBuscar]=useState("");
+  const [itemSel,setItemSel]=useState(""); // "" = todos los artículos; si no, solo el id elegido
 
   const items=tipo==="productos"?(productos||[]):(inventario||[]);
   const kardex=tipo==="productos"?(kardexProductos||[]):(kardexInsumos||[]);
   const nombreDe=id=>items.find(i=>String(i.id)===String(id))?.nombre||"—";
 
   const filtrado=kardex.filter(k=>{
+    if(itemSel&&String(k.itemId)!==String(itemSel))return false;
     const f=fechaLocal(k.fecha);
     if(desde&&f<desde)return false;
     if(hasta&&f>hasta)return false;
-    if(buscar.trim()){
+    if(!itemSel&&buscar.trim()){
       const q=buscar.trim().toLowerCase();
       const nombre=(k.itemNombre||nombreDe(k.itemId)||"").toLowerCase();
       if(!nombre.includes(q))return false;
@@ -7251,31 +7322,40 @@ function KardexView({productos,kardexProductos,inventario,kardexInsumos}){
 
   const exportar=()=>{
     if(filtrado.length===0){alert("No hay movimientos para descargar con estos filtros.");return;}
-    const enc=["Fecha Ingreso","Artículo","Movimiento","Causa/Referencia","Entero (cantidad)","Precio unitario","Proveedor","Saldo resultante","Registrado por"];
+    const enc=["Fecha Ingreso","Artículo","Movimiento","Causa/Referencia","Cliente","Entero (cantidad)","Precio unitario","Proveedor","Saldo resultante","Registrado por"];
     const filas=filtrado.map(k=>{
       const t=TIPO_KARDEX_LBL[k.tipo]||{label:k.tipo};
-      return[fmt(k.fecha),k.itemNombre||nombreDe(k.itemId),t.label,[k.folio,k.motivo].filter(Boolean).join(" · "),k.cantidad,k.precioUnitario!=null?"$"+k.precioUnitario.toFixed(2):"",k.proveedor||"",k.saldoResultante,k.registradoPor||""];
+      return[fmt(k.fecha),k.itemNombre||nombreDe(k.itemId),t.label,[k.folio,k.motivo].filter(Boolean).join(" · "),k.cliente||"",k.cantidad,k.precioUnitario!=null?"$"+k.precioUnitario.toFixed(2):"",k.proveedor||"",k.saldoResultante,k.registradoPor||""];
     });
-    filas.push(["","","","","Total entradas:",totalEntradas,"","",""]);
-    filas.push(["","","","","Total salidas:",-totalSalidas,"","",""]);
+    filas.push(["","","","","","Total entradas:",totalEntradas,"","",""]);
+    filas.push(["","","","","","Total salidas:",-totalSalidas,"","",""]);
     const csv=[enc,...filas].map(f=>f.map(c=>'"'+String(c).replace(/"/g,'\\"')+'"').join(",")).join("\n");
     const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
-    const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="kardex_"+tipo+"-"+desde+"_a_"+hasta+".csv";a.click();
+    const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="kardex_"+tipo+(itemSel?"_"+nombreDe(itemSel).replace(/\s+/g,"_"):"")+"-"+desde+"_a_"+hasta+".csv";a.click();
   };
 
   return(<div style={S.panel}>
     <h2 style={S.ptitle}>📒 Kardex</h2>
     <div style={{display:"flex",gap:8,marginBottom:14}}>
       {[["productos","🛍️ Productos"],["insumos","📦 Insumos"]].map(([val,l])=>(
-        <button key={val} onClick={()=>setTipo(val)} style={{flex:1,padding:"9px 6px",borderRadius:10,border:tipo===val?"2px solid #1a3c5e":"1.5px solid #e0e8f0",background:tipo===val?"#eaf3fb":"#fff",color:"#1a3c5e",fontWeight:700,fontSize:12,cursor:"pointer"}}>{l}</button>
+        <button key={val} onClick={()=>{setTipo(val);setItemSel("");}} style={{flex:1,padding:"9px 6px",borderRadius:10,border:tipo===val?"2px solid #1a3c5e":"1.5px solid #e0e8f0",background:tipo===val?"#eaf3fb":"#fff",color:"#1a3c5e",fontWeight:700,fontSize:12,cursor:"pointer"}}>{l}</button>
       ))}
     </div>
     <Card title="🔍 Filtros">
       <div style={{marginBottom:8}}>
-        <label style={S.lbl}>Búsqueda de artículo</label>
+        <label style={S.lbl}>Ver solo un artículo específico</label>
+        <select style={S.inp} value={itemSel} onChange={e=>{setItemSel(e.target.value);if(e.target.value)setBuscar("");}}>
+          <option value="">Todos los {tipo==="productos"?"productos":"insumos"}</option>
+          {items.filter(i=>!i.eliminada).sort((a,b)=>(a.nombre||"").localeCompare(b.nombre||"")).map(i=><option key={i.id} value={i.id}>{i.nombre}{i.codigo?` (${i.codigo})`:""}</option>)}
+        </select>
+      </div>
+      {!itemSel&&(
+      <div style={{marginBottom:8}}>
+        <label style={S.lbl}>O busca por nombre</label>
         <input style={S.inp} placeholder="Nombre del producto o insumo..." value={buscar} onChange={e=>setBuscar(e.target.value)}/>
         <div style={{fontSize:10,color:"#888",marginTop:4}}>💡 Escribe el nombre de un insumo y amplía el rango de fechas para ver cómo ha subido o bajado su precio, y qué proveedor te lo vendió cada vez.</div>
       </div>
+      )}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
         <div><label style={S.lbl}>Fecha inicio</label><input type="date" style={S.inp} value={desde} onChange={e=>setDesde(e.target.value)}/></div>
         <div><label style={S.lbl}>Fecha fin</label><input type="date" style={S.inp} value={hasta} onChange={e=>setHasta(e.target.value)}/></div>
@@ -7298,6 +7378,7 @@ function KardexView({productos,kardexProductos,inventario,kardexInsumos}){
               <th style={{padding:"6px 8px"}}>Artículo</th>
               <th style={{padding:"6px 8px"}}>Movimiento</th>
               <th style={{padding:"6px 8px"}}>Causa</th>
+              <th style={{padding:"6px 8px"}}>Cliente</th>
               <th style={{padding:"6px 8px",textAlign:"right"}}>Entero</th>
               <th style={{padding:"6px 8px",textAlign:"right"}}>P. unitario</th>
               <th style={{padding:"6px 8px"}}>Proveedor</th>
@@ -7313,6 +7394,7 @@ function KardexView({productos,kardexProductos,inventario,kardexInsumos}){
                   <td style={{padding:"6px 8px",fontWeight:600,color:"#1a3c5e"}}>{k.itemNombre||nombreDe(k.itemId)}</td>
                   <td style={{padding:"6px 8px",color:t.color,fontWeight:600,whiteSpace:"nowrap"}}>{t.icon} {t.label}</td>
                   <td style={{padding:"6px 8px",color:"#888"}}>{[k.folio,k.motivo].filter(Boolean).join(" · ")||"—"}</td>
+                  <td style={{padding:"6px 8px",color:"#1a3c5e",fontWeight:600}}>{k.cliente||"—"}</td>
                   <td style={{padding:"6px 8px",textAlign:"right",fontWeight:800,color:k.cantidad>=0?"#2e7d32":"#c62828"}}>{k.cantidad>=0?"+":""}{k.cantidad}</td>
                   <td style={{padding:"6px 8px",textAlign:"right",color:"#1a3c5e",fontWeight:600}}>{k.precioUnitario!=null?"$"+k.precioUnitario.toFixed(2):"—"}</td>
                   <td style={{padding:"6px 8px",color:"#888"}}>{k.proveedor||"—"}</td>
@@ -9329,7 +9411,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
   const tabs=[
     {id:"ventas",icon:"🧾",l:"Venta"},{id:"historial",icon:"📋",l:"Historial"},
     {id:"pendientes",icon:"⏳",l:"Pendientes",b:pCount},{id:"bi",icon:"🚀",l:"Dashboard"},
-    {id:"clientes",icon:"👥",l:"Clientes"},{id:"clientesAnalisis",icon:"📊",l:"Análisis clientes"},{id:"promosAdmin",icon:"🎁",l:"Promos"},{id:"cupones",icon:"🎟️",l:"Cupones"},{id:"resumen",icon:"📈",l:"Resumen día"},
+    {id:"clientes",icon:"👥",l:"Clientes"},{id:"clientesAnalisis",icon:"📊",l:"Análisis clientes"},{id:"promosAdmin",icon:"🎁",l:"Promos"},{id:"cupones",icon:"🎟️",l:"Cupones"},{id:"resumen",icon:"📈",l:"Resumen día"},{id:"satisfaccionAdmin",icon:"😊",l:"Satisfacción"},
     {id:"reportes",icon:"📊",l:"Reportes"},{id:"depositos",icon:"🏦",l:"Depósitos"},
     {id:"conciliacion",icon:"🏛️",l:"Conciliación"},
     {id:"gastos",icon:"🛒",l:"Gastos"},{id:"martinizingAdmin",icon:"🧴",l:"Martinizing"},{id:"inventario",icon:"📦",l:"Inventario"},{id:"productosAdmin",icon:"🛍️",l:"Productos"},{id:"kardexAdmin",icon:"📒",l:"Kardex"},{id:"conteosAdmin",icon:"📋",l:"Conteos"},{id:"activosFijosAdmin",icon:"📦",l:"Activos Fijos"},{id:"deudasAdmin",icon:"💳",l:"Deudas"},{id:"sorteoAdmin",icon:"🎟️",l:"Sorteo"},
@@ -9338,7 +9420,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
   ];
   // 🗂️ Agrupa las pestañas en categorías para que el panel admin se vea más ordenado (menos scroll horizontal, todo lo relacionado junto)
   const CATEGORIAS=[
-    {id:"ventas_caja",icon:"🧾",l:"Ventas",tabIds:["ventas","historial","pendientes","depositos","conciliacion","cupones","promosAdmin","reportes","resumen"]},
+    {id:"ventas_caja",icon:"🧾",l:"Ventas",tabIds:["ventas","historial","pendientes","depositos","conciliacion","cupones","promosAdmin","reportes","resumen","satisfaccionAdmin"]},
     {id:"personal",icon:"👥",l:"Personal",tabIds:["equipo","pinsAdmin","usuarios","tareasAdmin","notasAdmin","incentivosAdmin","evaluacionAdmin","calificacionManualAdmin","evaluacionConfigAdmin","reporteMaquinasAdmin","tiemposRopaAdmin"]},
     {id:"inventario_cat",icon:"📦",l:"Inventario",tabIds:["inventario","productosAdmin","kardexAdmin","conteosAdmin","gastos","martinizingAdmin","maquinasAdmin","activosFijosAdmin","deudasAdmin"]},
     {id:"negocio",icon:"📊",l:"Negocio",tabIds:["bi","clientes","clientesAnalisis","sorteoAdmin","produccionAdmin","config"]},
@@ -9389,6 +9471,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
       {tab==="promosAdmin"&&<PromosAdmin promos={promos} setPromos={setPromos} upsertPromo={upsertPromo} servicios={servicios}/>}
       {tab==="cupones"&&<Cupones cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} clientes={clientes} ventas={ventas} sesion={sesion} promos={promos}/>}
       {tab==="resumen"&&<ResumenDia ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja}/>}
+      {tab==="satisfaccionAdmin"&&<SatisfaccionClientes ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta}/>}
       {tab==="reportes"&&<Reportes ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja}/>}
       {tab==="depositos"&&<Depositos depositos={depositos} setDepositos={setDepositos} ventas={ventas} salidasCaja={salidasCaja} upsertDeposito={upsertDeposito}/>}
       {tab==="conciliacion"&&<Conciliacion ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} depositos={depositos} setDepositos={setDepositos} upsertDeposito={upsertDeposito}/>}
