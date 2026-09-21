@@ -4994,7 +4994,6 @@ function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertV
         </div>}
         {setVentas&&esAdmin&&<div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}>
           <label style={S.chk}><input type="checkbox" checked={v.checkMsgRetiro||false} onChange={()=>toggle("checkMsgRetiro")}/><span>📲 Msg retiro</span></label>
-          <label style={S.chk}><input type="checkbox" checked={v.checkMsgEntrega||false} onChange={()=>toggle("checkMsgEntrega")}/><span>✅ Entregado</span></label>
           <label style={{...S.chk,color:v.facturadoSRI?"#2e7d32":"#555"}}><input type="checkbox" checked={v.facturadoSRI||false} onChange={()=>toggle("facturadoSRI")}/><span>🧾 SRI</span></label>
         </div>}
         <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
@@ -5066,11 +5065,14 @@ function Historial({ventas,setVentas,empleadas,setTicket,addAbono,esAdmin,upsert
 
 function PendienteItem({v,empleadas,setTicket,addAbono,setVentas,upsertVenta}){
   const [showAb,setShowAb]=useState(false);
+  const [waEntregado,setWaEntregado]=useState(false);
   const emp=empleadas.find(e=>e.id===v.empleadaId);
   const pend=saldo(v);const esPag=pagada(v);
   const abs=v.abonos||[];const totAb=abs.reduce((a,ab)=>a+ab.monto,0);
   const est=getEst(v);
+  const yaEntregado=(v.estado||"recibido")==="entregado";
   const toggle=f=>setVentas&&setVentas(prev=>{const next=prev.map(vv=>vv.folio===v.folio?{...vv,[f]:!vv[f]}:vv);const updated=next.find(vv=>vv.folio===v.folio);if(updated&&upsertVenta)upsertVenta(updated);return next;});
+  const aplicarEstado=(nuevoEstado,extra={})=>setVentas&&setVentas(prev=>{const next=prev.map(vv=>vv.folio===v.folio?{...vv,estado:nuevoEstado,...extra}:vv);const updated=next.find(vv=>vv.folio===v.folio);if(updated&&upsertVenta)upsertVenta(updated);return next;});
   return(
     <div>
       <div style={{...S.vcard,borderLeft:`4px solid ${esPag?"#ff9800":"#e53935"}`}}>
@@ -5094,14 +5096,16 @@ function PendienteItem({v,empleadas,setTicket,addAbono,setVentas,upsertVenta}){
         </div>
         <div style={{display:"flex",gap:12,marginTop:10,flexWrap:"wrap"}}>
           <label style={S.chk}><input type="checkbox" checked={v.checkMsgRetiro||false} onChange={()=>toggle("checkMsgRetiro")}/><span>📲 Avisé</span></label>
-          <label style={S.chk}><input type="checkbox" checked={v.checkMsgEntrega||false} onChange={()=>toggle("checkMsgEntrega")}/><span>✅ Entregado</span></label>
         </div>
         <div style={{display:"flex",gap:6,marginTop:8}}>
           <button style={S.btnT} onClick={()=>setTicket(v)}>🧾 Ticket</button>
           {!esPag&&<button style={{...S.btnT,background:"#e8f5e9",color:"#2e7d32",fontWeight:700}} onClick={()=>setShowAb(true)}>💰 Cobrar</button>}
+          {esPag&&!yaEntregado&&<button style={{...S.btnT,background:"#e65100",color:"#fff",fontWeight:700}} onClick={()=>setWaEntregado(true)}>✅ Marcar entregado</button>}
+          {yaEntregado&&<div style={{...S.btnT,background:"#e8f5e9",color:"#2e7d32",fontWeight:700,textAlign:"center"}}>✅ Entregado</div>}
         </div>
       </div>
       {showAb&&<AbonoModal venta={v} onSave={ab=>{addAbono(v.folio,ab);setShowAb(false);}} onClose={()=>setShowAb(false)}/>}
+      {waEntregado&&<WhatsAppObligatorio venta={v} tipo="entregado" onConfirm={info=>{aplicarEstado("entregado",{fechaEntregado:new Date().toISOString(),msgSatisfaccion:info});setWaEntregado(false);}} onCancel={()=>setWaEntregado(false)}/>}
     </div>
   );
 }
