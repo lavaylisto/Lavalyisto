@@ -3,6 +3,19 @@ import { useState, useEffect, useRef, Component } from "react";
 // (ej. dentro de un botón, o una función async) no los atrapa el ErrorBoundary — este sí.
 if(typeof window!=="undefined"){
   const mostrarErrorGlobal=msg=>{
+    // 📦 Los errores de "cuota excedida" son del almacenamiento del navegador (más estricto en
+    // celulares que en computadora), no un bug de la app — la app sigue funcionando normal, solo que
+    // sin guardar copia local en ese dispositivo. Se avisa distinto: más suave, y se puede cerrar,
+    // en vez del aviso rojo permanente que pide mandar captura.
+    if(/quota/i.test(String(msg))){
+      if(document.getElementById("ll-error-cuota"))return;
+      const div=document.createElement("div");
+      div.id="ll-error-cuota";
+      div.style.cssText="position:fixed;bottom:0;left:0;right:0;background:#fff3e0;color:#7a4a00;padding:12px 14px;font-family:sans-serif;font-size:12px;z-index:999999;display:flex;justify-content:space-between;align-items:center;gap:10px;border-top:2px solid #e65100;";
+      div.innerHTML="<span>📦 Este dispositivo tiene poco espacio de almacenamiento libre — la app sigue funcionando normal, solo no guarda copia local aquí. Si quieres, borra el caché/datos del navegador para liberar espacio.</span><button style='background:#e65100;color:#fff;border:none;border-radius:6px;padding:6px 10px;font-weight:700;cursor:pointer;flex-shrink:0' onclick='this.parentElement.remove()'>Cerrar</button>";
+      document.body.appendChild(div);
+      return;
+    }
     if(document.getElementById("ll-error-global"))return; // no duplicar
     const div=document.createElement("div");
     div.id="ll-error-global";
@@ -568,6 +581,9 @@ const msgWa = (v, tipo) => {
     const manchaLinea=v.prendaManchaAviso?`\n${E.item} *Prenda que puede destiñir/manchar declarada:* ${v.prendaManchaObs}\n${L}`:"";
     return `${E.burbuja} *LAVA & LISTO* ${E.burbuja}\n_Lavanderia & Limpieza Especializada_\n${L}\n¡Hola *${v.clienteNombre}*! ${E.saludo}\nTu orden fue *RECIBIDA* ${E.check}\n\n${E.folio} *Folio:* ${v.folio}\n${L}\n*DETALLE DEL SERVICIO:*\n${items}\n${L}${manchaLinea}\n${E.dinero} *Total:* $${(v.total||0).toFixed(2)}\n${pend>0?`${E.reloj} *Saldo pendiente:* $${pend.toFixed(2)}`:`${E.check} *Pagado en su totalidad*`}\n${E.fecha} *Entrega estimada:* ${fmtD(v.entrega)}\n${L}\n¡Gracias por confiar en nosotros! ${E.corazon}\n${E.pin} Ricaurte, Cuenca\n\n_No nos hacemos responsables por daños, manchas o decoloración en su ropa si la información sobre prendas que destiñen o manchan no fue proporcionada correctamente al momento de dejar la orden._`;
   }
+  if(tipo==="entregado"){
+    return `${E.burbuja} *LAVA & LISTO* ${E.burbuja}\n_Lavanderia & Limpieza Especializada_\n${L}\n¡Hola *${v.clienteNombre}*! ${E.corazon}\n\nGracias por retirar tu pedido *${v.folio}* ${E.check}\n${L}\nNos encantaría saber cómo te pareció el servicio. Del 1 al 5, ¿cómo calificarías tu experiencia? ⭐\n\nAl final, tu comentario nos ayuda a perfeccionar nuestro servicio, porque queremos brindarte el mejor de los servicios.\n${L}\n${E.pin} Ricaurte, Cuenca`;
+  }
   // 🧽 Detalle del restregado extra (si se solicitó), para que el cliente vea siempre qué se incluyó o no en su cuenta final
   const rEstado=v.clasificacion?.restregadoEstado;
   const rCosto=v.clasificacion?.restregadoCosto;
@@ -638,10 +654,10 @@ function WhatsAppObligatorio({venta,tipo,onConfirm,onCancel}){
       <div style={S.tbox}>
         <div style={{textAlign:"center",fontSize:36,marginBottom:6}}>{"\u{1F4F2}"}</div>
         <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e",textAlign:"center",marginBottom:4}}>
-          {tipo==="recibido"?"Confirmar orden por WhatsApp":"Avisar: listo para retirar"}
+          {tipo==="recibido"?"Confirmar orden por WhatsApp":tipo==="entregado"?"Pedir calificación al cliente":"Avisar: listo para retirar"}
         </div>
         <div style={{fontSize:12,color:"#888",textAlign:"center",marginBottom:12}}>
-          {tipo==="recibido"?"Paso obligatorio: avisa al cliente que su orden fue recibida.":"Paso obligatorio: avisa al cliente antes de marcar la orden como lista."}
+          {tipo==="recibido"?"Paso obligatorio: avisa al cliente que su orden fue recibida.":tipo==="entregado"?"Pídele al cliente que califique el servicio, para seguir mejorando.":"Paso obligatorio: avisa al cliente antes de marcar la orden como lista."}
         </div>
         <div style={S.trow}><span>Cliente</span><strong>{venta.clienteNombre}</strong></div>
         <div style={S.trow}><span>Folio</span><span>{venta.folio}</span></div>
@@ -1562,6 +1578,7 @@ function TareasScreen({sesion,onVolver,onIrFacturacion,onIrProduccion,onLogout,t
 function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta,clientes,setClientes,upsertCliente,sesion}){
   const [showAb,setShowAb]=useState(false);
   const [waListo,setWaListo]=useState(false);
+  const [waEntregado,setWaEntregado]=useState(false);
   const [showEditCliente,setShowEditCliente]=useState(false);
   const est=getEst(v);const sig=sigEst(v.estado||"recibido");
   const esPag=pagada(v);const pend=saldo(v);
@@ -1569,6 +1586,7 @@ function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta,clientes,setClien
   const cambiar=()=>{
     if(!sig)return;
     if(sig.id==="listo"){setWaListo(true);return;} // WhatsApp obligatorio antes de "listo"
+    if(sig.id==="entregado"){setWaEntregado(true);return;} // Pedir calificación por WhatsApp antes de marcar entregado
     aplicarEstado(sig.id);
   };
   const reenviarWa=tipo=>{
@@ -1635,6 +1653,7 @@ function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta,clientes,setClien
       </div>
       {showAb&&<AbonoModal venta={v} onSave={ab=>{addAbono(v.folio,ab);setShowAb(false);}} onClose={()=>setShowAb(false)}/>}
       {waListo&&<WhatsAppObligatorio venta={v} tipo="listo" onConfirm={info=>{aplicarEstado("listo",{checkMsgRetiro:info.enviado,msgListo:info});setWaListo(false);}} onCancel={()=>setWaListo(false)}/>}
+      {waEntregado&&<WhatsAppObligatorio venta={v} tipo="entregado" onConfirm={info=>{aplicarEstado("entregado",{fechaEntregado:new Date().toISOString(),msgSatisfaccion:info});setWaEntregado(false);}} onCancel={()=>setWaEntregado(false)}/>}
       {showEditCliente&&<EditarClienteModal v={v} clientes={clientes} onGuardar={guardarEdicionCliente} onCancelar={()=>setShowEditCliente(false)}/>}
     </div>
   );
@@ -4896,6 +4915,7 @@ function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertV
   const [showAb,setShowAb]=useState(false);
   const [waListo,setWaListo]=useState(false);
   const [motivoListoManual,setMotivoListoManual]=useState(null); // 🔒 motivo del salto manual a "Listo" sin pasar por Producción
+  const [waEntregado,setWaEntregado]=useState(false);
   const [showNotaCredito,setShowNotaCredito]=useState(false);
   const tieneProductos=(v.items||[]).some(it=>it.esProducto&&it.productoId);
   const confirmarNotaCredito=(devoluciones,motivo)=>{
@@ -4941,6 +4961,7 @@ function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertV
       setWaListo(true);
       return;
     }
+    if(nv==="entregado"&&(v.estado||"recibido")!=="entregado"){setWaEntregado(true);return;} // pedir calificación antes de marcar entregado
     aplicarEstado(nv);
   };
   return(
@@ -5007,6 +5028,7 @@ function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertV
       </div>
       {showAb&&<AbonoModal venta={v} onSave={ab=>{addAbono(v.folio,ab);setShowAb(false);}} onClose={()=>setShowAb(false)}/>}
       {waListo&&<WhatsAppObligatorio venta={v} tipo="listo" onConfirm={info=>{aplicarEstado("listo",{checkMsgRetiro:info.enviado,msgListo:info,...(motivoListoManual?{listoManualMotivo:motivoListoManual,listoManualPor:sesion?.nombre||null,listoManualEn:new Date().toISOString()}:{})});setWaListo(false);setMotivoListoManual(null);}} onCancel={()=>{setWaListo(false);setMotivoListoManual(null);}}/>}
+      {waEntregado&&<WhatsAppObligatorio venta={v} tipo="entregado" onConfirm={info=>{aplicarEstado("entregado",{fechaEntregado:new Date().toISOString(),msgSatisfaccion:info});setWaEntregado(false);}} onCancel={()=>setWaEntregado(false)}/>}
       {showNotaCredito&&<NotaCreditoModal venta={v} productos={productos} onConfirmar={confirmarNotaCredito} onCancelar={()=>setShowNotaCredito(false)}/>}
     </>
   );
@@ -7554,6 +7576,15 @@ function Configuracion({servicios,setServicios,exportarDatos,importarDatos,upser
     </Card>
     <Card title={`📋 Servicios (${activos.length})`}>
       <input style={{...S.inp,marginBottom:10}} placeholder="Buscar..." value={busq} onChange={e=>setBusq(e.target.value)}/>
+      <button style={{...S.btnS,width:"100%",marginBottom:10}} onClick={()=>{
+        const filas=[["Nombre","Precio","Máximo por venta"],...activos.map(s=>[s.label,(s.precio||0).toFixed(2),s.limite||""])];
+        const csv=filas.map(f=>f.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n");
+        const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
+        const a=document.createElement("a");
+        a.href=URL.createObjectURL(blob);
+        a.download="servicios_lavaylisto_"+fechaHoyLocal()+".csv";
+        a.click();
+      }}>📥 Descargar lista de servicios (CSV)</button>
       {fil.map(s=>(<div key={s.id} style={{...S.vcard,padding:"8px 12px"}}>
         {editId===s.id?(
           <div style={{display:"grid",gridTemplateColumns:"1fr auto auto auto",gap:6,alignItems:"center"}}>
@@ -8078,6 +8109,31 @@ export default function LavaListo(){
       }
     }catch{}
   },[]);
+
+  // 🔒 Verificación en tiempo real: si esta usuaria se elimina (o se desactiva) desde el panel de admin,
+  // su sesión activa en CUALQUIER dispositivo se cierra sola, sin esperar a que cierre sesión manualmente.
+  // Antes, la sesión quedaba guardada en el teléfono para siempre aunque se borrara el usuario.
+  useEffect(()=>{
+    if(!ses)return;
+    let unsub=()=>{};
+    (async()=>{
+      try{
+        const{db}=await import("./firebase");
+        if(!db)return;
+        const{collection,onSnapshot}=await import("firebase/firestore");
+        unsub=onSnapshot(collection(db,"usuarios"),snap=>{
+          const propio=snap.docs.find(d=>String(d.id)===String(ses.id));
+          const data=propio?.data();
+          // Si ya no existe el documento, o quedó marcado como eliminada, se cierra la sesión sola
+          if(!propio||data?.eliminada){
+            try{localStorage.removeItem("ll_sesion_activa");}catch{}
+            setSes(null);
+          }
+        },()=>{}); // si falla la conexión, no se hace nada — no se cierra sesión por un error de red
+      }catch{}
+    })();
+    return()=>unsub();
+  },[ses?.id]);
 
   if(!ses)return <ErrorBoundary><LoginScreen onLogin={login}/></ErrorBoundary>;
   return <ErrorBoundary><AppContent key={ses._sesId} sesion={ses} onLogout={logout}/></ErrorBoundary>;
