@@ -7173,6 +7173,86 @@ function saldoVacacionesDe(e,mesSel,rolesPago){
 
 // 📋 OBLIGACIONES — resumen de lo que hay que depositar/pagar: IESS del mes, y lo acumulado de
 // décimos y vacaciones de TODAS las colaboradoras juntas, con sus fechas límite.
+// 🤝 REPARTO DE SOCIAS — Micaela y Natalia no cobran sueldo fijo; cobran solo cuando la utilidad del
+// mes pasa de $500, repartiéndose el excedente 50/50.
+function RepartoSocias({ventas,gastos}){
+  const [mes,setMes]=useState(mesK(new Date()));
+  const UMBRAL=500;
+
+  const valorVenta=v=>calcGanancia(v.items||[],v.costoMartinizingReal);
+  const ventaMes=(ventas||[]).filter(v=>!v.anulada&&mesK(new Date(v.fecha))===mes).reduce((a,v)=>a+valorVenta(v),0);
+  const gastosMes=(gastos||[]).filter(g=>!g.eliminada&&fechaLocal(g.fecha).startsWith(mes)).reduce((a,g)=>a+(g.monto||0),0);
+  const utilidad=ventaMes-gastosMes;
+  const excedente=Math.max(0,utilidad-UMBRAL);
+  const porSocia=excedente/2;
+
+  // 📊 Últimos 6 meses, para ver la tendencia del reparto
+  const historico=[];
+  for(let i=5;i>=0;i--){
+    const d=new Date();d.setDate(1);d.setMonth(d.getMonth()-i);
+    const clave=mesK(d);
+    const vMes=(ventas||[]).filter(v=>!v.anulada&&mesK(new Date(v.fecha))===clave).reduce((a,v)=>a+valorVenta(v),0);
+    const gMes=(gastos||[]).filter(g=>!g.eliminada&&fechaLocal(g.fecha).startsWith(clave)).reduce((a,g)=>a+(g.monto||0),0);
+    const uMes=vMes-gMes;
+    const excMes=Math.max(0,uMes-UMBRAL);
+    historico.push({clave,label:d.toLocaleDateString("es-EC",{month:"short",year:"2-digit"}),utilidad:uMes,excedente:excMes});
+  }
+
+  return(<div style={S.panel}>
+    <h2 style={S.ptitle}>🤝 Reparto de Socias</h2>
+    <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ Micaela y Natalia no cobran sueldo fijo — cobran solo cuando la utilidad del mes supera $500, repartiéndose el excedente 50% y 50%.</div>
+
+    <Card title="📅 Mes">
+      <input type="month" style={S.inp} value={mes} onChange={e=>setMes(e.target.value)}/>
+    </Card>
+
+    <div style={{background:"linear-gradient(135deg,#1a3c5e,#2563a8)",borderRadius:16,padding:20,marginBottom:16,color:"#fff"}}>
+      <div style={{fontSize:12,opacity:0.8,marginBottom:4}}>Utilidad del mes</div>
+      <div style={{fontSize:32,fontWeight:800}}>${utilidad.toFixed(2)}</div>
+      <div style={{display:"flex",justifyContent:"space-between",marginTop:10,fontSize:12,opacity:0.9}}>
+        <span>Umbral: ${UMBRAL.toFixed(2)}</span>
+        <span>{utilidad>=UMBRAL?"✅ Superó el umbral":"⏳ Todavía no llega al umbral"}</span>
+      </div>
+    </div>
+
+    {excedente>0?(
+      <Card title="💰 Excedente a repartir">
+        <div style={{fontSize:13,lineHeight:2}}>
+          <div style={{display:"flex",justifyContent:"space-between"}}><span>Utilidad del mes</span><strong>${utilidad.toFixed(2)}</strong></div>
+          <div style={{display:"flex",justifyContent:"space-between"}}><span>(−) Umbral</span><strong>-${UMBRAL.toFixed(2)}</strong></div>
+          <div style={{display:"flex",justifyContent:"space-between",borderTop:"1px solid #f0f4f8",paddingTop:4,marginTop:2}}><span>Excedente a repartir</span><strong style={{color:"#2e7d32"}}>${excedente.toFixed(2)}</strong></div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:12}}>
+          <div style={{...S.kpi,borderLeft:"4px solid #2e7d32"}}><div style={{fontSize:16}}>👩</div><div><div style={{fontWeight:800,fontSize:16,color:"#2e7d32"}}>${porSocia.toFixed(2)}</div><div style={{fontSize:10,fontWeight:600,color:"#1a3c5e"}}>Micaela (50%)</div></div></div>
+          <div style={{...S.kpi,borderLeft:"4px solid #7b1fa2"}}><div style={{fontSize:16}}>👩</div><div><div style={{fontWeight:800,fontSize:16,color:"#7b1fa2"}}>${porSocia.toFixed(2)}</div><div style={{fontSize:10,fontWeight:600,color:"#1a3c5e"}}>Natalia (50%)</div></div></div>
+        </div>
+      </Card>
+    ):(
+      <Card title="⏳ Todavía no hay excedente">
+        <div style={{fontSize:13,color:"#888"}}>Falta ${(UMBRAL-utilidad).toFixed(2)} para llegar al umbral de ${UMBRAL.toFixed(2)} — ese mes, ni Micaela ni Natalia cobran nada, se deja todo reinvertido en el negocio.</div>
+      </Card>
+    )}
+
+    <Card title="📊 Últimos 6 meses">
+      <div style={{overflowX:"auto"}}>
+        <table style={{width:"100%",fontSize:12,borderCollapse:"collapse"}}>
+          <thead><tr style={{background:"#f0f4f8",textAlign:"left"}}><th style={{padding:"6px 8px"}}>Mes</th><th style={{padding:"6px 8px",textAlign:"right"}}>Utilidad</th><th style={{padding:"6px 8px",textAlign:"right"}}>Excedente</th><th style={{padding:"6px 8px",textAlign:"right"}}>c/u (50%)</th></tr></thead>
+          <tbody>
+            {historico.map((h,i)=>(
+              <tr key={h.clave} style={{borderBottom:"1px solid #f0f4f8",background:i===historico.length-1?"#eaf3fb":"transparent"}}>
+                <td style={{padding:"6px 8px",fontWeight:i===historico.length-1?800:400}}>{h.label}</td>
+                <td style={{padding:"6px 8px",textAlign:"right"}}>${h.utilidad.toFixed(2)}</td>
+                <td style={{padding:"6px 8px",textAlign:"right",color:h.excedente>0?"#2e7d32":"#888",fontWeight:h.excedente>0?700:400}}>${h.excedente.toFixed(2)}</td>
+                <td style={{padding:"6px 8px",textAlign:"right",color:"#2e7d32"}}>${(h.excedente/2).toFixed(2)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  </div>);
+}
+
 function ObligacionesPago({empleadas,rolesPago}){
   const [mes,setMes]=useState(mesK(new Date()));
   const activas=(empleadas||[]).filter(e=>e.activa&&e.recibeSueldo!==false); // solo quien recibe sueldo
@@ -9850,12 +9930,12 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
     {id:"conciliacion",icon:"🏛️",l:"Conciliación"},
     {id:"gastos",icon:"🛒",l:"Gastos"},{id:"martinizingAdmin",icon:"🧴",l:"Martinizing"},{id:"inventario",icon:"📦",l:"Inventario"},{id:"productosAdmin",icon:"🛍️",l:"Productos"},{id:"kardexAdmin",icon:"📒",l:"Kardex"},{id:"conteosAdmin",icon:"📋",l:"Conteos"},{id:"activosFijosAdmin",icon:"📦",l:"Activos Fijos"},{id:"deudasAdmin",icon:"💳",l:"Deudas"},{id:"sorteoAdmin",icon:"🎟️",l:"Sorteo"},
     {id:"equipo",icon:"👩",l:"Equipo"},{id:"incentivosAdmin",icon:"🎯",l:"Incentivos"},{id:"maquinasAdmin",icon:"🏭",l:"Máquinas"},{id:"reporteMaquinasAdmin",icon:"⏱️",l:"Uso de máquinas"},{id:"tiemposRopaAdmin",icon:"👕",l:"Tiempos x Servicio"},{id:"pinsAdmin",icon:"🔒",l:"PINs"},{id:"produccionAdmin",icon:"🧺",l:"Producción"},{id:"tareasAdmin",icon:"📋",l:"Tareas"},{id:"notasAdmin",icon:"📝",l:"Notas"},{id:"evaluacionAdmin",icon:"📋",l:"Evaluación"},{id:"calificacionManualAdmin",icon:"🎧",l:"Calificación manual"},{id:"evaluacionConfigAdmin",icon:"⚙️",l:"Config. Evaluación"},
-    {id:"config",icon:"⚙️",l:"Config"},{id:"usuarios",icon:"🔑",l:"Usuarios"},{id:"rolesPago",icon:"💵",l:"Roles de Pago"},{id:"obligaciones",icon:"📋",l:"Obligaciones"},
+    {id:"config",icon:"⚙️",l:"Config"},{id:"usuarios",icon:"🔑",l:"Usuarios"},{id:"rolesPago",icon:"💵",l:"Roles de Pago"},{id:"obligaciones",icon:"📋",l:"Obligaciones"},{id:"repartoSocias",icon:"🤝",l:"Reparto Socias"},
   ];
   // 🗂️ Agrupa las pestañas en categorías para que el panel admin se vea más ordenado (menos scroll horizontal, todo lo relacionado junto)
   const CATEGORIAS=[
     {id:"ventas_caja",icon:"🧾",l:"Ventas",tabIds:["ventas","historial","pendientes","depositos","conciliacion","cupones","promosAdmin","reportes","resumen","satisfaccionAdmin"]},
-    {id:"personal",icon:"👥",l:"Personal",tabIds:["equipo","pinsAdmin","usuarios","tareasAdmin","notasAdmin","incentivosAdmin","evaluacionAdmin","calificacionManualAdmin","evaluacionConfigAdmin","reporteMaquinasAdmin","tiemposRopaAdmin","rolesPago","obligaciones"]},
+    {id:"personal",icon:"👥",l:"Personal",tabIds:["equipo","pinsAdmin","usuarios","tareasAdmin","notasAdmin","incentivosAdmin","evaluacionAdmin","calificacionManualAdmin","evaluacionConfigAdmin","reporteMaquinasAdmin","tiemposRopaAdmin","rolesPago","obligaciones","repartoSocias"]},
     {id:"inventario_cat",icon:"📦",l:"Inventario",tabIds:["inventario","productosAdmin","kardexAdmin","conteosAdmin","gastos","martinizingAdmin","maquinasAdmin","activosFijosAdmin","deudasAdmin"]},
     {id:"negocio",icon:"📊",l:"Negocio",tabIds:["bi","clientes","clientesAnalisis","sorteoAdmin","produccionAdmin","config"]},
   ];
@@ -9937,6 +10017,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
       {tab==="usuarios"&&<GestionUsuarios/>}
       {tab==="rolesPago"&&<RolesDePago empleadas={empleadas} setEmpleadas={setEmpleadas} upsertEmpleada={upsertEmpleada} ventas={ventas} rolesPago={rolesPago} setRolesPago={setRolesPago} upsertRolPago={upsertRolPago} sesion={sesion}/>}
       {tab==="obligaciones"&&<ObligacionesPago empleadas={empleadas} rolesPago={rolesPago}/>}
+      {tab==="repartoSocias"&&<RepartoSocias ventas={ventas} gastos={gastos}/>}
     </div>
     {ticketV&&<TicketModal venta={ticketV} empleadas={empleadas} onClose={()=>{setCuponSug(ticketV);setTicketV(null);}}/>}
     {cuponSug&&<CuponSugerido venta={cuponSug} clientes={clientes} ventas={ventas} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} sesion={sesion} promos={promos} onClose={()=>setCuponSug(null)}/>}
