@@ -394,7 +394,7 @@ function calcMetaMes(ventas,mesSel){
   if(ult3.length>0){
     const pesos=ult3.length===3?[0.2,0.3,0.5]:ult3.length===2?[0.4,0.6]:[1];
     const prom=ult3.reduce((a,b,i)=>a+b*pesos[i],0);
-    meta=Math.max(10,Math.ceil((prom*1.10)/10)*10);
+    meta=Math.max(10,Math.ceil((prom*1.20)/10)*10); // 🔺 crecimiento exigido subido de 10% a 20%
   }else{
     const proy=(ventaMes/Math.max(1,diaMes))*diasMes;
     meta=Math.max(10,Math.ceil(proy/10)*10);
@@ -7118,13 +7118,30 @@ function MartinizingAdmin({ventas,setVentas,upsertVenta,facturasMartinizing,setF
       return next;
     });
   };
+  const [waListoMartinizing,setWaListoMartinizing]=useState(null); // venta a la que hay que avisar "listo" tras retirar de Martinizing
   const marcarRetirado=folio=>{
+    let ventaActualizada=null;
     setVentas(prev=>{
-      const next=prev.map(v=>v.folio===folio?{...v,martinizingRetiradoEn:{fecha:new Date().toISOString(),empleada:sesion?.nombre||null}}:v);
+      const next=prev.map(v=>{
+        if(v.folio!==folio)return v;
+        ventaActualizada={...v,martinizingRetiradoEn:{fecha:new Date().toISOString(),empleada:sesion?.nombre||null}};
+        return ventaActualizada;
+      });
       const updated=next.find(v=>v.folio===folio);
       if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
       return next;
     });
+    // 🔔 Ya está lista para retirar — se pide avisar al cliente por WhatsApp, igual que en el resto del sistema
+    setWaListoMartinizing(ventaActualizada);
+  };
+  const confirmarListoMartinizing=info=>{
+    setVentas(prev=>{
+      const next=prev.map(v=>v.folio===waListoMartinizing.folio?{...v,estado:"listo",checkMsgRetiro:info.enviado,msgListo:info}:v);
+      const updated=next.find(v=>v.folio===waListoMartinizing.folio);
+      if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
+      return next;
+    });
+    setWaListoMartinizing(null);
   };
 
   // 📋 Órdenes con lavado en seco YA RETIRADAS de Martinizing, que todavía no tienen su factura real registrada
@@ -7289,6 +7306,7 @@ function MartinizingAdmin({ventas,setVentas,upsertVenta,facturasMartinizing,setF
       </Card>
     )}
     </>)}
+    {waListoMartinizing&&<WhatsAppObligatorio venta={waListoMartinizing} tipo="listo" onConfirm={confirmarListoMartinizing} onCancel={()=>setWaListoMartinizing(null)}/>}
   </div>);
 }
 
@@ -7461,6 +7479,51 @@ function AnalisisClientes({clientes,ventas}){
   const variacionVentas=mesAnteriorComp&&mesAnteriorComp.totalVentas>0?((mesActualComp.totalVentas-mesAnteriorComp.totalVentas)/mesAnteriorComp.totalVentas)*100:null;
   const variacionNuevos=mesAnteriorComp&&mesAnteriorComp.nNuevos>0?((mesActualComp.nNuevos-mesAnteriorComp.nNuevos)/mesAnteriorComp.nNuevos)*100:null;
 
+  // 🧾 Comparativo POR SERVICIO, mismos 6 meses — para ver qué servicio va creciendo y cuál no
+  const clavesMeses=mesesComparativa.map(m=>m.clave);
+  const serviciosTotales={}; // {nombreServicio: totalHistorico} — para elegir los más relevantes
+  (ventas||[]).forEach(v=>{
+    if(v.anulada)return;
+    (v.items||[]).forEach(it=>{serviciosTotales[it.label]=(serviciosTotales[it.label]||0)+(it.precio||0)*(it.piezas||1);});
+  });
+  const topServicios=Object.entries(serviciosTotales).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([nombre])=>nombre);
+  const comparativoPorServicio=topServicios.map(nombre=>{
+    const porMes=clavesMeses.map(clave=>{
+      let total=0;
+      (ventas||[]).forEach(v=>{
+        if(v.anulada||mesK(new Date(v.fecha))!==clave)return;
+        (v.items||[]).forEach(it=>{if(it.label===nombre)total+=(it.precio||0)*(it.piezas||1);});
+      });
+      return total;
+    });
+    return{nombre,porMes};
+  });
+
+  // ⏰ Ventas por hora del día (todas las órdenes registradas, histórico completo) — para ver qué horas
+  // están más libres y cuánto se vende dentro del nuevo horario ampliado de 7am-9am.
+  const ventasPorHora=Array.from({length:24},()=>({cantidad:0,total:0}));
+  (ventas||[]).forEach(v=>{
+    if(v.anulada)return;
+    const h=new Date(v.fecha).getHours();
+    ventasPorHora[h].cantidad++;
+    ventasPorHora[h].total+=calcGanancia(v.items||[],v.costoMartinizingReal);
+  });
+  const totalVentasHist=ventasPorHora.reduce((a,h)=>a+h.cantidad,0);
+  const horaMasLibre=ventasPorHora.map((h,i)=>({...h,hora:i})).filter(h=>h.hora>=9&&h.hora<20).sort((a,b)=>a.cantidad-b.cantidad)[0]; // solo dentro de horario de atención habitual
+  const ventas7a9=ventasPorHora[7].cantidad+ventasPorHora[8].cantidad;
+  const totalDinero7a9=ventasPorHora[7].total+ventasPorHora[8].total;
+
+  // 🏆 Servicio más vendido de CADA mes (no un top fijo — puede cambiar mes a mes)
+  const topServicioPorMes=mesesComparativa.map(m=>{
+    const totalesDelMes={};
+    (ventas||[]).forEach(v=>{
+      if(v.anulada||mesK(new Date(v.fecha))!==m.clave)return;
+      (v.items||[]).forEach(it=>{totalesDelMes[it.label]=(totalesDelMes[it.label]||0)+(it.precio||0)*(it.piezas||1);});
+    });
+    const top=Object.entries(totalesDelMes).sort((a,b)=>b[1]-a[1])[0];
+    return{mes:m.label,servicio:top?top[0]:null,monto:top?top[1]:0};
+  });
+
   // 🤖 "Análisis inteligente" — texto interpretativo generado con reglas de negocio (sin costo de IA externa)
   const insights=[];
   if(tasaRetencion!==null){
@@ -7579,6 +7642,64 @@ function AnalisisClientes({clientes,ventas}){
         </table>
       </div>
       {variacionVentas!==null&&<div style={{fontSize:11,color:"#888",marginTop:10,textAlign:"center"}}>Variación vs mes anterior: <strong style={{color:variacionVentas>=0?"#2e7d32":"#c62828"}}>{variacionVentas>=0?"+":""}{variacionVentas.toFixed(1)}%</strong></div>}
+    </Card>
+
+    <Card title="🧾 Comparativo por servicio (mismos 6 meses)">
+      <div style={{overflowX:"auto"}}>
+        <table style={{width:"100%",fontSize:11,borderCollapse:"collapse"}}>
+          <thead>
+            <tr style={{background:"#f0f4f8",textAlign:"left"}}>
+              <th style={{padding:"6px 8px",position:"sticky",left:0,background:"#f0f4f8"}}>Servicio</th>
+              {mesesComparativa.map(m=><th key={m.clave} style={{padding:"6px 8px",textAlign:"right",whiteSpace:"nowrap"}}>{m.label}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {comparativoPorServicio.map(s=>(
+              <tr key={s.nombre} style={{borderBottom:"1px solid #f0f4f8"}}>
+                <td style={{padding:"6px 8px",fontWeight:600,color:"#1a3c5e",position:"sticky",left:0,background:"#fff",maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.nombre}</td>
+                {s.porMes.map((v,i)=>(
+                  <td key={i} style={{padding:"6px 8px",textAlign:"right",color:i===s.porMes.length-1?"#2e7d32":"#888",fontWeight:i===s.porMes.length-1?700:400}}>${v.toFixed(0)}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div style={{fontSize:10,color:"#888",marginTop:8}}>Los 8 servicios con más ventas históricas — para ver cuál va creciendo y cuál no, mes a mes.</div>
+    </Card>
+
+    <Card title="🏆 Servicio más vendido de cada mes">
+      {topServicioPorMes.map((m,i)=>(
+        <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:i<topServicioPorMes.length-1?"1px solid #f0f4f8":"none"}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#1a3c5e",width:50,flexShrink:0}}>{m.mes}</div>
+          <div style={{fontSize:12,color:"#555",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{m.servicio||"—"}</div>
+          <strong style={{fontSize:12,color:"#2e7d32",flexShrink:0,marginLeft:8}}>${m.monto.toFixed(0)}</strong>
+        </div>
+      ))}
+      <div style={{fontSize:10,color:"#888",marginTop:8}}>El servicio que más facturó cada mes — puede cambiar de un mes a otro (no es una lista fija).</div>
+    </Card>
+
+    <Card title="⏰ Ventas por hora del día (histórico completo)">
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
+        <div style={{...S.kpi,borderLeft:"4px solid #2e7d32",gridColumn:"1/-1"}}><div style={{fontSize:18}}>🌅</div><div><div style={{fontWeight:800,fontSize:16,color:"#2e7d32"}}>${totalDinero7a9.toFixed(2)}</div><div style={{fontSize:10,fontWeight:600,color:"#1a3c5e"}}>Vendido entre 7am y 9am ({ventas7a9} ventas) — el horario nuevo</div></div></div>
+        {horaMasLibre&&<div style={{...S.kpi,borderLeft:"4px solid #e65100",gridColumn:"1/-1"}}><div style={{fontSize:18}}>😴</div><div><div style={{fontWeight:800,fontSize:16,color:"#e65100"}}>{horaMasLibre.hora}:00 - {horaMasLibre.hora+1}:00</div><div style={{fontSize:10,fontWeight:600,color:"#1a3c5e"}}>La hora más libre dentro del horario habitual (9am-8pm) — solo {horaMasLibre.cantidad} venta{horaMasLibre.cantidad!==1?"s":""} registradas ahí en todo el histórico</div></div></div>}
+      </div>
+      <div style={{overflowX:"auto"}}>
+        <div style={{display:"flex",alignItems:"flex-end",gap:2,height:100,minWidth:480}}>
+          {ventasPorHora.map((h,hora)=>{
+            const maxCant=Math.max(1,...ventasPorHora.map(x=>x.cantidad));
+            const alto=Math.max(2,(h.cantidad/maxCant)*90);
+            const esNueva=hora===7||hora===8;
+            return(
+              <div key={hora} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-end",height:"100%"}}>
+                <div title={`${hora}:00 — ${h.cantidad} venta(s)`} style={{width:"100%",height:alto,background:esNueva?"#2e7d32":h.cantidad===0?"#f0f4f8":"#4db6e4",borderRadius:"3px 3px 0 0"}}/>
+                <div style={{fontSize:8,color:esNueva?"#2e7d32":"#aaa",fontWeight:esNueva?800:400,marginTop:2}}>{hora}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      <div style={{fontSize:10,color:"#888",marginTop:8}}>Cada barra es una hora del día (0-23), la altura es cuántas órdenes se registraron ahí en todo el histórico. En verde: el horario nuevo de 7am-9am.</div>
     </Card>
 
     <div style={{fontSize:13,fontWeight:700,color:"#1a3c5e",marginBottom:8}}>📈 Clientes nuevos por período</div>
@@ -8884,8 +9005,8 @@ function DashboardBI({ventas,empleadas,gastos}){
     // Ponderado: el mes más reciente pesa más (50/30/20) — refleja mejor la tendencia real
     const pesos=ult3.length===3?[0.2,0.3,0.5]:ult3.length===2?[0.4,0.6]:[1];
     const prom=ult3.reduce((a,b,i)=>a+b*pesos[i],0);
-    meta=Math.max(10,Math.ceil((prom*1.10)/10)*10);
-    origenMeta=`Promedio ponderado de ${ult3.length} mes${ult3.length>1?"es":""} (los recientes pesan más: $${prom.toFixed(0)}) + 10% de crecimiento`;
+    meta=Math.max(10,Math.ceil((prom*1.20)/10)*10); // 🔺 crecimiento exigido subido de 10% a 20%
+    origenMeta=`Promedio ponderado de ${ult3.length} mes${ult3.length>1?"es":""} (los recientes pesan más: $${prom.toFixed(0)}) + 20% de crecimiento`;
   }else{
     const proy=(ventaMes/Math.max(1,diasTranscurridos))*diasMes;
     meta=Math.max(10,Math.ceil(proy/10)*10);
