@@ -5695,7 +5695,7 @@ function Equipo({empleadas,setEmpleadas,ventas,esAdmin,upsertEmpleada}){
   const mes=mesK(new Date());
   const add=()=>{if(!nv.nombre.trim())return;const ne={id:Date.now(),nombre:nv.nombre,activa:true,metaVentas:parseInt(nv.metaVentas)||20,montoBonus:parseFloat(nv.montoBonus)||0,bonoGrupal:!!nv.bonoGrupal,rolFuncional:nv.rolFuncional||"general"};setEmpleadas(prev=>[...prev,ne]);if(upsertEmpleada)upsertEmpleada({...ne,_updatedAt:new Date().toISOString()});setNv({nombre:"",metaVentas:20,montoBonus:20,bonoGrupal:false,rolFuncional:"general"});};
   const tog=id=>setEmpleadas(prev=>{const next=prev.map(e=>e.id===id?{...e,activa:!e.activa}:e);const updated=next.find(e=>e.id===id);if(updated&&upsertEmpleada)upsertEmpleada({...updated,_updatedAt:new Date().toISOString()});return next;});
-  const save2=()=>{setEmpleadas(prev=>{const next=prev.map(e=>e.id===editId?{...e,...ed,metaVentas:parseInt(ed.metaVentas)||20,montoBonus:parseFloat(ed.montoBonus)||0,bonoGrupal:!!ed.bonoGrupal,rolFuncional:ed.rolFuncional||"general"}:e);const updated=next.find(e=>e.id===editId);if(updated&&upsertEmpleada)upsertEmpleada({...updated,_updatedAt:new Date().toISOString()});return next;});setEditId(null);};
+  const save2=()=>{setEmpleadas(prev=>{const next=prev.map(e=>e.id===editId?{...e,...ed,metaVentas:parseInt(ed.metaVentas)||20,montoBonus:parseFloat(ed.montoBonus)||0,bonoGrupal:!!ed.bonoGrupal,rolFuncional:ed.rolFuncional||"general",remuneracion:ed.remuneracion!=null&&ed.remuneracion!==""?parseFloat(ed.remuneracion):482}:e);const updated=next.find(e=>e.id===editId);if(updated&&upsertEmpleada)upsertEmpleada({...updated,_updatedAt:new Date().toISOString()});return next;});setEditId(null);};
   const stats=empleadas.map(e=>{const mv=ventas.filter(v=>v.empleadaId===e.id&&mesK(v.fecha)===mes);return{...e,vm:mv.length,tm:mv.reduce((a,v)=>a+calcGanancia(v.items||[],v.costoMartinizingReal),0)};});
   return(<div style={S.panel}>
     <h2 style={S.ptitle}>👩 Equipo & Bonos</h2>
@@ -5724,6 +5724,10 @@ function Equipo({empleadas,setEmpleadas,ventas,esAdmin,upsertEmpleada}){
                 <div style={{marginTop:8}}>
                   <label style={S.lbl}>Hora esperada de entrada al turno (para Evaluación de Desempeño)</label>
                   <input type="time" style={S.inp} value={ed.horaEntradaEsperada||"09:00"} onChange={ev=>setEd({...ed,horaEntradaEsperada:ev.target.value})}/>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:8}}>
+                  <div><label style={S.lbl}>Remuneración mensual (para Rol de Pagos)</label><input type="number" step="0.01" style={S.inp} placeholder="482.00" value={ed.remuneracion||""} onChange={ev=>setEd({...ed,remuneracion:ev.target.value})}/></div>
+                  <div><label style={S.lbl}>Fecha de ingreso (para Fondo de Reserva)</label><input type="date" style={S.inp} value={ed.fechaIngreso||""} onChange={ev=>setEd({...ed,fechaIngreso:ev.target.value})}/></div>
                 </div>
               </div>
               <div style={{display:"flex",gap:8}}><button style={{...S.btnP,flex:1}} onClick={save2}>✓ Guardar</button><button style={S.btnC} onClick={()=>setEditId(null)}>Cancelar</button></div>
@@ -7083,6 +7087,216 @@ function SatisfaccionClientes({ventas,setVentas,upsertVenta}){
         </div>
       ))}
     </Card>
+  </div>);
+}
+
+// 💵 ROLES DE PAGO — calcula IESS (personal y patronal), fondo de reserva, provisión de décimos y
+// vacaciones para cada colaboradora, mes a mes, según las tasas vigentes 2026 en Ecuador.
+// 💵 Constantes y fórmulas de nómina Ecuador 2026 — reutilizables entre Roles de Pago y Obligaciones
+const TASA_IESS_PERSONAL=0.0945, TASA_IESS_PATRONAL=0.1115, TASA_FONDO_RESERVA=0.0833, SBU_2026=482;
+const periodoDecimo3=mesSel=>{const [y,m]=mesSel.split("-").map(Number);const inicioAnio=m===12?y:y-1;return{inicio:`${inicioAnio}-12`,finAnio:inicioAnio+1,pagoHasta:`24 dic ${inicioAnio+1}`};};
+const periodoDecimo4=mesSel=>{const [y,m]=mesSel.split("-").map(Number);const inicioAnio=m>=8?y:y-1;return{inicio:`${inicioAnio}-08`,finAnio:inicioAnio+1,pagoHasta:`15 ago ${inicioAnio+1}`};};
+const mesesDelPeriodo=inicioClave=>{const [y0,m0]=inicioClave.split("-").map(Number);const arr=[];let y=y0,m=m0;for(let i=0;i<12;i++){arr.push(`${y}-${String(m).padStart(2,"0")}`);m++;if(m>12){m=1;y++;}}return arr;};
+function calcularRolDePago(e,mesSel,rolesPago){
+  const remuneracion=e.remuneracion!=null?parseFloat(e.remuneracion):SBU_2026;
+  const guardado=(rolesPago||[]).find(r=>String(r.empleadaId)===String(e.id)&&r.mes===mesSel);
+  const horasSupl=guardado?.horasSupl||0;
+  const horasExtra=guardado?.horasExtra||0;
+  const valorHora=remuneracion/240;
+  const pagoSupl=horasSupl*valorHora*1.5;
+  const pagoExtra=horasExtra*valorHora*2.0;
+  const ingresosGravables=remuneracion+pagoSupl+pagoExtra;
+  const iessPersonal=ingresosGravables*TASA_IESS_PERSONAL;
+  const iessPatronal=ingresosGravables*TASA_IESS_PATRONAL;
+  // Fondo de reserva: obligatorio solo después de 1 año continuo trabajando
+  const tieneUnAnio=e.fechaIngreso&&(new Date(mesSel+"-01")-new Date(e.fechaIngreso))/(1000*60*60*24*365)>=1;
+  const fondoReserva=tieneUnAnio?ingresosGravables*TASA_FONDO_RESERVA:0;
+  const provisionDecimo3=ingresosGravables/12;
+  const provisionDecimo4=SBU_2026/12;
+  const provisionVacaciones=remuneracion/24;
+  const netoAPagar=remuneracion+pagoSupl+pagoExtra+fondoReserva-iessPersonal;
+  const costoEmpresa=remuneracion+pagoSupl+pagoExtra+iessPatronal+fondoReserva+provisionDecimo3+provisionDecimo4+provisionVacaciones;
+  return{remuneracion,horasSupl,horasExtra,valorHora,pagoSupl,pagoExtra,ingresosGravables,iessPersonal,iessPatronal,tieneUnAnio,fondoReserva,provisionDecimo3,provisionDecimo4,provisionVacaciones,netoAPagar,costoEmpresa};
+}
+// 📊 Acumulado de décimo tercero o cuarto del período en curso, sumando mes a mes lo que ya se registró
+function acumuladoDecimoDe(e,mesSel,rolesPago,tipo){ // tipo: 3 | 4
+  const periodo=tipo===3?periodoDecimo3(mesSel):periodoDecimo4(mesSel);
+  const meses=mesesDelPeriodo(periodo.inicio);
+  let total=0;
+  meses.forEach(m=>{const r=calcularRolDePago(e,m,rolesPago);total+=tipo===3?r.provisionDecimo3:r.provisionDecimo4;});
+  return{total,periodo};
+}
+
+// 📋 OBLIGACIONES — resumen de lo que hay que depositar/pagar: IESS del mes, y lo acumulado de
+// décimos y vacaciones de TODAS las colaboradoras juntas, con sus fechas límite.
+function ObligacionesPago({empleadas,rolesPago}){
+  const [mes,setMes]=useState(mesK(new Date()));
+  const activas=(empleadas||[]).filter(e=>e.activa);
+
+  const filas=activas.map(e=>{
+    const r=calcularRolDePago(e,mes,rolesPago);
+    const d3=acumuladoDecimoDe(e,mes,rolesPago,3);
+    const d4=acumuladoDecimoDe(e,mes,rolesPago,4);
+    return{nombre:e.nombre,...r,decimo3Acum:d3.total,periodo3:d3.periodo,decimo4Acum:d4.total,periodo4:d4.periodo};
+  });
+
+  const totalIessPersonal=filas.reduce((a,f)=>a+f.iessPersonal,0);
+  const totalIessPatronal=filas.reduce((a,f)=>a+f.iessPatronal,0);
+  const totalFondoReserva=filas.reduce((a,f)=>a+f.fondoReserva,0);
+  const totalDecimo3=filas.reduce((a,f)=>a+f.decimo3Acum,0);
+  const totalDecimo4=filas.reduce((a,f)=>a+f.decimo4Acum,0);
+  const totalVacaciones=filas.reduce((a,f)=>a+f.provisionVacaciones,0);
+  const periodo3=filas[0]?.periodo3,periodo4=filas[0]?.periodo4;
+
+  return(<div style={S.panel}>
+    <h2 style={S.ptitle}>📋 Obligaciones — IESS, Décimos y Vacaciones</h2>
+    <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ Lo que se debe depositar/pagar, sumando a todas las colaboradoras activas. El IESS se paga cada mes; los décimos en su fecha única (24 dic / 15 ago); las vacaciones se acumulan como derecho hasta que alguien las tome.</div>
+
+    <Card title="📅 Mes de referencia">
+      <input type="month" style={S.inp} value={mes} onChange={e=>setMes(e.target.value)}/>
+    </Card>
+
+    <Card title="🏦 IESS a depositar este mes">
+      <div style={{fontSize:13,lineHeight:2}}>
+        <div style={{display:"flex",justifyContent:"space-between"}}><span>Aporte personal (9.45%, descontado a las colaboradoras)</span><strong>${totalIessPersonal.toFixed(2)}</strong></div>
+        <div style={{display:"flex",justifyContent:"space-between"}}><span>Aporte patronal (11.15%, lo pone la empresa)</span><strong>${totalIessPatronal.toFixed(2)}</strong></div>
+        {totalFondoReserva>0&&<div style={{display:"flex",justifyContent:"space-between"}}><span>Fondo de Reserva (8.33%)</span><strong>${totalFondoReserva.toFixed(2)}</strong></div>}
+        <div style={{display:"flex",justifyContent:"space-between",borderTop:"1.5px solid #1a3c5e",paddingTop:6,marginTop:4,fontSize:15}}><strong style={{color:"#1a3c5e"}}>TOTAL a depositar al IESS</strong><strong style={{color:"#c62828"}}>${(totalIessPersonal+totalIessPatronal+totalFondoReserva).toFixed(2)}</strong></div>
+      </div>
+    </Card>
+
+    <Card title={`🎁 Décimo tercero — acumulado (período dic-nov, pago hasta ${periodo3?.pagoHasta||"—"})`}>
+      {filas.map(f=>(<div key={f.nombre} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"5px 0",borderBottom:"1px solid #f0f4f8"}}><span>{f.nombre}</span><strong>${f.decimo3Acum.toFixed(2)}</strong></div>))}
+      <div style={{display:"flex",justifyContent:"space-between",fontSize:15,paddingTop:8,marginTop:4,borderTop:"1.5px solid #1a3c5e"}}><strong style={{color:"#1a3c5e"}}>TOTAL a depositar</strong><strong style={{color:"#2e7d32"}}>${totalDecimo3.toFixed(2)}</strong></div>
+    </Card>
+
+    <Card title={`🎒 Décimo cuarto — acumulado (período ago-jul, pago hasta ${periodo4?.pagoHasta||"—"})`}>
+      {filas.map(f=>(<div key={f.nombre} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"5px 0",borderBottom:"1px solid #f0f4f8"}}><span>{f.nombre}</span><strong>${f.decimo4Acum.toFixed(2)}</strong></div>))}
+      <div style={{display:"flex",justifyContent:"space-between",fontSize:15,paddingTop:8,marginTop:4,borderTop:"1.5px solid #1a3c5e"}}><strong style={{color:"#1a3c5e"}}>TOTAL a depositar</strong><strong style={{color:"#2e7d32"}}>${totalDecimo4.toFixed(2)}</strong></div>
+    </Card>
+
+    <Card title="🏖️ Vacaciones — provisión acumulada del mes">
+      {filas.map(f=>(<div key={f.nombre} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"5px 0",borderBottom:"1px solid #f0f4f8"}}><span>{f.nombre}</span><strong>${f.provisionVacaciones.toFixed(2)}/mes</strong></div>))}
+      <div style={{display:"flex",justifyContent:"space-between",fontSize:15,paddingTop:8,marginTop:4,borderTop:"1.5px solid #1a3c5e"}}><strong style={{color:"#1a3c5e"}}>TOTAL provisión mensual</strong><strong style={{color:"#2e7d32"}}>${totalVacaciones.toFixed(2)}</strong></div>
+      <div style={{fontSize:10,color:"#888",marginTop:6}}>Las vacaciones no se "pagan" cada mes — se acumulan como derecho (15 días al año) hasta que la colaboradora las tome, ahí se le paga lo acumulado.</div>
+    </Card>
+  </div>);
+}
+
+function RolesDePago({empleadas,ventas,rolesPago,setRolesPago,upsertRolPago,sesion}){
+  const [mes,setMes]=useState(mesK(new Date()));
+  const [horasEd,setHorasEd]=useState({}); // {empleadaId: {supl, extra}} — borrador antes de guardar
+
+  const rolDe=(empId,mesSel)=>(rolesPago||[]).find(r=>String(r.empleadaId)===String(empId)&&r.mes===mesSel);
+  const activas=(empleadas||[]).filter(e=>e.activa);
+  const calcularRol=(e,mesSel)=>calcularRolDePago(e,mesSel,rolesPago);
+
+  const guardarHoras=e=>{
+    const draft=horasEd[e.id]||{};
+    const entry={id:e.id+"_"+mes,empleadaId:e.id,mes,horasSupl:parseFloat(draft.supl)||0,horasExtra:parseFloat(draft.extra)||0,registradoPor:sesion?.nombre||null};
+    setRolesPago(prev=>{const existe=prev.some(r=>r.id===entry.id);return existe?prev.map(r=>r.id===entry.id?entry:r):[entry,...prev];});
+    if(upsertRolPago)upsertRolPago({...entry,_updatedAt:new Date().toISOString()});
+  };
+
+  const totales=activas.reduce((acc,e)=>{
+    const r=calcularRol(e,mes);
+    acc.neto+=r.netoAPagar;acc.costo+=r.costoEmpresa;acc.iessPersonal+=r.iessPersonal;acc.iessPatronal+=r.iessPatronal;
+    return acc;
+  },{neto:0,costo:0,iessPersonal:0,iessPatronal:0});
+
+  const exportarCSV=()=>{
+    const enc=["Colaboradora","Remuneración","Hrs. Suplementarias","Pago Supl.","Hrs. Extraordinarias","Pago Extra","Ingresos Gravables","IESS Personal (9.45%)","IESS Patronal (11.15%)","Fondo Reserva (8.33%)","Provisión Décimo 3°","Provisión Décimo 4°","Provisión Vacaciones","NETO A PAGAR","COSTO EMPRESA"];
+    const filas=activas.map(e=>{const r=calcularRol(e,mes);return[e.nombre,r.remuneracion.toFixed(2),r.horasSupl,r.pagoSupl.toFixed(2),r.horasExtra,r.pagoExtra.toFixed(2),r.ingresosGravables.toFixed(2),r.iessPersonal.toFixed(2),r.iessPatronal.toFixed(2),r.fondoReserva.toFixed(2),r.provisionDecimo3.toFixed(2),r.provisionDecimo4.toFixed(2),r.provisionVacaciones.toFixed(2),r.netoAPagar.toFixed(2),r.costoEmpresa.toFixed(2)];});
+    const csv=[enc,...filas].map(f=>f.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(",")).join("\n");
+    const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
+    const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="rol_de_pagos_"+mes+".csv";a.click();
+  };
+
+  // 🖨️ Rol de pago individual, listo para imprimir y firmar
+  const imprimirRol=e=>{
+    const r=calcularRol(e,mes);
+    const w=window.open("","_blank","width=800,height=1000");
+    if(!w)return;
+    const fila=(label,valor,esNegativo)=>`<tr><td style="padding:6px 8px;border-bottom:1px solid #eee">${label}</td><td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-weight:600;${esNegativo?"color:#c62828":""}">${esNegativo?"-":""}$${Math.abs(valor).toFixed(2)}</td></tr>`;
+    const html=`<html><head><meta charset="UTF-8"><title>Rol de pago</title><style>body{font-family:sans-serif;padding:24px;color:#1a3c5e}table{width:100%;border-collapse:collapse;margin-top:10px}th{background:#1a3c5e;color:#fff;padding:6px 8px;text-align:left}</style></head><body>
+      <div style="text-align:center;margin-bottom:14px"><div style="font-size:22px;font-weight:800">🫧 Lava&Listo</div><div style="font-size:12px;color:#888">Rol de pago individual</div></div>
+      <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:10px"><div><strong>Colaboradora:</strong> ${e.nombre}</div><div><strong>Mes:</strong> ${mes}</div></div>
+      <table>
+        <tr><th colspan="2">INGRESOS</th></tr>
+        ${fila("Remuneración mensual",r.remuneracion)}
+        ${r.horasSupl>0?fila(`Horas suplementarias (${r.horasSupl}h · +50%)`,r.pagoSupl):""}
+        ${r.horasExtra>0?fila(`Horas extraordinarias (${r.horasExtra}h · +100%)`,r.pagoExtra):""}
+        ${r.fondoReserva>0?fila("Fondo de Reserva (8.33%)",r.fondoReserva):""}
+        <tr><th colspan="2">DEDUCCIONES</th></tr>
+        ${fila("Aporte personal IESS (9.45%)",r.iessPersonal,true)}
+        <tr><td style="padding:10px 8px;font-weight:800;font-size:15px;border-top:2px solid #1a3c5e">NETO A RECIBIR</td><td style="padding:10px 8px;text-align:right;font-weight:800;font-size:15px;border-top:2px solid #1a3c5e;color:#2e7d32">$${r.netoAPagar.toFixed(2)}</td></tr>
+      </table>
+      <div style="margin-top:10px;font-size:11px;color:#888">Provisiones informativas (no se pagan este mes): Décimo tercero $${r.provisionDecimo3.toFixed(2)} · Décimo cuarto $${r.provisionDecimo4.toFixed(2)} · Vacaciones $${r.provisionVacaciones.toFixed(2)}</div>
+      <div style="margin-top:70px;display:flex;justify-content:space-between;font-size:12px">
+        <div style="text-align:center;width:45%"><div style="border-top:1px solid #333;padding-top:6px">Firma colaboradora</div></div>
+        <div style="text-align:center;width:45%"><div style="border-top:1px solid #333;padding-top:6px">Firma Lava&Listo</div></div>
+      </div>
+      <scr${""}ipt>window.print();</scr${""}ipt>
+    </body></html>`;
+    w.document.write(html);
+    w.document.close();
+  };
+
+  return(<div style={S.panel}>
+    <h2 style={S.ptitle}>💵 Roles de Pago</h2>
+    <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ Tasas vigentes Ecuador 2026 — IESS personal 9.45%, IESS patronal 11.15%, Fondo de Reserva 8.33% (solo tras 1 año trabajando). Décimos y vacaciones se muestran como provisión mensual; los décimos se pagan en fecha única (24 dic el tercero, 15 ago el cuarto — régimen Sierra).</div>
+
+    <Card title="📅 Mes">
+      <input type="month" style={S.inp} value={mes} onChange={e=>setMes(e.target.value)}/>
+    </Card>
+
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16}}>
+      <div style={{...S.kpi,borderLeft:"4px solid #2e7d32"}}><div style={{fontSize:18}}>💰</div><div><div style={{fontWeight:800,fontSize:15,color:"#2e7d32"}}>${totales.neto.toFixed(2)}</div><div style={{fontSize:10,fontWeight:600,color:"#1a3c5e"}}>Total neto a pagar (todas)</div></div></div>
+      <div style={{...S.kpi,borderLeft:"4px solid #c62828"}}><div style={{fontSize:18}}>🏢</div><div><div style={{fontWeight:800,fontSize:15,color:"#c62828"}}>${totales.costo.toFixed(2)}</div><div style={{fontSize:10,fontWeight:600,color:"#1a3c5e"}}>Costo total para la empresa</div></div></div>
+      <div style={{...S.kpi,borderLeft:"4px solid #1565c0",gridColumn:"1/-1"}}><div style={{fontSize:18}}>🏦</div><div><div style={{fontWeight:800,fontSize:15,color:"#1565c0"}}>${(totales.iessPersonal+totales.iessPatronal).toFixed(2)}</div><div style={{fontSize:10,fontWeight:600,color:"#1a3c5e"}}>Total a pagar al IESS este mes (personal ${totales.iessPersonal.toFixed(2)} + patronal ${totales.iessPatronal.toFixed(2)})</div></div></div>
+    </div>
+
+    <button style={{...S.btnP,width:"100%",marginBottom:16}} onClick={exportarCSV}>📥 Descargar rol de pagos del mes (CSV)</button>
+
+    {activas.map(e=>{
+      const r=calcularRol(e,mes);
+      const d3=acumuladoDecimoDe(e,mes,rolesPago,3);
+      const d4=acumuladoDecimoDe(e,mes,rolesPago,4);
+      return(
+        <Card key={e.id} title={`👩 ${e.nombre}`}>
+          <div style={{fontSize:11,color:"#888",marginBottom:8}}>Remuneración: ${r.remuneracion.toFixed(2)} {!e.fechaIngreso&&<span style={{color:"#e65100"}}>· ⚠️ Falta fecha de ingreso (ve a Equipo para agregarla — afecta el Fondo de Reserva)</span>}</div>
+
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:8}}>
+            <div><label style={S.lbl}>Hrs. suplementarias (+50%)</label><input type="number" min="0" style={S.inp} placeholder="0" value={horasEd[e.id]?.supl??r.horasSupl}onChange={ev=>setHorasEd({...horasEd,[e.id]:{...horasEd[e.id],supl:ev.target.value}})}/></div>
+            <div><label style={S.lbl}>Hrs. extraordinarias (+100%)</label><input type="number" min="0" style={S.inp} placeholder="0" value={horasEd[e.id]?.extra??r.horasExtra} onChange={ev=>setHorasEd({...horasEd,[e.id]:{...horasEd[e.id],extra:ev.target.value}})}/></div>
+            <div style={{display:"flex",alignItems:"flex-end"}}><button style={{...S.btnS,width:"100%",background:"#1a3c5e",color:"#fff"}} onClick={()=>guardarHoras(e)}>💾 Guardar</button></div>
+          </div>
+
+          <div style={{fontSize:12,lineHeight:1.8}}>
+            <div style={{display:"flex",justifyContent:"space-between"}}><span>Pago hrs. suplementarias</span><strong>${r.pagoSupl.toFixed(2)}</strong></div>
+            <div style={{display:"flex",justifyContent:"space-between"}}><span>Pago hrs. extraordinarias</span><strong>${r.pagoExtra.toFixed(2)}</strong></div>
+            <div style={{display:"flex",justifyContent:"space-between",borderTop:"1px solid #f0f4f8",paddingTop:4,marginTop:2}}><span>Ingresos gravables</span><strong>${r.ingresosGravables.toFixed(2)}</strong></div>
+            <div style={{display:"flex",justifyContent:"space-between",color:"#c62828"}}><span>(−) IESS personal (9.45%)</span><strong>-${r.iessPersonal.toFixed(2)}</strong></div>
+            {r.fondoReserva>0&&<div style={{display:"flex",justifyContent:"space-between",color:"#2e7d32"}}><span>(+) Fondo de Reserva (8.33%)</span><strong>+${r.fondoReserva.toFixed(2)}</strong></div>}
+            <div style={{display:"flex",justifyContent:"space-between",borderTop:"1.5px solid #1a3c5e",paddingTop:4,marginTop:4,fontSize:14}}><span style={{fontWeight:700,color:"#1a3c5e"}}>NETO a pagar a {e.nombre.split(" ")[0]}</span><strong style={{color:"#2e7d32"}}>${r.netoAPagar.toFixed(2)}</strong></div>
+          </div>
+
+          <div style={{marginTop:10,background:"#fff3e0",borderRadius:8,padding:"8px 10px",fontSize:11}}>
+            <div style={{fontWeight:700,color:"#e65100",marginBottom:2}}>🏢 Costo total para la empresa este mes: ${r.costoEmpresa.toFixed(2)}</div>
+            <div style={{color:"#a05a00"}}>Incluye: sueldo + IESS patronal (${r.iessPatronal.toFixed(2)}) + fondo reserva + provisión décimos y vacaciones</div>
+          </div>
+
+          <div style={{marginTop:10,background:"#eaf3fb",borderRadius:8,padding:"8px 10px",fontSize:11}}>
+            <div style={{fontWeight:700,color:"#1565c0",marginBottom:2}}>📅 Décimo tercero acumulado (período dic-nov, pago hasta {d3.periodo.pagoHasta})</div>
+            <div style={{fontWeight:800,fontSize:14,color:"#1a3c5e"}}>${d3.total.toFixed(2)}</div>
+            <div style={{fontWeight:700,color:"#1565c0",marginTop:6,marginBottom:2}}>🎒 Décimo cuarto acumulado (período ago-jul, pago hasta {d4.periodo.pagoHasta})</div>
+            <div style={{fontWeight:800,fontSize:14,color:"#1a3c5e"}}>${d4.total.toFixed(2)}</div>
+            <div style={{fontSize:10,color:"#888",marginTop:4}}>Provisión mensual acumulada hasta {mes} — el valor real a pagar puede variar un poco si hubo horas extra en meses no registrados.</div>
+          </div>
+          <button style={{...S.btnP,width:"100%",marginTop:10}} onClick={()=>imprimirRol(e)}>🖨️ Imprimir rol de pago (para firmar)</button>
+        </Card>
+      );
+    })}
   </div>);
 }
 
@@ -9341,6 +9555,8 @@ const { data: conteosInventario, setData: setConteosInventario, upsert: upsertCo
 const { data: quejas, setData: setQuejas, upsert: upsertQueja } = useCollection("quejas", "ll_quejas", []);
 // 🧴 Facturas de Martinizing (lavado en seco tercerizado) — cada una cubre 1 o más órdenes
 const { data: facturasMartinizing, setData: setFacturasMartinizing, upsert: upsertFacturaMartinizing } = useCollection("facturasMartinizing", "ll_facturas_martinizing", []);
+// 💵 Roles de pago — horas extras registradas por colaboradora y mes (el resto se calcula en vivo)
+const { data: rolesPago, setData: setRolesPago, upsert: upsertRolPago } = useCollection("rolesPago", "ll_roles_pago", []);
 // 🎧 Calificaciones manuales de audios de atención (2 por semana, ~8 al mes)
 const { data: calificacionesAudio, setData: setCalificacionesAudio, upsert: upsertCalificacionAudio } = useCollection("calificacionesAudio", "ll_calificaciones_audio", []);
 const { data: evalConfigArr, setData: setEvalConfigArr, upsert: upsertEvalConfig } = useCollection("evalConfig", "ll_eval_config", EVAL_CONFIG_DEFAULT);
@@ -9537,12 +9753,12 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
     {id:"conciliacion",icon:"🏛️",l:"Conciliación"},
     {id:"gastos",icon:"🛒",l:"Gastos"},{id:"martinizingAdmin",icon:"🧴",l:"Martinizing"},{id:"inventario",icon:"📦",l:"Inventario"},{id:"productosAdmin",icon:"🛍️",l:"Productos"},{id:"kardexAdmin",icon:"📒",l:"Kardex"},{id:"conteosAdmin",icon:"📋",l:"Conteos"},{id:"activosFijosAdmin",icon:"📦",l:"Activos Fijos"},{id:"deudasAdmin",icon:"💳",l:"Deudas"},{id:"sorteoAdmin",icon:"🎟️",l:"Sorteo"},
     {id:"equipo",icon:"👩",l:"Equipo"},{id:"incentivosAdmin",icon:"🎯",l:"Incentivos"},{id:"maquinasAdmin",icon:"🏭",l:"Máquinas"},{id:"reporteMaquinasAdmin",icon:"⏱️",l:"Uso de máquinas"},{id:"tiemposRopaAdmin",icon:"👕",l:"Tiempos x Servicio"},{id:"pinsAdmin",icon:"🔒",l:"PINs"},{id:"produccionAdmin",icon:"🧺",l:"Producción"},{id:"tareasAdmin",icon:"📋",l:"Tareas"},{id:"notasAdmin",icon:"📝",l:"Notas"},{id:"evaluacionAdmin",icon:"📋",l:"Evaluación"},{id:"calificacionManualAdmin",icon:"🎧",l:"Calificación manual"},{id:"evaluacionConfigAdmin",icon:"⚙️",l:"Config. Evaluación"},
-    {id:"config",icon:"⚙️",l:"Config"},{id:"usuarios",icon:"🔑",l:"Usuarios"},
+    {id:"config",icon:"⚙️",l:"Config"},{id:"usuarios",icon:"🔑",l:"Usuarios"},{id:"rolesPago",icon:"💵",l:"Roles de Pago"},{id:"obligaciones",icon:"📋",l:"Obligaciones"},
   ];
   // 🗂️ Agrupa las pestañas en categorías para que el panel admin se vea más ordenado (menos scroll horizontal, todo lo relacionado junto)
   const CATEGORIAS=[
     {id:"ventas_caja",icon:"🧾",l:"Ventas",tabIds:["ventas","historial","pendientes","depositos","conciliacion","cupones","promosAdmin","reportes","resumen","satisfaccionAdmin"]},
-    {id:"personal",icon:"👥",l:"Personal",tabIds:["equipo","pinsAdmin","usuarios","tareasAdmin","notasAdmin","incentivosAdmin","evaluacionAdmin","calificacionManualAdmin","evaluacionConfigAdmin","reporteMaquinasAdmin","tiemposRopaAdmin"]},
+    {id:"personal",icon:"👥",l:"Personal",tabIds:["equipo","pinsAdmin","usuarios","tareasAdmin","notasAdmin","incentivosAdmin","evaluacionAdmin","calificacionManualAdmin","evaluacionConfigAdmin","reporteMaquinasAdmin","tiemposRopaAdmin","rolesPago","obligaciones"]},
     {id:"inventario_cat",icon:"📦",l:"Inventario",tabIds:["inventario","productosAdmin","kardexAdmin","conteosAdmin","gastos","martinizingAdmin","maquinasAdmin","activosFijosAdmin","deudasAdmin"]},
     {id:"negocio",icon:"📊",l:"Negocio",tabIds:["bi","clientes","clientesAnalisis","sorteoAdmin","produccionAdmin","config"]},
   ];
@@ -9622,6 +9838,8 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
       {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={handleCierreListo} onResetCierre={()=>setCierreOk(false)} sesion={sesion} salidasCaja={salidasCaja} setVentas={setVentas} upsertVenta={upsertVenta} upsertCaja={upsertCaja} eventosProduccion={eventosProduccion} cargas={cargas} maquinas={maquinas}/>}
       {tab==="config"&&<Configuracion servicios={servicios} setServicios={setServicios} exportarDatos={exportarDatos} importarDatos={importarDatos} upsertVenta={upsertVenta} upsertServicio={upsertServicio}/>}
       {tab==="usuarios"&&<GestionUsuarios/>}
+      {tab==="rolesPago"&&<RolesDePago empleadas={empleadas} ventas={ventas} rolesPago={rolesPago} setRolesPago={setRolesPago} upsertRolPago={upsertRolPago} sesion={sesion}/>}
+      {tab==="obligaciones"&&<ObligacionesPago empleadas={empleadas} rolesPago={rolesPago}/>}
     </div>
     {ticketV&&<TicketModal venta={ticketV} empleadas={empleadas} onClose={()=>{setCuponSug(ticketV);setTicketV(null);}}/>}
     {cuponSug&&<CuponSugerido venta={cuponSug} clientes={clientes} ventas={ventas} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} sesion={sesion} promos={promos} onClose={()=>setCuponSug(null)}/>}
