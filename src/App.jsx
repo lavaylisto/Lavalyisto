@@ -7110,8 +7110,17 @@ function calcularRolDePago(e,mesSel,rolesPago){
   const horasExtra=guardado?.horasExtra||0;
   const otrosDescuentos=guardado?.otrosDescuentos||0;
   const motivoDescuento=guardado?.motivoDescuento||"";
-  // 📆 Días trabajados: por defecto el mes completo; si trabajó menos, todo se prorratea proporcional
-  const diasTrabajados=guardado?.diasTrabajados!=null?guardado.diasTrabajados:diasDelMes;
+  // 📆 Días trabajados: por defecto, se calcula solo según la fecha de ingreso — si el mes es ANTES de
+  // que ingresara, son 0 días; si es el mes que ingresó, solo desde ese día hasta fin de mes; si es
+  // después, el mes completo. Esto evita contar sueldo/décimos de meses en que todavía no trabajaba.
+  let diasTrabajadosDefault=diasDelMes;
+  if(e.fechaIngreso){
+    const ing=new Date(e.fechaIngreso+"T00:00:00");
+    const ingY=ing.getFullYear(),ingM=ing.getMonth()+1;
+    if(yy<ingY||(yy===ingY&&mm<ingM))diasTrabajadosDefault=0;
+    else if(yy===ingY&&mm===ingM)diasTrabajadosDefault=Math.max(0,diasDelMes-ing.getDate()+1);
+  }
+  const diasTrabajados=guardado?.diasTrabajados!=null?guardado.diasTrabajados:diasTrabajadosDefault;
   const factorDias=Math.min(1,Math.max(0,diasTrabajados/diasDelMes));
   const remuneracion=remuneracionCompleta*factorDias;
   const valorHora=remuneracionCompleta/240;
@@ -7139,6 +7148,28 @@ function acumuladoDecimoDe(e,mesSel,rolesPago,tipo){ // tipo: 3 | 4
   meses.forEach(m=>{const r=calcularRolDePago(e,m,rolesPago);total+=tipo===3?r.provisionDecimo3:r.provisionDecimo4;});
   return{total,periodo};
 }
+// 🏖️ Saldo de vacaciones: se acumula desde la fecha de ingreso (1.25 días/mes = remuneración/24), y se
+// va restando lo que ya tomó (1 día de vacaciones = remuneración/30). El saldo que queda es lo disponible.
+function saldoVacacionesDe(e,mesSel,rolesPago){
+  if(!e.fechaIngreso)return{saldo:0,diasDisponibles:0,provisionado:0,tomado:0};
+  const ing=new Date(e.fechaIngreso+"T00:00:00");
+  let y=ing.getFullYear(),m=ing.getMonth()+1;
+  const [yFin,mFin]=mesSel.split("-").map(Number);
+  const meses=[];
+  while(y<yFin||(y===yFin&&m<=mFin)){meses.push(`${y}-${String(m).padStart(2,"0")}`);m++;if(m>12){m=1;y++;}}
+  let provisionado=0,tomado=0;
+  meses.forEach(mk=>{
+    const r=calcularRolDePago(e,mk,rolesPago);
+    provisionado+=r.provisionVacaciones;
+    const guardado=(rolesPago||[]).find(x=>String(x.empleadaId)===String(e.id)&&x.mes===mk);
+    const diasTomados=guardado?.diasVacacionesTomados||0;
+    tomado+=diasTomados*(r.remuneracionCompleta/30);
+  });
+  const saldo=Math.max(0,provisionado-tomado);
+  const remActual=e.remuneracion!=null?parseFloat(e.remuneracion):SBU_2026;
+  const diasDisponibles=remActual>0?saldo/(remActual/30):0;
+  return{saldo,diasDisponibles,provisionado,tomado};
+}
 
 // 📋 OBLIGACIONES — resumen de lo que hay que depositar/pagar: IESS del mes, y lo acumulado de
 // décimos y vacaciones de TODAS las colaboradoras juntas, con sus fechas límite.
@@ -7150,7 +7181,8 @@ function ObligacionesPago({empleadas,rolesPago}){
     const r=calcularRolDePago(e,mes,rolesPago);
     const d3=acumuladoDecimoDe(e,mes,rolesPago,3);
     const d4=acumuladoDecimoDe(e,mes,rolesPago,4);
-    return{nombre:e.nombre,...r,decimo3Acum:d3.total,periodo3:d3.periodo,decimo4Acum:d4.total,periodo4:d4.periodo};
+    const vac=saldoVacacionesDe(e,mes,rolesPago);
+    return{nombre:e.nombre,...r,decimo3Acum:d3.total,periodo3:d3.periodo,decimo4Acum:d4.total,periodo4:d4.periodo,vacSaldo:vac.saldo,vacDias:vac.diasDisponibles};
   });
 
   const totalIessPersonal=filas.reduce((a,f)=>a+f.iessPersonal,0);
@@ -7158,7 +7190,7 @@ function ObligacionesPago({empleadas,rolesPago}){
   const totalFondoReserva=filas.reduce((a,f)=>a+f.fondoReserva,0);
   const totalDecimo3=filas.reduce((a,f)=>a+f.decimo3Acum,0);
   const totalDecimo4=filas.reduce((a,f)=>a+f.decimo4Acum,0);
-  const totalVacaciones=filas.reduce((a,f)=>a+f.provisionVacaciones,0);
+  const totalVacaciones=filas.reduce((a,f)=>a+f.vacSaldo,0);
   const periodo3=filas[0]?.periodo3,periodo4=filas[0]?.periodo4;
 
   return(<div style={S.panel}>
@@ -7188,10 +7220,10 @@ function ObligacionesPago({empleadas,rolesPago}){
       <div style={{display:"flex",justifyContent:"space-between",fontSize:15,paddingTop:8,marginTop:4,borderTop:"1.5px solid #1a3c5e"}}><strong style={{color:"#1a3c5e"}}>TOTAL a depositar</strong><strong style={{color:"#2e7d32"}}>${totalDecimo4.toFixed(2)}</strong></div>
     </Card>
 
-    <Card title="🏖️ Vacaciones — provisión acumulada del mes">
-      {filas.map(f=>(<div key={f.nombre} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"5px 0",borderBottom:"1px solid #f0f4f8"}}><span>{f.nombre}</span><strong>${f.provisionVacaciones.toFixed(2)}/mes</strong></div>))}
-      <div style={{display:"flex",justifyContent:"space-between",fontSize:15,paddingTop:8,marginTop:4,borderTop:"1.5px solid #1a3c5e"}}><strong style={{color:"#1a3c5e"}}>TOTAL provisión mensual</strong><strong style={{color:"#2e7d32"}}>${totalVacaciones.toFixed(2)}</strong></div>
-      <div style={{fontSize:10,color:"#888",marginTop:6}}>Las vacaciones no se "pagan" cada mes — se acumulan como derecho (15 días al año) hasta que la colaboradora las tome, ahí se le paga lo acumulado.</div>
+    <Card title="🏖️ Vacaciones — saldo disponible por colaboradora">
+      {filas.map(f=>(<div key={f.nombre} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"5px 0",borderBottom:"1px solid #f0f4f8"}}><span>{f.nombre}</span><strong>{f.vacDias.toFixed(1)} días (${f.vacSaldo.toFixed(2)})</strong></div>))}
+      <div style={{display:"flex",justifyContent:"space-between",fontSize:15,paddingTop:8,marginTop:4,borderTop:"1.5px solid #1a3c5e"}}><strong style={{color:"#1a3c5e"}}>TOTAL provisionado (saldo pendiente)</strong><strong style={{color:"#2e7d32"}}>${totalVacaciones.toFixed(2)}</strong></div>
+      <div style={{fontSize:10,color:"#888",marginTop:6}}>Se acumulan 1.25 días por mes trabajado (15 días/año). El saldo ya descuenta los días que hayan tomado — regístralos en Roles de Pago cuando las tomen.</div>
     </Card>
   </div>);
 }
@@ -7206,9 +7238,8 @@ function RolesDePago({empleadas,setEmpleadas,upsertEmpleada,ventas,rolesPago,set
 
   const guardarHoras=e=>{
     const draft=horasEd[e.id]||{};
-    const [yy,mm]=mes.split("-").map(Number);
-    const diasDelMes=new Date(yy,mm,0).getDate();
-    const entry={id:e.id+"_"+mes,empleadaId:e.id,mes,horasSupl:parseFloat(draft.supl)||0,horasExtra:parseFloat(draft.extra)||0,diasTrabajados:draft.dias!=null&&draft.dias!==""?Math.min(diasDelMes,Math.max(0,parseFloat(draft.dias))):diasDelMes,otrosDescuentos:parseFloat(draft.descuento)||0,motivoDescuento:draft.motivoDescuento||"",registradoPor:sesion?.nombre||null};
+    const rActual=calcularRol(e,mes); // valores ya calculados (incluye el default correcto de días según fecha de ingreso)
+    const entry={id:e.id+"_"+mes,empleadaId:e.id,mes,horasSupl:parseFloat(draft.supl)||0,horasExtra:parseFloat(draft.extra)||0,diasTrabajados:draft.dias!=null&&draft.dias!==""?Math.min(rActual.diasDelMes,Math.max(0,parseFloat(draft.dias))):rActual.diasTrabajados,otrosDescuentos:parseFloat(draft.descuento)||0,motivoDescuento:draft.motivoDescuento||"",diasVacacionesTomados:parseFloat(draft.diasVacaciones)||0,diasPermiso:parseFloat(draft.diasPermiso)||0,motivoPermiso:draft.motivoPermiso||"",registradoPor:sesion?.nombre||null};
     setRolesPago(prev=>{const existe=prev.some(r=>r.id===entry.id);return existe?prev.map(r=>r.id===entry.id?entry:r):[entry,...prev];});
     if(upsertRolPago)upsertRolPago({...entry,_updatedAt:new Date().toISOString()});
   };
@@ -7293,6 +7324,7 @@ function RolesDePago({empleadas,setEmpleadas,upsertEmpleada,ventas,rolesPago,set
       const r=calcularRol(e,mes);
       const d3=acumuladoDecimoDe(e,mes,rolesPago,3);
       const d4=acumuladoDecimoDe(e,mes,rolesPago,4);
+      const vac=saldoVacacionesDe(e,mes,rolesPago);
       return(
         <Card key={e.id} title={`👩 ${e.nombre}`}>
           {editandoDatos===e.id?(
@@ -7320,6 +7352,11 @@ function RolesDePago({empleadas,setEmpleadas,upsertEmpleada,ventas,rolesPago,set
             <div><label style={S.lbl}>🔻 Otros descuentos ($)</label><input type="number" min="0" step="0.01" style={S.inp} placeholder="0.00" value={horasEd[e.id]?.descuento??r.otrosDescuentos} onChange={ev=>setHorasEd({...horasEd,[e.id]:{...horasEd[e.id],descuento:ev.target.value}})}/></div>
           </div>
           <div style={{marginBottom:8}}><label style={S.lbl}>Motivo del descuento (si aplica)</label><input style={S.inp} placeholder="ej. anticipo, préstamo..." value={horasEd[e.id]?.motivoDescuento??r.motivoDescuento} onChange={ev=>setHorasEd({...horasEd,[e.id]:{...horasEd[e.id],motivoDescuento:ev.target.value}})}/></div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:6}}>
+            <div><label style={S.lbl}>🏖️ Días de vacaciones tomados</label><input type="number" min="0" style={S.inp} placeholder="0" value={horasEd[e.id]?.diasVacaciones??""} onChange={ev=>setHorasEd({...horasEd,[e.id]:{...horasEd[e.id],diasVacaciones:ev.target.value}})}/></div>
+            <div><label style={S.lbl}>📋 Días de permiso</label><input type="number" min="0" style={S.inp} placeholder="0" value={horasEd[e.id]?.diasPermiso??""} onChange={ev=>setHorasEd({...horasEd,[e.id]:{...horasEd[e.id],diasPermiso:ev.target.value}})}/></div>
+          </div>
+          <div style={{marginBottom:8}}><label style={S.lbl}>Motivo del permiso (si aplica)</label><input style={S.inp} placeholder="ej. cita médica, asunto personal..." value={horasEd[e.id]?.motivoPermiso??""} onChange={ev=>setHorasEd({...horasEd,[e.id]:{...horasEd[e.id],motivoPermiso:ev.target.value}})}/></div>
           <button style={{...S.btnS,width:"100%",background:"#1a3c5e",color:"#fff",marginBottom:8}} onClick={()=>guardarHoras(e)}>💾 Guardar horas, días y descuentos</button>
           {r.diasTrabajados<r.diasDelMes&&<div style={{fontSize:11,color:"#e65100",marginBottom:8}}>📆 Trabajó {r.diasTrabajados} de {r.diasDelMes} días — el sueldo y los décimos se prorratearon automáticamente.</div>}
 
@@ -7346,6 +7383,12 @@ function RolesDePago({empleadas,setEmpleadas,upsertEmpleada,ventas,rolesPago,set
             <div style={{fontWeight:700,color:"#1565c0",marginTop:6,marginBottom:2}}>🎒 Décimo cuarto acumulado (período ago-jul, pago hasta {d4.periodo.pagoHasta})</div>
             <div style={{fontWeight:800,fontSize:14,color:"#1a3c5e"}}>${d4.total.toFixed(2)}</div>
             <div style={{fontSize:10,color:"#888",marginTop:4}}>Provisión mensual acumulada hasta {mes} — el valor real a pagar puede variar un poco si hubo horas extra en meses no registrados.</div>
+          </div>
+
+          <div style={{marginTop:10,background:"#e8f5e9",borderRadius:8,padding:"8px 10px",fontSize:11}}>
+            <div style={{fontWeight:700,color:"#2e7d32",marginBottom:2}}>🏖️ Vacaciones disponibles (acumulado desde que ingresó, menos lo ya tomado)</div>
+            <div style={{fontWeight:800,fontSize:14,color:"#1a3c5e"}}>{vac.diasDisponibles.toFixed(1)} días (${vac.saldo.toFixed(2)})</div>
+            <div style={{fontSize:10,color:"#888",marginTop:2}}>Ganado: ${vac.provisionado.toFixed(2)} · Ya tomado: ${vac.tomado.toFixed(2)}</div>
           </div>
           <button style={{...S.btnP,width:"100%",marginTop:10}} onClick={()=>imprimirRol(e)}>🖨️ Imprimir rol de pago (para firmar)</button>
         </Card>
