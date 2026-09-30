@@ -718,18 +718,22 @@ const ETAPA_PROD={
 };
 
 const expCSV=(ventas,titulo,empleadas)=>{
-  const enc=["Folio","Fecha","Cliente","Servicios","Total","Pagado","Pendiente","Metodo","Estado","Notas"];
+  const nombreDe=id=>(empleadas||[]).find(e=>String(e.id)===String(id))?.nombre||"";
+  const enc=["Folio","Fecha","Hora","Facturado por","Cliente","Servicios","Total","Pagado","Pendiente","Metodo","Estado","Notas"];
   const filas=ventas.map(v=>{
     const p=(v.abonos||[]).reduce((a,ab)=>a+(ab.monto||0),0);
     const m=[...new Set((v.abonos||[]).map(ab=>ab.metodo))].join("/");
-    return[v.folio,fmt(v.fecha),v.clienteNombre||"",(v.items||[]).map(it=>it.label).join("|"),"$"+(v.total||0).toFixed(2),"$"+p.toFixed(2),"$"+((v.total||0)-p).toFixed(2),m,v.estado||"recibido",v.notas||""];
+    const d=new Date(v.fecha);
+    const fechaSola=d.toLocaleDateString("es-MX",{day:"2-digit",month:"short",year:"numeric"});
+    const horaSola=d.toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"});
+    return[v.folio,fechaSola,horaSola,nombreDe(v.empleadaId),v.clienteNombre||"",(v.items||[]).map(it=>it.label).join("|"),"$"+(v.total||0).toFixed(2),"$"+p.toFixed(2),"$"+((v.total||0)-p).toFixed(2),m,v.estado||"recibido",v.notas||""];
   });
   // 💰 Fila de totales al final — para cuadrar cuentas: cuánto se vendió, cuánto se cobró y cuánto queda pendiente
   const totVendido=ventas.reduce((a,v)=>a+v.total,0);
   const totCobrado=ventas.reduce((a,v)=>a+(v.abonos||[]).reduce((x,ab)=>x+(ab.monto||0),0),0);
   const totPendiente=totVendido-totCobrado;
-  filas.push(["","","","","","","","","",""]);
-  filas.push(["TOTALES",`${ventas.length} venta(s)`,"","","$"+totVendido.toFixed(2),"$"+totCobrado.toFixed(2),"$"+totPendiente.toFixed(2),"","",""]);
+  filas.push(["","","","","","","","","","","",""]);
+  filas.push(["TOTALES",`${ventas.length} venta(s)`,"","","","","$"+totVendido.toFixed(2),"$"+totCobrado.toFixed(2),"$"+totPendiente.toFixed(2),"","",""]);
   const csv=[enc,...filas].map(f=>f.map(c=>'"'+String(c).replace(/"/g,'\\"')+'"').join(",")).join("\n");
   const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
   const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=titulo+"-"+fechaHoyLocal()+".csv";a.click();
