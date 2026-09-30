@@ -4007,7 +4007,7 @@ function PinsAdmin({empleadas,pins,setPins,upsertPin}){
   </div>);
 }
 
-function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,onIrProduccion,onIrTareas,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta,upsertSalida,upsertCliente,upsertCaja,cupones,setCupones,upsertCupon,promos,cfgInc,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga,pins,eventosProduccion,setEventosProduccion,upsertEvento,productos,setProductos,upsertProducto,setKardexProductos,upsertKardexProducto,sorteos,setSorteos,upsertSorteo,setBoletosSorteo,upsertBoletoSorteo,boletosParaImprimir,setBoletosParaImprimir,depositos,setDepositos,upsertDeposito,setConteosInventario,upsertConteoInventario,ventasPerfumeReg,setVentasPerfumeReg,upsertVentaPerfume,tareasDiarias,quejas,evalConfig,calificacionesAudio,facturasMartinizing,setFacturasMartinizing,upsertFacturaMartinizing}){
+function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,onIrProduccion,onIrTareas,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta,upsertSalida,upsertCliente,upsertCaja,cupones,setCupones,upsertCupon,cuponNuevoConfig,setCuponNuevoConfig,upsertCuponNuevoConfig,promos,cfgInc,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga,pins,eventosProduccion,setEventosProduccion,upsertEvento,productos,setProductos,upsertProducto,setKardexProductos,upsertKardexProducto,sorteos,setSorteos,upsertSorteo,setBoletosSorteo,upsertBoletoSorteo,boletosParaImprimir,setBoletosParaImprimir,depositos,setDepositos,upsertDeposito,setConteosInventario,upsertConteoInventario,ventasPerfumeReg,setVentasPerfumeReg,upsertVentaPerfume,tareasDiarias,quejas,evalConfig,calificacionesAudio,facturasMartinizing,setFacturasMartinizing,upsertFacturaMartinizing}){
   const [tab,setTab]=useState("hoy");const [busq,setBusq]=useState("");
   const [showNueva,setShowNueva]=useState(false);
   const [filtroTile,setFiltroTile]=useState(null); // 🔎 filtro rápido al tocar un contador (recibido/proceso/listo/entregado_pend)
@@ -4142,7 +4142,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
               <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e"}}>➕ Nueva Venta</div>
               <button style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:"#888"}} onClick={()=>setShowNueva(false)}>✕</button>
             </div>
-            <NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={v=>{setShowNueva(false);setTicket(v);}} servicios={servicios} sesion={sesion} upsertVenta={upsertVenta} upsertCliente={upsertCliente} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto} sorteos={sorteos} setSorteos={setSorteos} upsertSorteo={upsertSorteo} setBoletosSorteo={setBoletosSorteo} upsertBoletoSorteo={upsertBoletoSorteo} onBoletosGenerados={setBoletosParaImprimir}/>
+            <NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={v=>{setShowNueva(false);setTicket(v);}} servicios={servicios} sesion={sesion} upsertVenta={upsertVenta} upsertCliente={upsertCliente} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} cuponNuevoConfig={cuponNuevoConfig} setCuponNuevoConfig={setCuponNuevoConfig} upsertCuponNuevoConfig={upsertCuponNuevoConfig} promos={promos} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto} sorteos={sorteos} setSorteos={setSorteos} upsertSorteo={upsertSorteo} setBoletosSorteo={setBoletosSorteo} upsertBoletoSorteo={upsertBoletoSorteo} onBoletosGenerados={setBoletosParaImprimir}/>
           </div>
         </div>
       )}
@@ -4158,7 +4158,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         </div>
       )}
       {ticket&&<TicketModal venta={ticket} empleadas={empleadas} onClose={()=>{setCuponSugE(ticket);setTicket(null);}}/>}
-      {cuponSugE&&<CuponSugerido venta={cuponSugE} clientes={clientes} ventas={ventas} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} sesion={sesion} promos={promos} onClose={()=>setCuponSugE(null)}/>}
+      {/* CuponSugerido desactivado: reemplazado por el sistema automático de cupón de cliente nuevo */}
       {showSalidaEmp&&<SalidaCaja sesion={sesion} salidasCaja={salidasCaja||[]} setSalidasCaja={setSalidasCaja} onClose={()=>setShowSalidaEmp(false)} upsertSalida={upsertSalida}/>}
       {showNotifs&&<NotificacionesPanel ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} addAbono={addAbono} clientes={clientes} maquinas={maquinas} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} pins={pins} empleadas={empleadas} sesion={sesion} onClose={()=>setShowNotifs(false)}/>}
       {boletosParaImprimir&&<BoletosSorteoModal data={boletosParaImprimir} sorteos={sorteos||[]} onClose={()=>setBoletosParaImprimir(null)}/>}
@@ -4419,7 +4419,7 @@ function PromosDelDia({promos,servicios,onAgregar,onCerrar}){
   );
 }
 
-function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,servicios,sesion,upsertVenta,upsertCliente,cupones=[],setCupones,upsertCupon,promos,productos=[],setProductos,upsertProducto,setKardexProductos,upsertKardexProducto,sorteos=[],setSorteos,upsertSorteo,setBoletosSorteo,upsertBoletoSorteo,onBoletosGenerados}){
+function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,servicios,sesion,upsertVenta,upsertCliente,cupones=[],setCupones,upsertCupon,cuponNuevoConfig,setCuponNuevoConfig,upsertCuponNuevoConfig,promos,productos=[],setProductos,upsertProducto,setKardexProductos,upsertKardexProducto,sorteos=[],setSorteos,upsertSorteo,setBoletosSorteo,upsertBoletoSorteo,onBoletosGenerados}){
   const man=new Date();man.setDate(man.getDate()+1);
   const [cQ,setCQ]=useState("");const [cId,setCId]=useState(null);
   const [nC,setNC]=useState({nombre:"",tel:"",cedula:"",email:"",rfc:"",direccion:"",nacimiento:""});
@@ -4443,6 +4443,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
   const [impulsos,setImpulsos]=useState([]); // 🎯 promos impulsadas en esta venta (para métricas por colaboradora)
   const [segundaPromoActiva,setSegundaPromoActiva]=useState(null); // 🔁 promo "2da unidad al %" esperando que elijan el servicio
   const [cupInput,setCupInput]=useState("");const [cupApl,setCupApl]=useState(null);const [cupErr,setCupErr]=useState(""); // 🎟️ cupón
+  const [cuponRecienEmitido,setCuponRecienEmitido]=useState(null); // 🎟️ cupón que se acaba de generar automático, para mostrar botón de WhatsApp
   const [descCumple,setDescCumple]=useState(false); // 🎂 10% cumpleaños
   const [tienePrendaMancha,setTienePrendaMancha]=useState(null); // null=sin responder, true/false — 🧽 obligatorio antes de registrar
   const [protocoloCumplido,setProtocoloCumplido]=useState(true); // 📋 para Evaluación de Desempeño — checklist de atención al cliente (saludo, confirmar datos, explicar tiempos, despedida)
@@ -4488,14 +4489,13 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
     const code=cupInput.trim().toUpperCase();
     if(!code){setCupErr("Escribe el número del cupón");return;}
     if(cupApl){setCupErr("Ya hay un cupón aplicado en esta venta (un cupón por venta)");return;}
-    const cup=cupones.find(c=>String(c.id).toUpperCase()===code);
-    if(!cup){setCupErr("Cupón no encontrado — verifica el número");return;}
-    if(cup.estado==="usado"){setCupErr(`Este cupón ya fue canjeado${cup.usadoEn?` en la venta ${cup.usadoEn}`:""} ❌`);return;}
-    if(fechaHoyLocal()>cup.caduca){setCupErr(`Cupón caducado el ${fmtD(cup.caduca)} ⌛`);return;}
-    const min=cup.minCompra||((cup.promoTipo==="descuento")?CUPON_MIN_COMPRA_DESC:0);
-    if(cup.promoTipo==="descuento"&&posActual()<min){setCupErr(`Este cupón aplica en compras desde $${min.toFixed(2)} — agrega primero los servicios 🛒`);return;}
-    if(cup.promoTipo==="descuento")setItems(prev=>[...prev,{servId:servicios[0]?.id,piezas:1,custom:true,deCupon:true,lC:`${cup.promoLabel} · ${cup.id}`,pC:String(-Math.abs(cup.promoMonto||1))}]);
-    else setItems(prev=>[...prev,{servId:servicios[0]?.id,piezas:1,custom:true,deCupon:true,lC:`${cup.promoLabel} · ${cup.id}`,pC:String(cup.promoPrecio||0)}]);
+    const clienteTelActual=(mC==="buscar"?selC?.tel:nC.tel)||"";
+    const cfg=(cuponNuevoConfig&&cuponNuevoConfig[0])||CUPON_NUEVO_CONFIG_DEFAULT[0];
+    const res=validarCanjeCuponNuevo(code,clienteTelActual,cupones);
+    if(!res.ok){setCupErr(`${res.motivo} ❌`);return;}
+    const cup=res.cupon;
+    const t=cfg.tipos[cup.tipo];
+    setItems(prev=>[...prev,{servId:servicios[0]?.id,piezas:t?.cantidad||1,custom:true,deCupon:true,lC:`${t?.label||cup.tipo} (cupón) · ${cup.codigo}`,pC:String(t?.precio||0)}]);
     setCupApl(cup);setCupErr("");setCupInput("");
   };
   const quitarCupon=()=>{setItems(prev=>{const sinCup=prev.filter(it=>!it.deCupon);return sinCup.length?sinCup:[{servId:servicios[0]?.id,piezas:1,custom:false,lC:"",pC:""}];});setCupApl(null);setCupErr("");};
@@ -4593,6 +4593,29 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
       prendaManchaAviso:!!tienePrendaMancha,prendaManchaObs:tienePrendaMancha?obsPrendaMancha.trim():null,
       boletoResenaSolicitado:!!boletoResena,protocoloCumplido:!!protocoloCumplido};
     setVentas([v,...ventas]);if(upsertVenta)upsertVenta(v);
+    // 🎟️ CUPÓN AUTOMÁTICO — si es la primera venta de este cliente (y no es personal interno, y el
+    // total no es $0, y nunca antes recibió un cupón), se clasifica qué NO compró y se emite el cupón.
+    {
+      const clienteRef=mC==="buscar"?selC:{id:cid,nombre:cNom,tel:cTel,esInterno:!!nC.esInterno};
+      const yaTuvoCupon=(cupones||[]).some(c=>(clienteRef?.id!=null&&String(c.clienteId)===String(clienteRef.id))||(cTel&&c.telefono===cTel));
+      if(clienteRef&&!clienteRef.esInterno&&total>0&&!yaTuvoCupon&&esClienteNuevoCupon({...clienteRef,id:cid},[v,...ventas])){
+        const cfg=(cuponNuevoConfig&&cuponNuevoConfig[0])||CUPON_NUEVO_CONFIG_DEFAULT[0];
+        const clasif=clasificarServiciosCupon(v.items);
+        const{regla,candidatos}=reglaCuponAplicable(clasif);
+        const tipo=elegirTipoCupon(candidatos,cupones);
+        const vig=calcularVigenciaCupon(v.fecha);
+        const codigo=genCodigoCuponTipo(tipo,cupones,cfg);
+        const cuponEmitido={
+          id:codigo,codigo,tipo,clienteId:cid,clienteNombre:cNom,telefono:cTel,
+          folioOrigen:v.folio,serviciosOrigen:(v.items||[]).map(it=>it.label).join(", "),reglaAplicada:regla,
+          fechaEmision:new Date().toISOString(),fechaInicio:vig.inicio,fechaFin:vig.fin,
+          estado:"vigente",folioCanje:null,fechaCanje:null,facturadoPorCanje:null,mensajeEnviado:false,
+        };
+        setCupones(prev=>[cuponEmitido,...prev]);
+        if(upsertCupon)upsertCupon({...cuponEmitido,_updatedAt:new Date().toISOString()});
+        setCuponRecienEmitido(cuponEmitido);
+      }
+    }
     // 🛍️ Descuenta del stock cada producto vendido en esta venta, y deja el movimiento en el Kardex
     const prodsVendidos=items.filter(it=>it.esProducto&&it.productoId);
     if(prodsVendidos.length>0&&setProductos){
@@ -4610,9 +4633,9 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
         return next;
       });
     }
-    if(cupApl){ // 🎟️ quemar el cupón: un solo uso, sincronizado en la nube
-      const usado={...cupApl,estado:"usado",usadoEn:v.folio,usadoFecha:new Date().toISOString()};
-      if(setCupones)setCupones(prev=>prev.map(c=>c.id===cupApl.id?usado:c));
+    if(cupApl){ // 🎟️ quemar el cupón: un solo uso, sincronizado en la nube — guarda también el ticket de esta venta (para el aprendizaje)
+      const usado={...cupApl,estado:"usado",folioCanje:v.folio,fechaCanje:new Date().toISOString(),facturadoPorCanje:sesion?.nombre||null,totalVentaCanje:total};
+      if(setCupones)setCupones(prev=>prev.map(c=>c.codigo===cupApl.codigo?usado:c));
       if(upsertCupon)upsertCupon(usado);
     }
     // 🎟️ Si la venta quedó pagada por completo, revisa si corresponde generar boleto(s) de sorteo
@@ -4677,6 +4700,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
             {[["nombre","Nombre *"],["tel","Telefono"],["cedula","Cedula"],["email","Email"],["rfc","RUC/RFC"]].map(([k,l])=><input key={k} style={S.inp} placeholder={l} value={nC[k]||""} onChange={e=>setNC({...nC,[k]:e.target.value})}/>)}
             <input style={{...S.inp,gridColumn:"1/-1"}} placeholder="📍 Direccion" value={nC.direccion} onChange={e=>setNC({...nC,direccion:e.target.value})}/>
             <div style={{gridColumn:"1/-1"}}><label style={S.lbl}>🎂 Fecha de nacimiento (opcional)</label><input type="date" style={S.inp} value={nC.nacimiento} onChange={e=>setNC({...nC,nacimiento:e.target.value})}/></div>
+            <label style={{...S.chk,gridColumn:"1/-1"}}><input type="checkbox" checked={!!nC.esInterno} onChange={e=>setNC({...nC,esInterno:e.target.checked})}/><span>👤 Es personal interno (no recibe cupón automático)</span></label>
           </div>
         )}
         {clienteCumple&&(
@@ -4870,6 +4894,33 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
       {showPromos&&!waVenta&&<PromosDelDia promos={promos} servicios={servicios} onAgregar={agregarPromo} onCerrar={()=>{setShowPromos(false);reg(true);}}/>}
       {segundaPromoActiva&&<SegundaUnidadPicker promo={segundaPromoActiva} servicios={servicios} onElegir={elegirSegundaUnidad} onCancelar={()=>setSegundaPromoActiva(null)}/>}
       {waVenta&&<WhatsAppObligatorio venta={waVenta} tipo="recibido" onConfirm={confirmarWaRecibido}/>}
+      {cuponRecienEmitido&&(()=>{
+        const cfg=(cuponNuevoConfig&&cuponNuevoConfig[0])||CUPON_NUEVO_CONFIG_DEFAULT[0];
+        const t=cfg.tipos[cuponRecienEmitido.tipo];
+        const tel=telWa(cuponRecienEmitido.telefono);
+        return(
+          <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:9999,padding:16}}>
+            <div style={{background:"#fff",borderRadius:16,padding:24,maxWidth:380,width:"100%",textAlign:"center"}}>
+              <div style={{fontSize:40}}>🎟️</div>
+              <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e",marginTop:6}}>¡Cupón generado para {cuponRecienEmitido.clienteNombre}!</div>
+              <div style={{background:"#e6fffa",border:"2px solid #00E5B8",borderRadius:10,padding:12,margin:"12px 0"}}>
+                <div style={{fontSize:12,color:"#00a887",fontWeight:700}}>{t?.beneficio}</div>
+                <div style={{fontSize:20,fontWeight:800,color:"#001847",letterSpacing:1,marginTop:4}}>{cuponRecienEmitido.codigo}</div>
+                <div style={{fontSize:11,color:"#888",marginTop:2}}>Válido del {fmtD(cuponRecienEmitido.fechaInicio)} al {fmtD(cuponRecienEmitido.fechaFin)}</div>
+              </div>
+              {tel?(
+                <a href={`https://wa.me/${tel}?text=${encodeURIComponent(msgWaCuponNuevo(cuponRecienEmitido,cfg))}`} target="_blank" rel="noopener noreferrer" style={{display:"block",padding:"12px",background:"linear-gradient(135deg,#25d366,#128c7e)",color:"#fff",borderRadius:10,fontWeight:700,textDecoration:"none",marginBottom:8}} onClick={()=>{
+                  const act={...cuponRecienEmitido,mensajeEnviado:true};
+                  setCupones(prev=>prev.map(c=>c.codigo===act.codigo?act:c));
+                  if(upsertCupon)upsertCupon({...act,_updatedAt:new Date().toISOString()});
+                }}>📲 Enviar por WhatsApp</a>
+              ):<div style={{fontSize:12,color:"#e65100",marginBottom:8}}>⚠️ Este cliente no tiene teléfono registrado — no se puede enviar por WhatsApp.</div>}
+              <button style={{...S.btnS,width:"100%",marginBottom:8}} onClick={()=>imprimirCuponNuevo(cuponRecienEmitido,cfg)}>🖨️ Imprimir cupón</button>
+              <button style={{...S.btnS,width:"100%"}} onClick={()=>setCuponRecienEmitido(null)}>Cerrar</button>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -8837,6 +8888,133 @@ const consumeCategoria=(vs,promo)=>{
 };
 const nombreCategoria=promo=>promo?.claves?.[0]||promo?.titulo||"este servicio";
 const CUPON_DIAS_INACTIVO=30; // cliente "poco frecuente": +30 días sin comprar (o sin compras)
+// ═══════════════════════════════════════════════════════════════════════════
+// 🎟️ CUPÓN AUTOMÁTICO DE CLIENTE NUEVO — reemplaza el sorteo manual anterior.
+// Al confirmar la primera venta de un cliente nuevo, se analiza qué NO compró
+// y se emite un cupón de venta cruzada para su segunda visita.
+// ═══════════════════════════════════════════════════════════════════════════
+const CUPON_NUEVO_CONFIG_DEFAULT=[{
+  id:"config",
+  tipos:{
+    ZAPATOS:{precio:5.99,precioNormal:3.50,unidad:"par",cantidad:2,label:"2 pares de zapatos",beneficio:"2 pares de zapatos lavados por solo $5,99 👟",prefijo:"Z"},
+    EDREDON:{precio:5.99,precioNormal:7.00,unidad:"edredón",cantidad:1,label:"1 edredón de 2 plazas",beneficio:"1 edredón de 2 plazas lavado por solo $5,99 🛏️",prefijo:"E"},
+    SABANAS:{precio:3.99,precioNormal:2.50,unidad:"juego",cantidad:2,label:"2 juegos de sábanas",beneficio:"2 juegos de sábanas lavados por solo $3,99 🧺",prefijo:"S"},
+  },
+}];
+// 📋 Clasifica los servicios de una venta en las 4 categorías que importan para la regla
+const clasificarServiciosCupon=items=>{
+  const labels=(items||[]).map(it=>normTxt(it.label));
+  const tieneZapatos=labels.some(l=>l.includes("par")||l.includes("zapato"));
+  const tieneEdredon=labels.some(l=>l.includes("edredon"));
+  const tieneSabanas=labels.some(l=>l.includes("sabana"));
+  return{tieneZapatos,tieneEdredon,tieneSabanas};
+};
+// 🧮 Regla a/b/c/d — devuelve la lista de tipos POSIBLES según lo que trajo (normalmente 1, a veces varios en la regla a)
+const reglaCuponAplicable=clasif=>{
+  if(!clasif.tieneZapatos)return{regla:"a",candidatos:["ZAPATOS"]};
+  if(!clasif.tieneEdredon)return{regla:"b",candidatos:["EDREDON"]};
+  if(!clasif.tieneSabanas)return{regla:"c",candidatos:["SABANAS"]};
+  return{regla:"d",candidatos:["ZAPATOS"]};
+};
+// 🤖 Aprendizaje simple: con 30+ cupones ya resueltos (usado o vencido) de un tipo, se calcula su ganancia
+// por cupón (tasa de canje × ticket promedio con cupón) y se prefiere el de mayor ganancia. Si no hay
+// suficientes datos todavía para TODOS los candidatos, se reparte al azar (50% zapatos/25%/25%).
+const elegirTipoCupon=(candidatos,cuponesHistoricos)=>{
+  if(candidatos.length===1)return candidatos[0];
+  const stats=tipo=>{
+    const resueltos=(cuponesHistoricos||[]).filter(c=>c.tipo===tipo&&(c.estado==="usado"||c.estado==="vencido"));
+    if(resueltos.length<30)return null;
+    const usados=resueltos.filter(c=>c.estado==="usado");
+    const tasa=usados.length/resueltos.length;
+    const ticketProm=usados.length?usados.reduce((a,c)=>a+(c.totalVentaCanje||0),0)/usados.length:0;
+    return{tasa,ticketProm,ganancia:tasa*ticketProm};
+  };
+  const todasConDatos=candidatos.every(t=>stats(t)!==null);
+  if(todasConDatos){
+    return candidatos.reduce((mejor,t)=>stats(t).ganancia>stats(mejor).ganancia?t:mejor,candidatos[0]);
+  }
+  // Al azar, ponderado 50% zapatos / 25% edredón / 25% sábanas (entre los candidatos disponibles)
+  const pesos={ZAPATOS:50,EDREDON:25,SABANAS:25};
+  const opciones=candidatos.flatMap(t=>Array(pesos[t]||10).fill(t));
+  return opciones[Math.floor(Math.random()*opciones.length)];
+};
+// 🔢 Código único por tipo: LL-Z-XXXX / LL-E-XXXX / LL-S-XXXX
+const genCodigoCuponTipo=(tipo,existentes,cfg)=>{
+  const prefijo=cfg.tipos[tipo]?.prefijo||"X";
+  const abc="ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+  for(let i=0;i<50;i++){
+    let c=`LL-${prefijo}-`;for(let j=0;j<4;j++)c+=abc[Math.floor(Math.random()*abc.length)];
+    if(!existentes.some(x=>x.id===c))return c;
+  }
+  return `LL-${prefijo}-`+Date.now().toString(36).toUpperCase().slice(-4);
+};
+// 📅 Vigencia: 10 días exactos desde el día de la primera venta del cliente (la fecha de emisión), sin
+// importar en qué día del mes cayó esa venta.
+const calcularVigenciaCupon=fechaPrimeraVentaISO=>{
+  const f=new Date(fechaPrimeraVentaISO);
+  const inicio=new Date(f.getFullYear(),f.getMonth(),f.getDate());
+  const fin=new Date(f.getFullYear(),f.getMonth(),f.getDate()+10);
+  return{inicio:inicio.toISOString().slice(0,10),fin:fin.toISOString().slice(0,10)};
+};
+// 👤 ¿Es cliente nuevo? — primera venta registrada, identificado por teléfono (o nombre normalizado si no hay tel)
+const esClienteNuevoCupon=(cliente,ventas)=>{
+  const mismasVentas=(ventas||[]).filter(v=>{
+    if(v.clienteId!=null&&cliente.id!=null&&String(v.clienteId)===String(cliente.id))return true;
+    if(cliente.tel&&v.clienteTel&&v.clienteTel===cliente.tel)return true;
+    if(!cliente.tel&&!v.clienteTel&&normTxt(v.clienteNombre).replace(/\s+/g," ")===normTxt(cliente.nombre).replace(/\s+/g," "))return true;
+    return false;
+  });
+  return mismasVentas.length<=1; // la que se acaba de registrar cuenta como 1
+};
+// ✅ Validar canje: existe, vigente, no usado, pertenece al mismo cliente (mismo teléfono)
+const validarCanjeCuponNuevo=(codigo,clienteTel,cupones)=>{
+  const cup=(cupones||[]).find(c=>c.codigo===codigo);
+  if(!cup)return{ok:false,motivo:"Cupón no encontrado"};
+  if(cup.estado==="usado")return{ok:false,motivo:"Cupón ya usado"};
+  const hoy=fechaHoyLocal();
+  if(hoy<cup.fechaInicio)return{ok:false,motivo:"Aún no está vigente"};
+  if(hoy>cup.fechaFin)return{ok:false,motivo:"Cupón vencido"};
+  if(clienteTel&&cup.telefono&&clienteTel!==cup.telefono)return{ok:false,motivo:"No pertenece a este cliente"};
+  return{ok:true,cupon:cup};
+};
+const msgWaCuponNuevo=(c,cfg)=>{
+  const t=cfg.tipos[c.tipo];
+  return `¡Hola ${c.clienteNombre}! ✨ Gracias por confiar en Lava & Listo. Tienes un regalo para tu próxima visita: ${t?.beneficio||c.tipo}. Tu código: ${c.codigo}. Válido del ${fmtD(c.fechaInicio)} al ${fmtD(c.fechaFin)}. Un uso por cliente. ¡Te esperamos en Ricaurte!`;
+};
+// 🖨️ Cupón físico imprimible — colores de marca (azul marino, menta, cian)
+const imprimirCuponNuevo=(c,cfg)=>{
+  const t=cfg.tipos[c.tipo]||{};
+  const w=window.open("","_blank","width=480,height=640");
+  if(!w){alert("Permite las ventanas emergentes para imprimir el cupón");return;}
+  w.document.write(`<!DOCTYPE html><html><head><title>Cupón ${c.codigo}</title><style>
+    body{font-family:'Segoe UI',Arial,sans-serif;display:flex;justify-content:center;padding:20px;background:#fff}
+    .cup{width:360px;border:3px dashed #001847;border-radius:16px;overflow:hidden}
+    .top{background:#001847;color:#fff;text-align:center;padding:16px}
+    .top .brand{font-size:20px;font-weight:800;letter-spacing:1px}
+    .top .sub{font-size:10px;color:#4DD9E8;letter-spacing:2px;text-transform:uppercase}
+    .mid{text-align:center;padding:18px 16px 10px}
+    .gana{font-size:11px;color:#00a887;font-weight:700;letter-spacing:2px;text-transform:uppercase}
+    .promo{font-size:19px;font-weight:800;color:#001847;margin:6px 0}
+    .code{background:#e6fffa;border:2px dashed #00E5B8;border-radius:10px;padding:10px;margin:14px 0;font-size:22px;font-weight:800;letter-spacing:2px;color:#001847}
+    .venc{font-size:12px;color:#555;margin-top:6px}
+    .foot{background:#f4fbfb;padding:12px 16px;font-size:10px;color:#666;text-align:center;line-height:1.6}
+    @media print{body{padding:0}}
+  </style></head><body>
+    <div class="cup">
+      <div class="top"><div class="brand">🫧 LAVA & LISTO</div><div class="sub">Lavandería & Limpieza Especializada</div></div>
+      <div class="mid">
+        <div class="gana">🎁 ¡Regalo para tu próxima visita!</div>
+        <div class="promo">${t.beneficio||c.tipo}</div>
+        <div style="font-size:12px;color:#888">${c.clienteNombre}</div>
+        <div class="code">${c.codigo}</div>
+        <div class="venc">Válido del <strong>${fmtD(c.fechaInicio)}</strong> al <strong>${fmtD(c.fechaFin)}</strong></div>
+      </div>
+      <div class="foot">Presenta este código al pagar.<br/>Un solo uso · No acumulable con otras promociones.<br/>📍 Ricaurte, Cuenca · ¡Te esperamos!</div>
+    </div>
+    <scr${""}ipt>window.print();</scr${""}ipt>
+  </body></html>`);
+  w.document.close();
+};
 const genCodigoCupon=existentes=>{
   const abc="ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // sin caracteres confusos (0/O, 1/I/L)
   for(let i=0;i<50;i++){
@@ -9091,106 +9269,178 @@ function PromosAdmin({promos,setPromos,upsertPromo,servicios}){
   </div>);
 }
 
-function Cupones({cupones,setCupones,upsertCupon,clientes,ventas,sesion,promos}){
-  const [prev,setPrev]=useState(null); // preview del sorteo antes de generar
-  const [soloInactivos,setSoloInactivos]=useState(true);
-  const listaPromos=(promos&&promos.length?promos:DEFAULT_PROMOS).filter(p=>p.activa!==false);
-  const activos=clientes.filter(c=>!c.eliminada);
+function Cupones({cupones,setCupones,upsertCupon,cuponNuevoConfig,setCuponNuevoConfig,upsertCuponNuevoConfig,clientes,ventas,empleadas,sesion}){
+  const cfg=(cuponNuevoConfig&&cuponNuevoConfig[0])||CUPON_NUEVO_CONFIG_DEFAULT[0];
+  const [mesF,setMesF]=useState(mesK(new Date()));
+  const [tipoF,setTipoF]=useState("Todos");
+  const [editandoCfg,setEditandoCfg]=useState(false);
+  const [cfgDraft,setCfgDraft]=useState(null);
   const hoy=fechaHoyLocal();
-  const conUltima=activos.map(c=>{
-    const vs=ventas.filter(v=>String(v.clienteId)===String(c.id)&&!v.anulada);
-    const ultima=vs.length?vs.map(v=>fechaLocal(v.fecha)).sort().slice(-1)[0]:null;
-    const diasSin=ultima?Math.round((new Date(hoy)-new Date(ultima))/86400000):9999;
-    return{...c,vs,ultima,diasSin};
+  const empDe=id=>(empleadas||[]).find(e=>String(e.id)===String(id))?.nombre||"—";
+
+  // 🔄 Marcar como vencidos los que ya pasaron su fecha fin y siguen "vigente" — solo visual, no escribe hasta que se guarde algo
+  const cuponesConEstado=(cupones||[]).map(c=>c.estado==="vigente"&&hoy>c.fechaFin?{...c,estado:"vencido"}:c);
+
+  const filtrados=cuponesConEstado.filter(c=>{
+    if(tipoF!=="Todos"&&c.tipo!==tipoF)return false;
+    if(mesF&&!(c.fechaEmision||"").startsWith(mesF))return false;
+    return true;
   });
-  const elegibles=soloInactivos?conUltima.filter(c=>c.diasSin>=CUPON_DIAS_INACTIVO):conUltima;
-  const sortear=()=>{
-    if(elegibles.length===0){alert(soloInactivos?"No hay clientes con más de 30 días sin comprar. Prueba incluyendo a todos.":"No hay clientes registrados.");return;}
-    if(listaPromos.length===0){alert("No hay promos activas en tu listado. Ve a la pestaña 🎁 Promos y crea o activa alguna.");return;}
-    const cli=elegibles[Math.floor(Math.random()*elegibles.length)];
-    // 🎯 Solo promos del listado (activas), dirigidas a lo que el cliente NO consume
-    const noConsume=listaPromos.filter(p=>!consumeCategoria(cli.vs,p));
-    const pool=noConsume.length>0?noConsume:listaPromos;
-    const p=pool[Math.floor(Math.random()*pool.length)];
-    const cat=nombreCategoria(p);
-    const motivo=noConsume.some(x=>x.id===p.id)
-      ?(cli.vs.length===0?`Cliente nuevo sin compras — ideal para estrenar ${cat}`:`Nunca ha llevado ${cat} — ¡venta cruzada!`)
-      :`Ya consume todo el listado — cupón de refuerzo`;
-    setPrev({cli,promo:p,motivo});
+
+  const emitidos=filtrados.length;
+  const canjeados=filtrados.filter(c=>c.estado==="usado").length;
+  const vencidos=filtrados.filter(c=>c.estado==="vencido").length;
+  const tasaCanje=emitidos?((canjeados/emitidos)*100).toFixed(0):0;
+  const ventasConCupon=filtrados.filter(c=>c.estado==="usado");
+  const totalVentasCupon=ventasConCupon.reduce((a,c)=>a+(c.totalVentaCanje||0),0);
+  const ticketPromCupon=ventasConCupon.length?totalVentasCupon/ventasConCupon.length:0;
+
+  // 📊 Por tipo — ganancia por cupón (tasa de canje × ticket promedio), igual que usa el aprendizaje
+  const porTipo=["ZAPATOS","EDREDON","SABANAS"].map(t=>{
+    const deLTipo=cuponesConEstado.filter(c=>c.tipo===t);
+    const resueltosT=deLTipo.filter(c=>c.estado==="usado"||c.estado==="vencido");
+    const usadosT=deLTipo.filter(c=>c.estado==="usado");
+    const tasaT=resueltosT.length?(usadosT.length/resueltosT.length)*100:null;
+    const ticketT=usadosT.length?usadosT.reduce((a,c)=>a+(c.totalVentaCanje||0),0)/usadosT.length:0;
+    const gananciaT=tasaT!=null?(tasaT/100)*ticketT:null;
+    return{tipo:t,label:cfg.tipos[t]?.label||t,emitidos:deLTipo.length,usados:usadosT.length,tasa:tasaT,ganancia:gananciaT,datosSuficientes:resueltosT.length>=30,resueltos:resueltosT.length};
+  });
+  const mejorTipo=porTipo.filter(t=>t.ganancia!=null).sort((a,b)=>b.ganancia-a.ganancia)[0];
+
+  // 🔁 Retención real: ¿el cliente volvió una TERCERA vez después de usar el cupón?
+  const retencion=ventasConCupon.map(c=>{
+    const ventasCliente=(ventas||[]).filter(v=>!v.anulada&&((c.clienteId!=null&&String(v.clienteId)===String(c.clienteId))||(c.telefono&&v.clienteTel===c.telefono))).sort((a,b)=>new Date(a.fecha)-new Date(b.fecha));
+    const idxCanje=ventasCliente.findIndex(v=>v.folio===c.folioCanje);
+    const volvio=idxCanje>=0&&ventasCliente.length>idxCanje+1;
+    return{...c,volvio};
+  });
+  const tasaRetencion=retencion.length?((retencion.filter(r=>r.volvio).length/retencion.length)*100).toFixed(0):0;
+
+  // 👩 Canjes por empleada
+  const porEmpleada={};
+  ventasConCupon.forEach(c=>{const n=c.facturadoPorCanje||"—";porEmpleada[n]=(porEmpleada[n]||0)+1;});
+
+  // 📅 Alerta del día 20: clientes con cupón vigente sin usar
+  const esDia20=new Date().getDate()===20;
+  const vigentesSinUsar=cuponesConEstado.filter(c=>c.estado==="vigente");
+
+  const guardarCfg=()=>{
+    const nuevo={...cfg,tipos:{...cfg.tipos,
+      ZAPATOS:{...cfg.tipos.ZAPATOS,precio:parseFloat(cfgDraft.ZAPATOS)||cfg.tipos.ZAPATOS.precio},
+      EDREDON:{...cfg.tipos.EDREDON,precio:parseFloat(cfgDraft.EDREDON)||cfg.tipos.EDREDON.precio},
+      SABANAS:{...cfg.tipos.SABANAS,precio:parseFloat(cfgDraft.SABANAS)||cfg.tipos.SABANAS.precio},
+    }};
+    setCuponNuevoConfig([nuevo]);
+    if(upsertCuponNuevoConfig)upsertCuponNuevoConfig({...nuevo,_updatedAt:new Date().toISOString()});
+    setEditandoCfg(false);
   };
-  const generar=()=>{
-    if(!prev)return;
-    const emitido=fechaHoyLocal();
-    const cad=new Date();cad.setDate(cad.getDate()+CUPON_DIAS_VALIDEZ);
-    const p=prev.promo;
-    const cup={
-      id:genCodigoCupon(cupones),
-      promoId:p.id,promoTipo:p.tipo,promoTitulo:p.titulo,promoDetalle:p.detalle||"",promoEmoji:p.emoji,
-      promoLabel:p.tipo==="descuento"?p.labelDescuento:p.label,
-      promoPrecio:p.tipo==="custom"?p.precio:null,promoMonto:p.tipo==="descuento"?p.monto:null,
-      clienteId:prev.cli.id,clienteNombre:prev.cli.nombre,clienteTel:prev.cli.tel||"",
-      emitido,caduca:cad.toISOString().slice(0,10),
-      motivo:prev.motivo||"",minCompra:p.tipo==="descuento"?(p.minCompra||CUPON_MIN_COMPRA_DESC):null,
-      estado:"vigente",generadoPor:sesion?.nombre||"",fecha:new Date().toISOString()
-    };
-    setCupones(pv=>[cup,...pv]);
-    if(upsertCupon)upsertCupon(cup); // ☁️ cupón guardado en la nube
-    setPrev(null);
+
+  const exportarCSV=()=>{
+    const enc=["Código","Tipo","Cliente","Teléfono","Folio origen","Servicios origen","Regla","Fecha emisión","Vigencia desde","Vigencia hasta","Estado","Folio canje","Fecha canje","Facturado por (canje)","Total venta canje","Mensaje enviado"];
+    const filas=filtrados.map(c=>[c.codigo,c.tipo,c.clienteNombre,c.telefono||"",c.folioOrigen,c.serviciosOrigen,c.reglaAplicada,fmt(c.fechaEmision),c.fechaInicio,c.fechaFin,c.estado,c.folioCanje||"",c.fechaCanje?fmt(c.fechaCanje):"",c.facturadoPorCanje||"",c.totalVentaCanje?"$"+c.totalVentaCanje.toFixed(2):"",c.mensajeEnviado?"Sí":"No"]);
+    const csv=[enc,...filas].map(f=>f.map(x=>'"'+String(x).replace(/"/g,'""')+'"').join(",")).join("\n");
+    const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
+    const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="cupones_"+mesF+".csv";a.click();
   };
-  const lista=[...cupones].sort((a,b)=>(b.fecha||"").localeCompare(a.fecha||""));
-  const nVig=lista.filter(cuponVigente).length;
-  const nUsa=lista.filter(c=>c.estado==="usado").length;
-  const tasa=lista.length?((nUsa/lista.length)*100).toFixed(0):0;
+
   return(<div style={S.panel}>
-    <h2 style={S.ptitle}>🎟️ Cupones Promo</h2>
-    <div style={S.kgrid}>
-      <div style={{...S.kpi,borderLeft:"4px solid #1a3c5e"}}><div style={{fontSize:22}}>🎟️</div><div><div style={{fontWeight:800,fontSize:18,color:"#1a3c5e"}}>{lista.length}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Emitidos</div></div></div>
-      <div style={{...S.kpi,borderLeft:"4px solid #4caf50"}}><div style={{fontSize:22}}>✔️</div><div><div style={{fontWeight:800,fontSize:18,color:"#2e7d32"}}>{nUsa}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Canjeados · {tasa}%</div></div></div>
-      <div style={{...S.kpi,borderLeft:"4px solid #f59e0b"}}><div style={{fontSize:22}}>🟢</div><div><div style={{fontWeight:800,fontSize:18,color:"#f59e0b"}}>{nVig}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Vigentes</div></div></div>
-    </div>
-    <Card title="🎲 Sortear un cupón">
-      <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
-        <button style={{...S.pill,fontSize:12,...(soloInactivos?S.pillA:{})}} onClick={()=>setSoloInactivos(true)}>😴 Solo poco frecuentes (+{CUPON_DIAS_INACTIVO} días) · {conUltima.filter(c=>c.diasSin>=CUPON_DIAS_INACTIVO).length}</button>
-        <button style={{...S.pill,fontSize:12,...(!soloInactivos?S.pillA:{})}} onClick={()=>setSoloInactivos(false)}>👥 Todos · {conUltima.length}</button>
+    <h2 style={S.ptitle}>🎟️ Cupones de Cliente Nuevo</h2>
+    <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ Se emiten solos al confirmar la primera venta de un cliente nuevo — analiza qué NO compró y le regala un cupón de venta cruzada para su segunda visita. Un cupón por cliente, de por vida.</div>
+
+    {esDia20&&vigentesSinUsar.length>0&&(
+      <div style={{background:"#fff3e0",border:"2px solid #e65100",borderRadius:12,padding:12,marginBottom:16}}>
+        <div style={{fontSize:13,fontWeight:800,color:"#e65100",marginBottom:6}}>📅 ¡Hoy es 20! Recuerda a estos clientes que tienen cupón sin usar ({vigentesSinUsar.length})</div>
+        {vigentesSinUsar.map(c=>{
+          const tel=telWa(c.telefono);
+          return(
+            <div key={c.codigo} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #ffe0b2"}}>
+              <div style={{fontSize:12,color:"#a05a00"}}>{c.clienteNombre} · {c.codigo} · vence {fmtD(c.fechaFin)}</div>
+              {tel?<a href={`https://wa.me/${tel}?text=${encodeURIComponent(msgWaCuponNuevo(c,cfg))}`} target="_blank" rel="noopener noreferrer" style={{fontSize:11,background:"#25d366",color:"#fff",padding:"5px 10px",borderRadius:6,textDecoration:"none",fontWeight:700}}>📲 Recordar</a>:<span style={{fontSize:10,color:"#888"}}>Sin tel.</span>}
+            </div>
+          );
+        })}
       </div>
-      {!prev
-        ?<button style={{...S.btnP,width:"100%"}} onClick={sortear}>🎲 Sortear cliente y promo</button>
-        :(<div style={{background:"linear-gradient(135deg,#e6fffa,#f0fdfb)",border:"2px solid #00E5B8",borderRadius:12,padding:"14px"}}>
-            <div style={{fontSize:12,fontWeight:700,color:"#00a887",textTransform:"uppercase",letterSpacing:1}}>Resultado del sorteo</div>
-            <div style={{fontWeight:800,fontSize:16,color:"#001847",marginTop:4}}>👤 {prev.cli.nombre}</div>
-            <div style={{fontSize:11,color:"#888"}}>{prev.cli.diasSin>=9000?"Nunca ha comprado":`Última compra hace ${prev.cli.diasSin} días`}{prev.cli.tel?` · 📱 ${prev.cli.tel}`:" · ⚠️ sin teléfono"}</div>
-            <div style={{fontWeight:700,fontSize:14,color:"#1a3c5e",marginTop:8}}>{prev.promo.emoji} {prev.promo.titulo}</div>
-            <div style={{fontSize:11,color:"#888"}}>{prev.promo.detalle}</div>
-            <div style={{background:"#fff8e1",borderRadius:8,padding:"6px 10px",marginTop:6,fontSize:12,color:"#b45309",fontWeight:600}}>🎯 {prev.motivo}</div>
-            {prev.promo.tipo==="descuento"&&<div style={{fontSize:11,color:"#1a3c5e",fontWeight:600,marginTop:4}}>🛒 Válido en compras desde ${(prev.promo.minCompra||CUPON_MIN_COMPRA_DESC).toFixed(2)}</div>}
-            <div style={{fontSize:11,color:"#c0392b",fontWeight:600,marginTop:6}}>⏰ Caducará en {CUPON_DIAS_VALIDEZ} días si lo generas hoy</div>
-            <div style={{display:"flex",gap:8,marginTop:10}}>
-              <button style={{...S.btnP,flex:1}} onClick={generar}>✓ Generar cupón</button>
-              <button style={S.btnS} onClick={sortear}>🎲 Volver a sortear</button>
-              <button style={S.btnC} onClick={()=>setPrev(null)}>✕</button>
-            </div>
-          </div>)}
-    </Card>
-    <Card title={`📜 Cupones emitidos (${lista.length})`}>
-      {lista.length===0?<div style={S.empty}>Aún no has emitido cupones. ¡Sortea el primero! 🎲</div>:lista.slice(0,60).map(c=>{
-        const est=estadoCupon(c);
-        const url=c.clienteTel?`https://api.whatsapp.com/send/?phone=${telWa(c.clienteTel)}&text=${encodeURIComponent(msgWaCupon(c))}`:null;
-        return(<div key={c.id} style={{...S.vcard,borderLeft:`4px solid ${est.col}`}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
-            <div style={{minWidth:0}}>
-              <div style={{fontWeight:800,fontSize:16,letterSpacing:1,color:"#001847"}}>{c.id} <span style={{...S.badge,background:est.bg,color:est.col,fontSize:10,letterSpacing:0}}>{est.i} {est.l}</span></div>
-              <div style={{fontSize:13,fontWeight:600,marginTop:2}}>{c.promoEmoji} {c.promoTitulo}</div>
-              <div style={{fontSize:11,color:"#888"}}>👤 {c.clienteNombre} · Emitido {fmtD(c.emitido)} · Caduca {fmtD(c.caduca)}</div>
-              {c.estado==="usado"&&<div style={{fontSize:11,color:"#546e7a"}}>✔️ Canjeado en {c.usadoEn} el {fmtD(c.usadoFecha)}</div>}
-            </div>
-            {cuponVigente(c)&&(
-              <div style={{display:"flex",flexDirection:"column",gap:5,alignItems:"flex-end",flexShrink:0}}>
-                <button style={S.btnS} onClick={()=>imprimirCupon(c)}>🖨️ Imprimir</button>
-                {url&&<a href={url} target="_blank" rel="noreferrer" style={{background:"#25d366",color:"#fff",borderRadius:8,padding:"6px 10px",fontSize:12,fontWeight:700,textDecoration:"none"}}>💬 Enviar</a>}
-              </div>
-            )}
+    )}
+
+    <Card title="⚙️ Precios de los cupones">
+      {!editandoCfg?(
+        <div>
+          <div style={{fontSize:13,marginBottom:4}}>👟 Zapatos: <strong>${cfg.tipos.ZAPATOS.precio.toFixed(2)}</strong> (normal ${cfg.tipos.ZAPATOS.precioNormal.toFixed(2)})</div>
+          <div style={{fontSize:13,marginBottom:4}}>🛏️ Edredón: <strong>${cfg.tipos.EDREDON.precio.toFixed(2)}</strong> (normal ${cfg.tipos.EDREDON.precioNormal.toFixed(2)})</div>
+          <div style={{fontSize:13,marginBottom:8}}>🧺 Sábanas: <strong>${cfg.tipos.SABANAS.precio.toFixed(2)}</strong> (normal ${cfg.tipos.SABANAS.precioNormal.toFixed(2)})</div>
+          <button style={S.btnS} onClick={()=>{setCfgDraft({ZAPATOS:cfg.tipos.ZAPATOS.precio,EDREDON:cfg.tipos.EDREDON.precio,SABANAS:cfg.tipos.SABANAS.precio});setEditandoCfg(true);}}>✏️ Editar precios</button>
+        </div>
+      ):(
+        <div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:8}}>
+            <div><label style={S.lbl}>👟 Zapatos</label><input type="number" step="0.01" style={S.inp} value={cfgDraft.ZAPATOS} onChange={e=>setCfgDraft({...cfgDraft,ZAPATOS:e.target.value})}/></div>
+            <div><label style={S.lbl}>🛏️ Edredón</label><input type="number" step="0.01" style={S.inp} value={cfgDraft.EDREDON} onChange={e=>setCfgDraft({...cfgDraft,EDREDON:e.target.value})}/></div>
+            <div><label style={S.lbl}>🧺 Sábanas</label><input type="number" step="0.01" style={S.inp} value={cfgDraft.SABANAS} onChange={e=>setCfgDraft({...cfgDraft,SABANAS:e.target.value})}/></div>
           </div>
-        </div>);
+          <div style={{display:"flex",gap:8}}><button style={{...S.btnP,flex:1}} onClick={guardarCfg}>✓ Guardar</button><button style={S.btnC} onClick={()=>setEditandoCfg(false)}>Cancelar</button></div>
+        </div>
+      )}
+    </Card>
+
+    <Card title="🔍 Filtros">
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <div><label style={S.lbl}>Mes de emisión</label><input type="month" style={S.inp} value={mesF} onChange={e=>setMesF(e.target.value)}/></div>
+        <div><label style={S.lbl}>Tipo</label><select style={S.inp} value={tipoF} onChange={e=>setTipoF(e.target.value)}><option>Todos</option><option value="ZAPATOS">Zapatos</option><option value="EDREDON">Edredón</option><option value="SABANAS">Sábanas</option></select></div>
+      </div>
+      <button style={{...S.btnP,width:"100%",marginTop:10}} onClick={exportarCSV}>📥 Descargar CSV</button>
+    </Card>
+
+    <div style={S.kgrid}>
+      <div style={{...S.kpi,borderLeft:"4px solid #1a3c5e"}}><div style={{fontSize:22}}>🎟️</div><div><div style={{fontWeight:800,fontSize:18,color:"#1a3c5e"}}>{emitidos}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Emitidos</div></div></div>
+      <div style={{...S.kpi,borderLeft:"4px solid #4caf50"}}><div style={{fontSize:22}}>✔️</div><div><div style={{fontWeight:800,fontSize:18,color:"#2e7d32"}}>{canjeados}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Canjeados · {tasaCanje}%</div></div></div>
+      <div style={{...S.kpi,borderLeft:"4px solid #c62828"}}><div style={{fontSize:22}}>⌛</div><div><div style={{fontWeight:800,fontSize:18,color:"#c62828"}}>{vencidos}</div><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>Vencidos</div></div></div>
+    </div>
+
+    <Card title="💰 Ventas con cupón">
+      <div style={{fontSize:13,lineHeight:1.9}}>
+        <div style={{display:"flex",justifyContent:"space-between"}}><span>Ventas totales con cupón</span><strong>${totalVentasCupon.toFixed(2)}</strong></div>
+        <div style={{display:"flex",justifyContent:"space-between"}}><span>Ticket promedio con cupón</span><strong>${ticketPromCupon.toFixed(2)}</strong></div>
+        <div style={{display:"flex",justifyContent:"space-between"}}><span>Retención real (volvió una 3ª vez)</span><strong style={{color:"#2e7d32"}}>{tasaRetencion}%</strong></div>
+      </div>
+    </Card>
+
+    <Card title="📊 Cuál cupón está funcionando mejor">
+      {porTipo.map(t=>(
+        <div key={t.tipo} style={{padding:"8px 0",borderBottom:"1px solid #f0f4f8"}}>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:13,fontWeight:700,color:mejorTipo?.tipo===t.tipo?"#2e7d32":"#1a3c5e"}}>
+            <span>{mejorTipo?.tipo===t.tipo?"🏆 ":""}{t.label}</span>
+            <span>{t.emitidos} emitidos</span>
+          </div>
+          <div style={{fontSize:11,color:"#888",marginTop:2}}>
+            {t.datosSuficientes?`Tasa de canje: ${t.tasa.toFixed(0)}% · Ganancia por cupón: $${t.ganancia.toFixed(2)}`:`Aún acumulando datos (${t.resueltos}/30 resueltos) — se está repartiendo al azar mientras tanto`}
+          </div>
+        </div>
+      ))}
+    </Card>
+
+    <Card title="👩 Canjes por colaboradora">
+      {Object.keys(porEmpleada).length===0&&<div style={S.empty}>Sin canjes todavía.</div>}
+      {Object.entries(porEmpleada).map(([n,c])=>(<div key={n} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"5px 0",borderBottom:"1px solid #f0f4f8"}}><span>{n}</span><strong>{c}</strong></div>))}
+    </Card>
+
+    <Card title={`📋 Cupones del mes (${filtrados.length})`}>
+      {filtrados.length===0&&<div style={S.empty}>Sin cupones en este filtro.</div>}
+      {filtrados.sort((a,b)=>(b.fechaEmision||"").localeCompare(a.fechaEmision||"")).map(c=>{
+        const est=c.estado==="usado"?{l:"Canjeado",bg:"#e8f5e9",col:"#2e7d32",i:"✔️"}:c.estado==="vencido"?{l:"Vencido",bg:"#ffebee",col:"#c62828",i:"⌛"}:{l:"Vigente",bg:"#e8f5e9",col:"#2e7d32",i:"🟢"};
+        return(
+          <div key={c.codigo} style={{padding:"8px 0",borderBottom:"1px solid #f0f4f8"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div>
+                <div style={{fontSize:13,fontWeight:700,color:"#1a3c5e"}}>{c.clienteNombre} <span style={{color:"#aaa",fontWeight:400,fontSize:11}}>({c.codigo})</span></div>
+                <div style={{fontSize:11,color:"#888"}}>{cfg.tipos[c.tipo]?.label||c.tipo} · regla {c.reglaAplicada} · emitido {fmtD(c.fechaEmision)}</div>
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <button style={{...S.btnS,fontSize:11,padding:"4px 8px"}} onClick={()=>imprimirCuponNuevo(c,cfg)}>🖨️</button>
+                <div style={{...S.badge,background:est.bg,color:est.col}}>{est.i} {est.l}</div>
+              </div>
+            </div>
+          </div>
+        );
       })}
     </Card>
   </div>);
@@ -9755,6 +10005,7 @@ const { data: depositos, setData: setDepositos, upsert: upsertDeposito } = useCo
 const { data: salidasCaja, setData: setSalidasCaja, upsert: upsertSalida } = useCollection("salidasCaja", "ll_salidas_caja", []);
 const { data: cajas, upsert: upsertCaja, nube } = useCollection("cajas", "ll_cajas", []);
 const { data: cupones, setData: setCupones, upsert: upsertCupon } = useCollection("cupones", "ll_cupones", []);
+const { data: cuponNuevoConfig, setData: setCuponNuevoConfig, upsert: upsertCuponNuevoConfig } = useCollection("cuponNuevoConfig", "ll_cupon_nuevo_config", CUPON_NUEVO_CONFIG_DEFAULT);
 const { data: promos, setData: setPromos, upsert: upsertPromo } = useCollection("promos", "ll_promos", []);
 const { data: incentivosArr, setData: setIncentivosArr, upsert: upsertIncentivo } = useCollection("configIncentivos", "ll_config_incentivos", INCENTIVOS_DEFAULT);
 const cfgInc = incentivosArr[0] || INCENTIVOS_DEFAULT[0];
@@ -9925,7 +10176,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
     empleadas={empleadas}
     upsertCaja={upsertCaja}
   />;
-  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={serviciosActivos} sesion={sesion} addAbono={addAbono} onLogout={onLogout} onIrProduccion={()=>setVista("produccion")} onIrTareas={()=>setVista("tareas")} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} upsertVenta={upsertVenta} upsertSalida={upsertSalida} upsertCliente={upsertCliente} upsertCaja={upsertCaja} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos} cfgInc={cfgInc} maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga} pins={pins} eventosProduccion={eventosProduccion} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto} sorteos={sorteos} setSorteos={setSorteos} upsertSorteo={upsertSorteo} setBoletosSorteo={setBoletosSorteo} upsertBoletoSorteo={upsertBoletoSorteo} boletosParaImprimir={boletosParaImprimir} setBoletosParaImprimir={setBoletosParaImprimir} depositos={depositos} setDepositos={setDepositos} upsertDeposito={upsertDeposito} setConteosInventario={setConteosInventario} upsertConteoInventario={upsertConteoInventario} ventasPerfumeReg={ventasPerfumeReg} setVentasPerfumeReg={setVentasPerfumeReg} upsertVentaPerfume={upsertVentaPerfume} tareasDiarias={tareasDiarias} quejas={quejas} evalConfig={evalConfig} calificacionesAudio={calificacionesAudio} facturasMartinizing={facturasMartinizing} setFacturasMartinizing={setFacturasMartinizing} upsertFacturaMartinizing={upsertFacturaMartinizing}/>;
+  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={serviciosActivos} sesion={sesion} addAbono={addAbono} onLogout={onLogout} onIrProduccion={()=>setVista("produccion")} onIrTareas={()=>setVista("tareas")} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} upsertVenta={upsertVenta} upsertSalida={upsertSalida} upsertCliente={upsertCliente} upsertCaja={upsertCaja} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} cuponNuevoConfig={cuponNuevoConfig} setCuponNuevoConfig={setCuponNuevoConfig} upsertCuponNuevoConfig={upsertCuponNuevoConfig} promos={promos} cfgInc={cfgInc} maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga} pins={pins} eventosProduccion={eventosProduccion} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto} sorteos={sorteos} setSorteos={setSorteos} upsertSorteo={upsertSorteo} setBoletosSorteo={setBoletosSorteo} upsertBoletoSorteo={upsertBoletoSorteo} boletosParaImprimir={boletosParaImprimir} setBoletosParaImprimir={setBoletosParaImprimir} depositos={depositos} setDepositos={setDepositos} upsertDeposito={upsertDeposito} setConteosInventario={setConteosInventario} upsertConteoInventario={upsertConteoInventario} ventasPerfumeReg={ventasPerfumeReg} setVentasPerfumeReg={setVentasPerfumeReg} upsertVentaPerfume={upsertVentaPerfume} tareasDiarias={tareasDiarias} quejas={quejas} evalConfig={evalConfig} calificacionesAudio={calificacionesAudio} facturasMartinizing={facturasMartinizing} setFacturasMartinizing={setFacturasMartinizing} upsertFacturaMartinizing={upsertFacturaMartinizing}/>;
   const tabs=[
     {id:"ventas",icon:"🧾",l:"Venta"},{id:"historial",icon:"📋",l:"Historial"},
     {id:"pendientes",icon:"⏳",l:"Pendientes",b:pCount},{id:"bi",icon:"🚀",l:"Dashboard"},
@@ -9980,14 +10231,14 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
       </button>))}
     </div>
     <div style={S.content}>
-      {tab==="ventas"&&<NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={setTicketV} servicios={serviciosActivos} sesion={sesion} upsertVenta={upsertVenta} upsertCliente={upsertCliente} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} promos={promos} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto} sorteos={sorteos} setSorteos={setSorteos} upsertSorteo={upsertSorteo} setBoletosSorteo={setBoletosSorteo} upsertBoletoSorteo={upsertBoletoSorteo} onBoletosGenerados={setBoletosParaImprimir}/>}
+      {tab==="ventas"&&<NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={setTicketV} servicios={serviciosActivos} sesion={sesion} upsertVenta={upsertVenta} upsertCliente={upsertCliente} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} cuponNuevoConfig={cuponNuevoConfig} setCuponNuevoConfig={setCuponNuevoConfig} upsertCuponNuevoConfig={upsertCuponNuevoConfig} promos={promos} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto} sorteos={sorteos} setSorteos={setSorteos} upsertSorteo={upsertSorteo} setBoletosSorteo={setBoletosSorteo} upsertBoletoSorteo={upsertBoletoSorteo} onBoletosGenerados={setBoletosParaImprimir}/>}
       {tab==="historial"&&<Historial ventas={ventas} setVentas={setVentas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} esAdmin={esAdmin} upsertVenta={upsertVenta} sesion={sesion} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto} setQuejas={setQuejas} upsertQueja={upsertQueja}/>}
       {tab==="pendientes"&&<Pendientes ventas={ventas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} setVentas={setVentas} upsertVenta={upsertVenta}/>}
       {tab==="bi"&&<DashboardBI ventas={ventas} empleadas={empleadas} gastos={gastos}/>}
       {tab==="clientes"&&<Clientes clientes={clientes} setClientes={setClientes} upsertCliente={upsertCliente} ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta}/>}
       {tab==="clientesAnalisis"&&<AnalisisClientes clientes={clientes} ventas={ventas}/>}
       {tab==="promosAdmin"&&<PromosAdmin promos={promos} setPromos={setPromos} upsertPromo={upsertPromo} servicios={servicios}/>}
-      {tab==="cupones"&&<Cupones cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} clientes={clientes} ventas={ventas} sesion={sesion} promos={promos}/>}
+      {tab==="cupones"&&<Cupones cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} cuponNuevoConfig={cuponNuevoConfig} setCuponNuevoConfig={setCuponNuevoConfig} upsertCuponNuevoConfig={upsertCuponNuevoConfig} clientes={clientes} ventas={ventas} empleadas={empleadas} sesion={sesion}/>}
       {tab==="resumen"&&<ResumenDia ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja}/>}
       {tab==="satisfaccionAdmin"&&<SatisfaccionClientes ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta}/>}
       {tab==="reportes"&&<Reportes ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja}/>}
@@ -10024,7 +10275,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
       {tab==="repartoSocias"&&<RepartoSocias ventas={ventas} gastos={gastos}/>}
     </div>
     {ticketV&&<TicketModal venta={ticketV} empleadas={empleadas} onClose={()=>{setCuponSug(ticketV);setTicketV(null);}}/>}
-    {cuponSug&&<CuponSugerido venta={cuponSug} clientes={clientes} ventas={ventas} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} sesion={sesion} promos={promos} onClose={()=>setCuponSug(null)}/>}
+    {/* CuponSugerido desactivado: reemplazado por el sistema automático de cupón de cliente nuevo */}
     {showSalida&&<SalidaCaja sesion={sesion} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} onClose={()=>setShowSalida(false)} upsertSalida={upsertSalida}/>}
     {showNotifsAdmin&&<NotificacionesPanel ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} addAbono={addAbono} clientes={clientes} maquinas={maquinas} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} pins={pins} empleadas={empleadas} sesion={sesion} esAdmin={true} onClose={()=>setShowNotifsAdmin(false)}/>}
     {boletosParaImprimir&&<BoletosSorteoModal data={boletosParaImprimir} sorteos={sorteos} onClose={()=>setBoletosParaImprimir(null)}/>}
