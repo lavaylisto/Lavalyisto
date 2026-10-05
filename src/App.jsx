@@ -3480,6 +3480,7 @@ function SorteosAdmin({sorteos,setSorteos,upsertSorteo,boletosSorteo,productos})
   const [form,setForm]=useState(vacio);
   const [editId,setEditId]=useState(null);
   const [buscarNum,setBuscarNum]=useState("");
+  const [fechaBoletosF,setFechaBoletosF]=useState(fechaHoyLocal()); // 🖨️ fecha para reimprimir boletos del día
   const activo=sorteosVisibles.find(s=>s.activo);
   const tienenPerfume=(productos||[]).filter(p=>!p.eliminada&&p.categoria==="aromatizador");
 
@@ -3591,10 +3592,33 @@ function SorteosAdmin({sorteos,setSorteos,upsertSorteo,boletosSorteo,productos})
             <div style={{fontSize:13,marginTop:4}}>👤 {boletoEncontrado.clienteNombre||"—"}</div>
             <div style={{fontSize:13}}>📱 {boletoEncontrado.clienteTelefono||"—"}</div>
             <div style={{fontSize:12,color:"#888"}}>Folio: {boletoEncontrado.ventaId} · {fmt(boletoEncontrado.fecha)} · {etiquetaMotivoBoleto(boletoEncontrado.motivo)}</div>
+            <button style={{...S.btnP,width:"100%",marginTop:8}} onClick={()=>imprimirBoletoSorteo(boletoEncontrado,activo)}>🖨️ Imprimir</button>
           </div>
         ):buscarNum.trim()&&<div style={{marginTop:10,color:"#c62828",fontSize:13}}>No se encontró ese número en el sorteo activo.</div>}
       </Card>
     )}
+
+    {activo&&(()=>{
+      const boletosDelDia=boletosDe(activo.id).filter(b=>fechaLocal(b.fecha)===fechaBoletosF).sort((a,b)=>b.numeroBoleto-a.numeroBoleto);
+      return(
+        <Card title="🖨️ Reimprimir boletos por fecha">
+          <label style={S.lbl}>Fecha</label>
+          <input type="date" style={S.inp} value={fechaBoletosF} onChange={e=>setFechaBoletosF(e.target.value)}/>
+          <div style={{marginTop:10}}>
+            {boletosDelDia.length===0&&<div style={S.empty}>No hay boletos generados ese día.</div>}
+            {boletosDelDia.map(b=>(
+              <div key={b.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid #f0f4f8"}}>
+                <div>
+                  <div style={{fontSize:13,fontWeight:700,color:"#1a3c5e"}}>#{String(b.numeroBoleto).padStart(4,"0")} · {b.clienteNombre||"—"}</div>
+                  <div style={{fontSize:11,color:"#888"}}>{fmt(b.fecha)} · {etiquetaMotivoBoleto(b.motivo)}</div>
+                </div>
+                <button style={{...S.btnS,background:"#1a3c5e",color:"#fff"}} onClick={()=>imprimirBoletoSorteo(b,activo)}>🖨️ Imprimir</button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      );
+    })()}
 
     <Card title={editId?"✏️ Editar sorteo":"➕ Nuevo sorteo"}>
       <div style={{marginBottom:8}}><label style={S.lbl}>Nombre del sorteo</label><input style={S.inp} placeholder="ej. Sorteo Alexa Sept-Oct 2026" value={form.nombre} onChange={e=>setForm({...form,nombre:e.target.value})}/></div>
@@ -7152,7 +7176,7 @@ function SatisfaccionClientes({ventas,setVentas,upsertVenta}){
 // 💵 ROLES DE PAGO — calcula IESS (personal y patronal), fondo de reserva, provisión de décimos y
 // vacaciones para cada colaboradora, mes a mes, según las tasas vigentes 2026 en Ecuador.
 // 💵 Constantes y fórmulas de nómina Ecuador 2026 — reutilizables entre Roles de Pago y Obligaciones
-const TASA_IESS_PERSONAL=0.0945, TASA_IESS_PATRONAL=0.1115, TASA_FONDO_RESERVA=0.0833, SBU_2026=482;
+const TASA_IESS_PERSONAL=0.0945, TASA_IESS_PATRONAL=0.1115, TASA_FONDO_RESERVA=1/12, SBU_2026=482;
 const periodoDecimo3=mesSel=>{const [y,m]=mesSel.split("-").map(Number);const inicioAnio=m===12?y:y-1;return{inicio:`${inicioAnio}-12`,finAnio:inicioAnio+1,pagoHasta:`24 dic ${inicioAnio+1}`};};
 const periodoDecimo4=mesSel=>{const [y,m]=mesSel.split("-").map(Number);const inicioAnio=m>=8?y:y-1;return{inicio:`${inicioAnio}-08`,finAnio:inicioAnio+1,pagoHasta:`15 ago ${inicioAnio+1}`};};
 const mesesDelPeriodo=inicioClave=>{const [y0,m0]=inicioClave.split("-").map(Number);const arr=[];let y=y0,m=m0;for(let i=0;i<12;i++){arr.push(`${y}-${String(m).padStart(2,"0")}`);m++;if(m>12){m=1;y++;}}return arr;};
@@ -7165,6 +7189,14 @@ function calcularRolDePago(e,mesSel,rolesPago){
   const horasExtra=guardado?.horasExtra||0;
   const otrosDescuentos=guardado?.otrosDescuentos||0;
   const motivoDescuento=guardado?.motivoDescuento||"";
+  const acumFondoReserva=guardado?.acumFondoReserva||0;
+  const pagoAlimentacion=guardado?.pagoAlimentacion||0;
+  const prestamosIess=guardado?.prestamosIess||0;
+  const observaciones=guardado?.observaciones||"";
+  const mensualizaDecimos=e.mensualizaDecimos!==false; // por defecto SÍ se mensualizan (se pagan cada mes dentro del rol) // si se pagan cada mes dentro del rol (en vez de acumularse)
+  let numeroRolDefault=1;
+  if(e.fechaIngreso){const ing0=new Date(e.fechaIngreso+"T00:00:00");numeroRolDefault=Math.max(1,(yy-ing0.getFullYear())*12+(mm-(ing0.getMonth()+1))+1);}
+  const numeroRol=guardado?.numeroRol!=null&&guardado.numeroRol!==""?guardado.numeroRol:numeroRolDefault;
   // 📆 Días trabajados: por defecto, se calcula solo según la fecha de ingreso — si el mes es ANTES de
   // que ingresara, son 0 días; si es el mes que ingresó, solo desde ese día hasta fin de mes; si es
   // después, el mes completo. Esto evita contar sueldo/décimos de meses en que todavía no trabajaba.
@@ -7190,14 +7222,18 @@ function calcularRolDePago(e,mesSel,rolesPago){
   const provisionDecimo3=ingresosGravables/12;
   const provisionDecimo4=(SBU_2026/12)*factorDias;
   const provisionVacaciones=remuneracion/24;
-  const totalDescuentos=iessPersonal+otrosDescuentos;
-  const netoAPagar=remuneracion+pagoSupl+pagoExtra+fondoReserva-totalDescuentos;
+  const decimo3Pagado=mensualizaDecimos?provisionDecimo3:0;
+  const decimo4Pagado=mensualizaDecimos?provisionDecimo4:0;
+  const totalDescuentos=iessPersonal+acumFondoReserva+pagoAlimentacion+prestamosIess+otrosDescuentos;
+  const totalIngresos=remuneracion+pagoSupl+pagoExtra+decimo3Pagado+decimo4Pagado+fondoReserva;
+  const netoAPagar=totalIngresos-totalDescuentos;
   const costoEmpresa=remuneracion+pagoSupl+pagoExtra+iessPatronal+fondoReserva+provisionDecimo3+provisionDecimo4+provisionVacaciones;
-  return{remuneracion,remuneracionCompleta,diasTrabajados,diasDelMes,horasSupl,horasExtra,otrosDescuentos,motivoDescuento,totalDescuentos,valorHora,pagoSupl,pagoExtra,ingresosGravables,iessPersonal,iessPatronal,tieneUnAnio,fondoReserva,provisionDecimo3,provisionDecimo4,provisionVacaciones,netoAPagar,costoEmpresa};
+  return{totalIngresos,decimo3Pagado,decimo4Pagado,acumFondoReserva,pagoAlimentacion,prestamosIess,observaciones,numeroRol,mensualizaDecimos,remuneracion,remuneracionCompleta,diasTrabajados,diasDelMes,horasSupl,horasExtra,otrosDescuentos,motivoDescuento,totalDescuentos,valorHora,pagoSupl,pagoExtra,ingresosGravables,iessPersonal,iessPatronal,tieneUnAnio,fondoReserva,provisionDecimo3,provisionDecimo4,provisionVacaciones,netoAPagar,costoEmpresa};
 }
 // 📊 Acumulado de décimo tercero o cuarto del período en curso, sumando mes a mes lo que ya se registró
 function acumuladoDecimoDe(e,mesSel,rolesPago,tipo){ // tipo: 3 | 4
   const periodo=tipo===3?periodoDecimo3(mesSel):periodoDecimo4(mesSel);
+  if(e.mensualizaDecimos!==false)return{total:0,periodo};
   const meses=mesesDelPeriodo(periodo.inicio);
   let total=0;
   meses.forEach(m=>{const r=calcularRolDePago(e,m,rolesPago);total+=tipo===3?r.provisionDecimo3:r.provisionDecimo4;});
@@ -7363,18 +7399,39 @@ function ObligacionesPago({empleadas,rolesPago}){
   </div>);
 }
 
-function RolesDePago({empleadas,setEmpleadas,upsertEmpleada,ventas,rolesPago,setRolesPago,upsertRolPago,sesion}){
+function RolesDePago({empleadas,setEmpleadas,upsertEmpleada,ventas,rolesPago,setRolesPago,upsertRolPago,rolesConfig,setRolesConfig,upsertRolesConfig,sesion}){
   const [mes,setMes]=useState(mesK(new Date()));
   const [horasEd,setHorasEd]=useState({}); // {empleadaId: {supl, extra}} — borrador antes de guardar
 
   const rolDe=(empId,mesSel)=>(rolesPago||[]).find(r=>String(r.empleadaId)===String(empId)&&r.mes===mesSel);
+  // 🏢 Nombre del empleador que sale en el rol impreso
+  const cfgRoles=(rolesConfig&&rolesConfig[0])||{id:"config",empleador:""};
+  const [empleadorEd,setEmpleadorEd]=useState(null);
+  const guardarEmpleador=()=>{
+    const nuevo={...cfgRoles,id:"config",empleador:String(empleadorEd!=null?empleadorEd:(cfgRoles.empleador||"")).trim()};
+    if(setRolesConfig)setRolesConfig([nuevo]);
+    if(upsertRolesConfig)upsertRolesConfig({...nuevo,_updatedAt:new Date().toISOString()});
+    setEmpleadorEd(null);
+  };
   const activas=(empleadas||[]).filter(e=>e.activa&&e.recibeSueldo!==false); // solo quien recibe sueldo
   const calcularRol=(e,mesSel)=>calcularRolDePago(e,mesSel,rolesPago);
 
   const guardarHoras=e=>{
     const draft=horasEd[e.id]||{};
     const rActual=calcularRol(e,mes); // valores ya calculados (incluye el default correcto de días según fecha de ingreso)
-    const entry={id:e.id+"_"+mes,empleadaId:e.id,mes,horasSupl:parseFloat(draft.supl)||0,horasExtra:parseFloat(draft.extra)||0,diasTrabajados:draft.dias!=null&&draft.dias!==""?Math.min(rActual.diasDelMes,Math.max(0,parseFloat(draft.dias))):rActual.diasTrabajados,otrosDescuentos:parseFloat(draft.descuento)||0,motivoDescuento:draft.motivoDescuento||"",diasVacacionesTomados:parseFloat(draft.diasVacaciones)||0,diasPermiso:parseFloat(draft.diasPermiso)||0,motivoPermiso:draft.motivoPermiso||"",registradoPor:sesion?.nombre||null};
+    const g=rolDe(e.id,mes)||{};
+    // Si el campo no se tocó, se conserva lo que ya estaba guardado (antes se perdía y quedaba en 0)
+    const num=(k,saved)=>draft[k]!=null?(parseFloat(draft[k])||0):(saved||0);
+    const txt=(k,saved)=>draft[k]!=null?draft[k]:(saved||"");
+    const entry={id:e.id+"_"+mes,empleadaId:e.id,mes,
+      horasSupl:num("supl",g.horasSupl),horasExtra:num("extra",g.horasExtra),
+      diasTrabajados:draft.dias!=null&&draft.dias!==""?Math.min(rActual.diasDelMes,Math.max(0,parseFloat(draft.dias)||0)):rActual.diasTrabajados,
+      otrosDescuentos:num("descuento",g.otrosDescuentos),motivoDescuento:txt("motivoDescuento",g.motivoDescuento),
+      diasVacacionesTomados:num("diasVacaciones",g.diasVacacionesTomados),diasPermiso:num("diasPermiso",g.diasPermiso),motivoPermiso:txt("motivoPermiso",g.motivoPermiso),
+      acumFondoReserva:num("acumFR",g.acumFondoReserva),pagoAlimentacion:num("alimentacion",g.pagoAlimentacion),prestamosIess:num("prestamos",g.prestamosIess),
+      observaciones:txt("observaciones",g.observaciones),
+      numeroRol:draft.numeroRol!=null&&draft.numeroRol!==""?draft.numeroRol:rActual.numeroRol,
+      registradoPor:sesion?.nombre||null};
     setRolesPago(prev=>{const existe=prev.some(r=>r.id===entry.id);return existe?prev.map(r=>r.id===entry.id?entry:r):[entry,...prev];});
     if(upsertRolPago)upsertRolPago({...entry,_updatedAt:new Date().toISOString()});
   };
@@ -7383,7 +7440,7 @@ function RolesDePago({empleadas,setEmpleadas,upsertEmpleada,ventas,rolesPago,set
   const [editandoDatos,setEditandoDatos]=useState(null); // id de la empleada cuyos datos base se están editando
   const [datosEd,setDatosEd]=useState({});
   const guardarDatosBase=e=>{
-    const cambios={remuneracion:parseFloat(datosEd.remuneracion)||e.remuneracion||SBU_2026,fechaIngreso:datosEd.fechaIngreso||e.fechaIngreso||null};
+    const cambios={remuneracion:parseFloat(datosEd.remuneracion)||e.remuneracion||SBU_2026,fechaIngreso:datosEd.fechaIngreso||e.fechaIngreso||null,cedula:datosEd.cedula!=null?datosEd.cedula:(e.cedula||""),mensualizaDecimos:datosEd.mensualizaDecimos!=null?!!datosEd.mensualizaDecimos:e.mensualizaDecimos!==false};
     setEmpleadas(prev=>{
       const next=prev.map(x=>x.id===e.id?{...x,...cambios}:x);
       const updated=next.find(x=>x.id===e.id);
@@ -7410,29 +7467,55 @@ function RolesDePago({empleadas,setEmpleadas,upsertEmpleada,ventas,rolesPago,set
   // 🖨️ Rol de pago individual, listo para imprimir y firmar
   const imprimirRol=e=>{
     const r=calcularRol(e,mes);
+    const [yy,mm]=mes.split("-").map(Number);
+    const MESES_ES=["ENERO","FEBRERO","MARZO","ABRIL","MAYO","JUNIO","JULIO","AGOSTO","SEPTIEMBRE","OCTUBRE","NOVIEMBRE","DICIEMBRE"];
+    const periodo=`${MESES_ES[mm-1]}_${yy}`;
+    const mon=n=>"$"+Number(n||0).toFixed(2).replace(".",",");
+    const esc=t=>String(t==null?"":t).replace(/&/g,"&amp;").replace(/</g,"&lt;");
+    const fIng=e.fechaIngreso?e.fechaIngreso.split("-").reverse().join("/"):"";
+    // Columna de ingresos y de descuentos — las horas extra solo aparecen si se llenó el casillero
+    const izq=[["SUELDO",r.remuneracion]];
+    if(r.horasSupl>0)izq.push([`HORAS SUPLEMENTARIAS (${r.horasSupl} h)`,r.pagoSupl]);
+    if(r.horasExtra>0)izq.push([`HORAS EXTRAORDINARIAS (${r.horasExtra} h)`,r.pagoExtra]);
+    izq.push(["DÉCIMO TERCERO",r.decimo3Pagado],["DÉCIMO CUARTO",r.decimo4Pagado],["FONDOS DE RESERVA",r.fondoReserva]);
+    const der=[["APORTE PERSONAL IESS (9,45%)",r.iessPersonal],["ACUMULACIÓN FONDOS DE RESERVA (8,33%)",r.acumFondoReserva],["PAGO ALIMENTACIÓN",r.pagoAlimentacion],["PRÉSTAMOS IESS",r.prestamosIess]];
+    if(r.otrosDescuentos>0)der.push(["OTROS DESCUENTOS"+(r.motivoDescuento?" ("+esc(r.motivoDescuento)+")":""),r.otrosDescuentos]);
+    const n=Math.max(izq.length,der.length);
+    let filas="";
+    for(let k=0;k<n;k++){
+      const a=izq[k],b=der[k];
+      filas+=`<tr class="f"><td class="l">${a?a[0]:""}</td><td>${a?mon(a[1]):""}</td><td class="l">${b?b[0]:""}</td><td>${b?mon(b[1]):""}</td></tr>`;
+    }
     const w=window.open("","_blank","width=800,height=1000");
     if(!w)return;
-    const fila=(label,valor,esNegativo)=>`<tr><td style="padding:6px 8px;border-bottom:1px solid #eee">${label}</td><td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-weight:600;${esNegativo?"color:#c62828":""}">${esNegativo?"-":""}$${Math.abs(valor).toFixed(2)}</td></tr>`;
-    const html=`<html><head><meta charset="UTF-8"><title>Rol de pago</title><style>body{font-family:sans-serif;padding:24px;color:#1a3c5e}table{width:100%;border-collapse:collapse;margin-top:10px}th{background:#1a3c5e;color:#fff;padding:6px 8px;text-align:left}</style></head><body>
-      <div style="text-align:center;margin-bottom:14px"><div style="font-size:22px;font-weight:800">🫧 Lava&Listo</div><div style="font-size:12px;color:#888">Rol de pago individual</div></div>
-      <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:10px"><div><strong>Colaboradora:</strong> ${e.nombre}</div><div><strong>Mes:</strong> ${mes}</div></div>
-      <div style="font-size:12px;color:#555;margin-bottom:10px">📆 Días trabajados: <strong>${r.diasTrabajados} de ${r.diasDelMes}</strong></div>
+    const html=`<html><head><meta charset="UTF-8"><title>Rol de pagos</title><style>
+      @page{size:A4 portrait;margin:14mm}
+      body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:0}
+      table{width:100%;border-collapse:collapse;table-layout:fixed}
+      td{border:1px solid #000;padding:6px 8px;font-size:13px}
+      .t{font-size:22px;font-weight:800;text-align:center;padding:8px}
+      .k{font-weight:700}
+      .h{font-weight:700;text-align:center;padding:10px}
+      .f td{height:46px;text-align:center}
+      .f .l{font-weight:700}
+    </style></head><body>
       <table>
-        <tr><th colspan="2">INGRESOS</th></tr>
-        ${fila(`Remuneración (${r.diasTrabajados}/${r.diasDelMes} días)`,r.remuneracion)}
-        ${r.horasSupl>0?fila(`Horas suplementarias (${r.horasSupl}h · +50%)`,r.pagoSupl):""}
-        ${r.horasExtra>0?fila(`Horas extraordinarias (${r.horasExtra}h · +100%)`,r.pagoExtra):""}
-        ${r.fondoReserva>0?fila("Fondo de Reserva (8.33%)",r.fondoReserva):""}
-        <tr><th colspan="2">🔻 DESCUENTOS</th></tr>
-        ${fila("Aporte personal IESS (9.45%)",r.iessPersonal,true)}
-        ${r.otrosDescuentos>0?fila(`Otro descuento${r.motivoDescuento?" ("+r.motivoDescuento+")":""}`,r.otrosDescuentos,true):""}
-        <tr><td style="padding:10px 8px;font-weight:800;font-size:15px;border-top:2px solid #1a3c5e">NETO A RECIBIR</td><td style="padding:10px 8px;text-align:right;font-weight:800;font-size:15px;border-top:2px solid #1a3c5e;color:#2e7d32">$${r.netoAPagar.toFixed(2)}</td></tr>
+        <colgroup><col style="width:25%"/><col style="width:25%"/><col style="width:25%"/><col style="width:25%"/></colgroup>
+        <tr><td class="t" colspan="4">ROL DE PAGOS</td></tr>
+        <tr><td class="k">EMPLEADOR:</td><td colspan="3">${esc(cfgRoles.empleador)}</td></tr>
+        <tr><td class="k">TRABAJADOR:</td><td colspan="3">${esc(e.nombre)}</td></tr>
+        <tr><td class="k">CÉDULA DE CIUDADANÍA:</td><td colspan="3">${esc(e.cedula)}</td></tr>
+        <tr><td class="k">FECHA DE INGRESO:</td><td colspan="3">${fIng}</td></tr>
+        <tr><td class="k">PERIODO:</td><td>${periodo}</td><td class="k" style="text-align:right">ROL N°</td><td style="text-align:center">${esc(r.numeroRol)}</td></tr>
+        <tr><td class="k">SUELDO:</td><td colspan="3">${mon(r.remuneracionCompleta)}</td></tr>
+        <tr><td class="h" colspan="2">INGRESOS</td><td class="h" colspan="2">DESCUENTOS</td></tr>
+        ${filas}
+        <tr><td class="k">DIAS TRABAJADOS</td><td colspan="3" style="text-align:right">${r.diasTrabajados}</td></tr>
+        <tr><td class="k">NETO A PAGAR</td><td colspan="3" style="text-align:right;font-weight:800">${mon(r.netoAPagar)}</td></tr>
+        <tr><td class="k">OBSERVACIONES:</td><td colspan="3">${esc(r.observaciones)}</td></tr>
+        <tr><td colspan="4" style="height:36px"></td></tr>
+        <tr><td class="k" style="text-align:center;height:100px">FIRMA CONFORME:</td><td colspan="3"></td></tr>
       </table>
-      <div style="margin-top:10px;font-size:11px;color:#888">Provisiones informativas (no se pagan este mes): Décimo tercero $${r.provisionDecimo3.toFixed(2)} · Décimo cuarto $${r.provisionDecimo4.toFixed(2)} · Vacaciones $${r.provisionVacaciones.toFixed(2)}</div>
-      <div style="margin-top:70px;display:flex;justify-content:space-between;font-size:12px">
-        <div style="text-align:center;width:45%"><div style="border-top:1px solid #333;padding-top:6px">Firma colaboradora</div></div>
-        <div style="text-align:center;width:45%"><div style="border-top:1px solid #333;padding-top:6px">Firma Lava&Listo</div></div>
-      </div>
       <scr${""}ipt>window.print();</scr${""}ipt>
     </body></html>`;
     w.document.write(html);
@@ -7453,6 +7536,12 @@ function RolesDePago({empleadas,setEmpleadas,upsertEmpleada,ventas,rolesPago,set
       <div style={{...S.kpi,borderLeft:"4px solid #1565c0",gridColumn:"1/-1"}}><div style={{fontSize:18}}>🏦</div><div><div style={{fontWeight:800,fontSize:15,color:"#1565c0"}}>${(totales.iessPersonal+totales.iessPatronal).toFixed(2)}</div><div style={{fontSize:10,fontWeight:600,color:"#1a3c5e"}}>Total a pagar al IESS este mes (personal ${totales.iessPersonal.toFixed(2)} + patronal ${totales.iessPatronal.toFixed(2)})</div></div></div>
     </div>
 
+    <Card title="🏢 Empleador (sale en el rol impreso)">
+      <input style={S.inp} placeholder="Nombre completo del empleador" value={empleadorEd!=null?empleadorEd:(cfgRoles.empleador||"")} onChange={ev=>setEmpleadorEd(ev.target.value)}/>
+      {empleadorEd!=null&&<button style={{...S.btnP,width:"100%",marginTop:8}} onClick={guardarEmpleador}>💾 Guardar empleador</button>}
+      {!cfgRoles.empleador&&empleadorEd==null&&<div style={{fontSize:11,color:"#e65100",marginTop:6}}>⚠️ Escribe el nombre del empleador para que salga en el rol impreso.</div>}
+    </Card>
+
     <button style={{...S.btnP,width:"100%",marginBottom:16}} onClick={exportarCSV}>📥 Descargar rol de pagos del mes (CSV)</button>
 
     {activas.map(e=>{
@@ -7468,13 +7557,15 @@ function RolesDePago({empleadas,setEmpleadas,upsertEmpleada,ventas,rolesPago,set
                 <div><label style={S.lbl}>Remuneración mensual</label><input type="number" step="0.01" style={S.inp} value={datosEd.remuneracion??e.remuneracion??SBU_2026} onChange={ev=>setDatosEd({...datosEd,remuneracion:ev.target.value})}/></div>
                 <div><label style={S.lbl}>Fecha de ingreso</label><input type="date" style={S.inp} value={datosEd.fechaIngreso??e.fechaIngreso??""} onChange={ev=>setDatosEd({...datosEd,fechaIngreso:ev.target.value})}/></div>
               </div>
+              <div style={{marginTop:8}}><label style={S.lbl}>Cédula de ciudadanía</label><input style={S.inp} placeholder="Cédula" value={datosEd.cedula??e.cedula??""} onChange={ev=>setDatosEd({...datosEd,cedula:ev.target.value})}/></div>
+              <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,marginTop:8,cursor:"pointer"}}><input type="checkbox" checked={datosEd.mensualizaDecimos!=null?!!datosEd.mensualizaDecimos:e.mensualizaDecimos!==false} onChange={ev=>setDatosEd({...datosEd,mensualizaDecimos:ev.target.checked})}/>Décimos mensualizados (se pagan cada mes dentro del rol)</label>
               <div style={{display:"flex",gap:8,marginTop:8}}><button style={{...S.btnP,flex:1}} onClick={()=>guardarDatosBase(e)}>✓ Guardar</button><button style={S.btnC} onClick={()=>setEditandoDatos(null)}>Cancelar</button></div>
             </div>
           ):(
             <div style={{fontSize:11,color:"#888",marginBottom:8,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
               <span>Remuneración: ${r.remuneracionCompleta.toFixed(2)} · Ingreso: {e.fechaIngreso?fmtD(e.fechaIngreso):"—"}</span>
               {!e.fechaIngreso&&<span style={{color:"#e65100",fontWeight:600}}>⚠️ Falta fecha de ingreso (afecta el Fondo de Reserva)</span>}
-              <button style={{...S.btnS,fontSize:10,padding:"3px 8px"}} onClick={()=>{setEditandoDatos(e.id);setDatosEd({remuneracion:e.remuneracion,fechaIngreso:e.fechaIngreso});}}>✏️ Editar</button>
+              <button style={{...S.btnS,fontSize:10,padding:"3px 8px"}} onClick={()=>{setEditandoDatos(e.id);setDatosEd({remuneracion:e.remuneracion,fechaIngreso:e.fechaIngreso,cedula:e.cedula||"",mensualizaDecimos:e.mensualizaDecimos!==false});}}>✏️ Editar</button>
             </div>
           )}
 
@@ -7492,6 +7583,15 @@ function RolesDePago({empleadas,setEmpleadas,upsertEmpleada,ventas,rolesPago,set
             <div><label style={S.lbl}>📋 Días de permiso</label><input type="number" min="0" style={S.inp} placeholder="0" value={horasEd[e.id]?.diasPermiso??""} onChange={ev=>setHorasEd({...horasEd,[e.id]:{...horasEd[e.id],diasPermiso:ev.target.value}})}/></div>
           </div>
           <div style={{marginBottom:8}}><label style={S.lbl}>Motivo del permiso (si aplica)</label><input style={S.inp} placeholder="ej. cita médica, asunto personal..." value={horasEd[e.id]?.motivoPermiso??""} onChange={ev=>setHorasEd({...horasEd,[e.id]:{...horasEd[e.id],motivoPermiso:ev.target.value}})}/></div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:6}}>
+            <div><label style={S.lbl}>Acum. fondos reserva ($)</label><input type="number" min="0" step="0.01" style={S.inp} placeholder="0.00" value={horasEd[e.id]?.acumFR??(r.acumFondoReserva||"")} onChange={ev=>setHorasEd({...horasEd,[e.id]:{...horasEd[e.id],acumFR:ev.target.value}})}/></div>
+            <div><label style={S.lbl}>Pago alimentación ($)</label><input type="number" min="0" step="0.01" style={S.inp} placeholder="0.00" value={horasEd[e.id]?.alimentacion??(r.pagoAlimentacion||"")} onChange={ev=>setHorasEd({...horasEd,[e.id]:{...horasEd[e.id],alimentacion:ev.target.value}})}/></div>
+            <div><label style={S.lbl}>Préstamos IESS ($)</label><input type="number" min="0" step="0.01" style={S.inp} placeholder="0.00" value={horasEd[e.id]?.prestamos??(r.prestamosIess||"")} onChange={ev=>setHorasEd({...horasEd,[e.id]:{...horasEd[e.id],prestamos:ev.target.value}})}/></div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 3fr",gap:6,marginBottom:8}}>
+            <div><label style={S.lbl}>N° de rol</label><input style={S.inp} value={horasEd[e.id]?.numeroRol??r.numeroRol} onChange={ev=>setHorasEd({...horasEd,[e.id]:{...horasEd[e.id],numeroRol:ev.target.value}})}/></div>
+            <div><label style={S.lbl}>Observaciones</label><input style={S.inp} placeholder="(opcional)" value={horasEd[e.id]?.observaciones??r.observaciones} onChange={ev=>setHorasEd({...horasEd,[e.id]:{...horasEd[e.id],observaciones:ev.target.value}})}/></div>
+          </div>
           <button style={{...S.btnS,width:"100%",background:"#1a3c5e",color:"#fff",marginBottom:8}} onClick={()=>guardarHoras(e)}>💾 Guardar horas, días y descuentos</button>
           {r.diasTrabajados<r.diasDelMes&&<div style={{fontSize:11,color:"#e65100",marginBottom:8}}>📆 Trabajó {r.diasTrabajados} de {r.diasDelMes} días — el sueldo y los décimos se prorratearon automáticamente.</div>}
 
@@ -7502,7 +7602,12 @@ function RolesDePago({empleadas,setEmpleadas,upsertEmpleada,ventas,rolesPago,set
             <div style={{display:"flex",justifyContent:"space-between",borderTop:"1px solid #f0f4f8",paddingTop:4,marginTop:2}}><span>Ingresos gravables</span><strong>${r.ingresosGravables.toFixed(2)}</strong></div>
             <div style={{fontWeight:700,color:"#c62828",marginTop:4}}>🔻 Descuentos</div>
             <div style={{display:"flex",justifyContent:"space-between",color:"#c62828",paddingLeft:10}}><span>IESS personal (9.45%)</span><strong>-${r.iessPersonal.toFixed(2)}</strong></div>
+            {r.acumFondoReserva>0&&<div style={{display:"flex",justifyContent:"space-between",color:"#c62828",paddingLeft:10}}><span>Acumulación fondos de reserva</span><strong>-${r.acumFondoReserva.toFixed(2)}</strong></div>}
+            {r.pagoAlimentacion>0&&<div style={{display:"flex",justifyContent:"space-between",color:"#c62828",paddingLeft:10}}><span>Pago alimentación</span><strong>-${r.pagoAlimentacion.toFixed(2)}</strong></div>}
+            {r.prestamosIess>0&&<div style={{display:"flex",justifyContent:"space-between",color:"#c62828",paddingLeft:10}}><span>Préstamos IESS</span><strong>-${r.prestamosIess.toFixed(2)}</strong></div>}
             {r.otrosDescuentos>0&&<div style={{display:"flex",justifyContent:"space-between",color:"#c62828",paddingLeft:10}}><span>Otro{r.motivoDescuento?` (${r.motivoDescuento})`:""}</span><strong>-${r.otrosDescuentos.toFixed(2)}</strong></div>}
+            {r.decimo3Pagado>0&&<div style={{display:"flex",justifyContent:"space-between",color:"#2e7d32"}}><span>(+) Décimo tercero (mensualizado)</span><strong>+${r.decimo3Pagado.toFixed(2)}</strong></div>}
+            {r.decimo4Pagado>0&&<div style={{display:"flex",justifyContent:"space-between",color:"#2e7d32"}}><span>(+) Décimo cuarto (mensualizado)</span><strong>+${r.decimo4Pagado.toFixed(2)}</strong></div>}
             {r.fondoReserva>0&&<div style={{display:"flex",justifyContent:"space-between",color:"#2e7d32"}}><span>(+) Fondo de Reserva (8.33%)</span><strong>+${r.fondoReserva.toFixed(2)}</strong></div>}
             <div style={{display:"flex",justifyContent:"space-between",borderTop:"1.5px solid #1a3c5e",paddingTop:4,marginTop:4,fontSize:14}}><span style={{fontWeight:700,color:"#1a3c5e"}}>NETO a pagar a {e.nombre.split(" ")[0]}</span><strong style={{color:"#2e7d32"}}>${r.netoAPagar.toFixed(2)}</strong></div>
           </div>
@@ -9988,6 +10093,7 @@ const { data: quejas, setData: setQuejas, upsert: upsertQueja } = useCollection(
 const { data: facturasMartinizing, setData: setFacturasMartinizing, upsert: upsertFacturaMartinizing } = useCollection("facturasMartinizing", "ll_facturas_martinizing", []);
 // 💵 Roles de pago — horas extras registradas por colaboradora y mes (el resto se calcula en vivo)
 const { data: rolesPago, setData: setRolesPago, upsert: upsertRolPago } = useCollection("rolesPago", "ll_roles_pago", []);
+const { data: rolesConfig, setData: setRolesConfig, upsert: upsertRolesConfig } = useCollection("rolesConfig", "ll_roles_config", [{id:"config",empleador:""}]);
 // 🎧 Calificaciones manuales de audios de atención (2 por semana, ~8 al mes)
 const { data: calificacionesAudio, setData: setCalificacionesAudio, upsert: upsertCalificacionAudio } = useCollection("calificacionesAudio", "ll_calificaciones_audio", []);
 const { data: evalConfigArr, setData: setEvalConfigArr, upsert: upsertEvalConfig } = useCollection("evalConfig", "ll_eval_config", EVAL_CONFIG_DEFAULT);
@@ -10270,7 +10376,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
       {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={handleCierreListo} onResetCierre={()=>setCierreOk(false)} sesion={sesion} salidasCaja={salidasCaja} setVentas={setVentas} upsertVenta={upsertVenta} upsertCaja={upsertCaja} eventosProduccion={eventosProduccion} cargas={cargas} maquinas={maquinas}/>}
       {tab==="config"&&<Configuracion servicios={servicios} setServicios={setServicios} exportarDatos={exportarDatos} importarDatos={importarDatos} upsertVenta={upsertVenta} upsertServicio={upsertServicio}/>}
       {tab==="usuarios"&&<GestionUsuarios/>}
-      {tab==="rolesPago"&&<RolesDePago empleadas={empleadas} setEmpleadas={setEmpleadas} upsertEmpleada={upsertEmpleada} ventas={ventas} rolesPago={rolesPago} setRolesPago={setRolesPago} upsertRolPago={upsertRolPago} sesion={sesion}/>}
+      {tab==="rolesPago"&&<RolesDePago empleadas={empleadas} setEmpleadas={setEmpleadas} upsertEmpleada={upsertEmpleada} ventas={ventas} rolesPago={rolesPago} setRolesPago={setRolesPago} upsertRolPago={upsertRolPago} rolesConfig={rolesConfig} setRolesConfig={setRolesConfig} upsertRolesConfig={upsertRolesConfig} sesion={sesion}/>}
       {tab==="obligaciones"&&<ObligacionesPago empleadas={empleadas} rolesPago={rolesPago}/>}
       {tab==="repartoSocias"&&<RepartoSocias ventas={ventas} gastos={gastos}/>}
     </div>
