@@ -76,6 +76,23 @@ const registrarKardex=({itemId,itemNombre,tipo,cantidad,folio,motivo,saldoResult
   if(upsertKardex)upsertKardex(entry);
   return entry;
 };
+// ↩️ Revierte del inventario lo que entró con una factura (al anularla): descuenta el stock y deja la nota de crédito en el kardex
+const revertirEntradaInventario=({lineas,folio,proveedor,motivo,inventario,setInventario,upsertInventario,setKardexInsumos,upsertKardexInsumo,sesion})=>{
+  const ahora=new Date().toISOString();const work={};const kx=[];
+  (lineas||[]).forEach(l=>{
+    const orig=(inventario||[]).find(i=>String(i.id)===String(l.insumoId));if(!orig)return;
+    const w=work[orig.id]||(work[orig.id]={...orig});
+    const u=parseFloat(l.unidades)||0;if(u<=0)return;
+    const nuevo=Math.max(0,(w.stock||0)-u);w.stock=nuevo;
+    kx.push({itemId:orig.id,itemNombre:l.nombre||orig.nombre,tipo:"nota_credito",cantidad:-u,folio:folio||null,motivo,saldoResultante:nuevo,registradoPor:sesion?.nombre,precioUnitario:l.costo!=null?l.costo:null,proveedor:proveedor||null});
+  });
+  if(Object.keys(work).length){
+    if(setInventario)setInventario(prev=>prev.map(i=>work[i.id]?{...i,stock:work[i.id].stock}:i));
+    Object.values(work).forEach(w=>{if(upsertInventario)upsertInventario({...w,_updatedAt:ahora});});
+  }
+  kx.forEach(k=>registrarKardex(k,{setKardex:setKardexInsumos,upsertKardex:upsertKardexInsumo}));
+  return kx.length;
+};
 const TIPO_KARDEX_LBL={venta:{label:"Venta",icon:"🛍️",color:"#c62828"},nota_credito:{label:"Nota de crédito",icon:"↩️",color:"#2e7d32"},ajuste_manual:{label:"Ajuste manual",icon:"✏️",color:"#1565c0"},ingreso_inicial:{label:"Ingreso inicial",icon:"🆕",color:"#7b1fa2"},entrada_factura:{label:"Entrada por factura",icon:"🧾",color:"#2e7d32"},consumo:{label:"Consumo/uso",icon:"📉",color:"#c62828"},entrega:{label:"Entrega",icon:"📤",color:"#c62828"},reposicion:{label:"Reposición",icon:"📦",color:"#2e7d32"}};
 // 🆕 Genera un código correlativo nuevo para un insumo (INS-0001, INS-0002...) buscando el mayor número ya usado
 const generarCodigoInsumo=inventario=>{
@@ -6050,19 +6067,9 @@ function ComprasInsumos({inventario,setInventario,upsertInventario,kardexInsumos
   // ↩️ Anular una compra: devuelve las unidades (sale del stock), deja la nota de crédito en el kardex y elimina el gasto
   const anular=c=>{
     if(c.anulada)return;
-    if(!window.confirm(`¿Anular la compra ${c.numeroFactura||""} a ${c.proveedor}? Se descuentan esas unidades del stock y se elimina el gasto.`))return;
+    if(!window.confirm(`¿Anular la compra ${c.numeroFactura||""} a ${c.proveedor}?\n\nSe descuentan esas unidades del inventario de inmediato y se elimina el gasto.`))return;
     const ahora=new Date().toISOString();
-    const work={},kardexOut=[];
-    (c.lineas||[]).forEach(l=>{
-      const orig=(inventario||[]).find(i=>i.id===l.insumoId);if(!orig)return;
-      const w=work[orig.id]||(work[orig.id]={...orig});
-      const nuevo=Math.max(0,(w.stock||0)-l.unidadesTotales);
-      w.stock=nuevo;
-      kardexOut.push({itemId:orig.id,itemNombre:l.nombre,tipo:"nota_credito",cantidad:-l.unidadesTotales,folio:c.numeroFactura||null,motivo:`Anulación de compra a ${c.proveedor}`,saldoResultante:nuevo,registradoPor:sesion?.nombre,precioUnitario:l.costoUnitarioBase,proveedor:c.proveedor});
-    });
-    setInventario(prev=>prev.map(i=>work[i.id]?work[i.id]:i));
-    Object.values(work).forEach(w=>{if(upsertInventario)upsertInventario({...w,_updatedAt:ahora});});
-    kardexOut.forEach(k=>registrarKardex(k,{setKardex:setKardexInsumos,upsertKardex:upsertKardexInsumo}));
+    revertirEntradaInventario({lineas:(c.lineas||[]).map(l=>({insumoId:l.insumoId,nombre:l.nombre,unidades:l.unidadesTotales,costo:l.costoUnitarioBase})),folio:c.numeroFactura,proveedor:c.proveedor,motivo:`Anulación de compra a ${c.proveedor}`,inventario,setInventario,upsertInventario,setKardexInsumos,upsertKardexInsumo,sesion});
     const anulada={...c,anulada:true,anuladaPor:sesion?.nombre||null,anuladaEn:ahora};
     setCompras(prev=>prev.map(x=>x.id===c.id?anulada:x));if(upsertCompra)upsertCompra({...anulada,_updatedAt:ahora});
     setGastos(prev=>{const next=prev.map(g=>g.id===c.gastoId?{...g,eliminada:true}:g);const b=next.find(g=>g.id===c.gastoId);if(b&&upsertGasto)upsertGasto({...b,_updatedAt:ahora});return next;});
@@ -6679,7 +6686,7 @@ function MaquinasAdmin({maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upse
 }
 
 const CATS=["Insumos/Suministros","Servicios","Arriendo","Sueldos","Mantenimiento","Publicidad","Equipos","Pago de deuda","Otros"];
-function Gastos({empleadas,rolesPago,gastosFijosConfig,setGastosFijosConfig,upsertGastosFijosConfig,gastos,setGastos,sesion,upsertGasto,salidasCaja,activosFijos,setActivosFijos,upsertActivoFijo,inventario,setInventario,upsertInventario,kardexInsumos,setKardexInsumos,upsertKardexInsumo}){
+function Gastos({compras,setCompras,upsertCompra,empleadas,rolesPago,gastosFijosConfig,setGastosFijosConfig,upsertGastosFijosConfig,gastos,setGastos,sesion,upsertGasto,salidasCaja,activosFijos,setActivosFijos,upsertActivoFijo,inventario,setInventario,upsertInventario,kardexInsumos,setKardexInsumos,upsertKardexInsumo}){
   // 🏪 Proveedores ya usados antes (de facturas de gastos e insumos) — para autocompletar al escribir
   const proveedoresConocidos=[...new Set([...(gastos||[]).map(g=>g.proveedor),...(kardexInsumos||[]).map(k=>k.proveedor)].filter(Boolean))].sort();
   const [nv,setNv]=useState({descripcion:"",categoria:"Insumos/Suministros",proveedor:"",numeroFactura:"",monto:"",fecha:fechaHoyLocal(),metodoPago:"Efectivo",notas:""});
@@ -6721,7 +6728,9 @@ function Gastos({empleadas,rolesPago,gastosFijosConfig,setGastosFijosConfig,upse
     if(modoMonto==="subtotal"&&!subtotalFactura){setErr("Escribe el subtotal de la factura (sin IVA)");return;}
     if(modoMonto==="total"&&!nv.monto){setErr("Escribe el monto total de la factura");return;}
     const montoFinal=modoMonto==="subtotal"?totalConIva:parseFloat(nv.monto);
-    const ng={...nv,id:Date.now(),monto:montoFinal,fechaPago:nv.metodoPago==="Pendiente por pagar"?null:(nv.fechaPago||nv.fecha),estadoPago:nv.metodoPago==="Pendiente por pagar"?"pendiente":"pagado",pendienteA:nv.metodoPago==="Pendiente por pagar"?(nv.pendienteA||"Proveedor (crédito)"):null,subtotal:modoMonto==="subtotal"?parseFloat(subtotalFactura):null,subtotal0:modoMonto==="subtotal"?(parseFloat(subtotal0)||0):null,iva:modoMonto==="subtotal"?ivaCalculado:null,registradoPor:sesion.nombre};
+    const baseId=Date.now();
+    const lineasInv=itemsCompra.map((linea,k)=>({...linea,insumoId:linea.esNuevo?baseId+1000+k:linea.insumoId}));
+    const ng={...nv,id:baseId,monto:montoFinal,lineasInventario:lineasInv.map(l=>({insumoId:l.insumoId,nombre:l.nombre,unidades:l.cantidad,costo:l.precioUnitario||null})),fechaPago:nv.metodoPago==="Pendiente por pagar"?null:(nv.fechaPago||nv.fecha),estadoPago:nv.metodoPago==="Pendiente por pagar"?"pendiente":"pagado",pendienteA:nv.metodoPago==="Pendiente por pagar"?(nv.pendienteA||"Proveedor (crédito)"):null,subtotal:modoMonto==="subtotal"?parseFloat(subtotalFactura):null,subtotal0:modoMonto==="subtotal"?(parseFloat(subtotal0)||0):null,iva:modoMonto==="subtotal"?ivaCalculado:null,registradoPor:sesion.nombre};
     setGastos(prev=>[ng,...prev]);
     if(upsertGasto)upsertGasto({...ng,_updatedAt:new Date().toISOString()});
     // 📦 Si el tipo de factura es "Activo Fijo", se registra también en Activos Fijos automáticamente
@@ -6731,12 +6740,12 @@ function Gastos({empleadas,rolesPago,gastosFijosConfig,setGastosFijosConfig,upse
       if(upsertActivoFijo)upsertActivoFijo({...af,_updatedAt:new Date().toISOString()});
     }
     // 📦 Cada insumo detallado por código suma su cantidad al inventario (o se crea si es nuevo), con el N° de factura como referencia en el kardex
-    if(itemsCompra.length>0&&setInventario){
+    if(lineasInv.length>0&&setInventario){
       setInventario(prev=>{
         let next=[...prev];
-        itemsCompra.forEach(linea=>{
+        lineasInv.forEach(linea=>{
           if(linea.esNuevo){
-            const ni={id:Date.now()+Math.floor(Math.random()*1000),nombre:linea.nombre,codigo:linea.codigo,stock:linea.cantidad,min:1,unidad:"pzas"};
+            const ni={id:linea.insumoId,nombre:linea.nombre,codigo:linea.codigo,stock:linea.cantidad,min:1,unidad:"pzas"};
             next=[...next,ni];
             if(upsertInventario)upsertInventario({...ni,_updatedAt:new Date().toISOString()});
             registrarKardex({itemId:ni.id,itemNombre:ni.nombre,tipo:"entrada_factura",cantidad:linea.cantidad,folio:ng.numeroFactura||null,motivo:"Compra (insumo nuevo): "+ng.descripcion,saldoResultante:ni.stock,registradoPor:sesion?.nombre,precioUnitario:linea.precioUnitario||null,proveedor:ng.proveedor||null},{setKardex:setKardexInsumos,upsertKardex:upsertKardexInsumo});
@@ -6759,7 +6768,29 @@ function Gastos({empleadas,rolesPago,gastosFijosConfig,setGastosFijosConfig,upse
     setItemsCompra([]);
     setErr("");
   };
-  const del=id=>{if(!window.confirm("Eliminar?"))return;setGastos(prev=>{const next=prev.map(g=>g.id===id?{...g,eliminada:true}:g);const borrado=next.find(g=>g.id===id);if(borrado&&upsertGasto)upsertGasto({...borrado,_updatedAt:new Date().toISOString()});return next;});};
+  const del=id=>{
+    const g=(gastos||[]).find(x=>x.id===id);if(!g)return;
+    const compra=g.compraInsumosId?(compras||[]).find(c=>c.id===g.compraInsumosId):null;
+    let lineas=[],origen=null;
+    if(compra&&!compra.anulada){lineas=(compra.lineas||[]).map(l=>({insumoId:l.insumoId,nombre:l.nombre,unidades:l.unidadesTotales,costo:l.costoUnitarioBase}));origen="compra";}
+    else if(Array.isArray(g.lineasInventario)&&g.lineasInventario.length){lineas=g.lineasInventario;origen="gasto";}
+    else if(!g.compraInsumosId){
+      // Facturas registradas antes de este cambio: se buscan sus entradas en el kardex (mismo N° de factura y descripción, registradas al mismo tiempo)
+      const cerca=k=>typeof g.id!=="number"||g.id<1e12||Math.abs(Date.parse(k.fecha)-g.id)<10*60*1000;
+      const ks=(kardexInsumos||[]).filter(k=>k.tipo==="entrada_factura"&&(k.folio||null)===(g.numeroFactura||null)&&(k.motivo==="Compra: "+g.descripcion||k.motivo==="Compra (insumo nuevo): "+g.descripcion)&&cerca(k));
+      if(ks.length){lineas=ks.map(k=>({insumoId:k.itemId,nombre:k.itemNombre,unidades:k.cantidad,costo:k.precioUnitario}));origen="kardex";}
+    }
+    const msg=lineas.length?`¿Anular "${g.descripcion}"?\n\nTambién se descontará del inventario lo que entró con esta factura (${lineas.length} insumo${lineas.length!==1?"s":""}) y quedará la nota de crédito en el kardex.`:`¿Eliminar "${g.descripcion}"?`;
+    if(!window.confirm(msg))return;
+    const ahora=new Date().toISOString();
+    if(lineas.length)revertirEntradaInventario({lineas,folio:g.numeroFactura,proveedor:g.proveedor,motivo:`Anulación de factura${g.proveedor?` a ${g.proveedor}`:""} (desde Gastos)`,inventario,setInventario,upsertInventario,setKardexInsumos,upsertKardexInsumo,sesion});
+    if(origen==="compra"){
+      const anulada={...compra,anulada:true,anuladaPor:sesion?.nombre||null,anuladaEn:ahora};
+      if(setCompras)setCompras(prev=>prev.map(x=>x.id===compra.id?anulada:x));
+      if(upsertCompra)upsertCompra({...anulada,_updatedAt:ahora});
+    }
+    setGastos(prev=>{const next=prev.map(x=>x.id===id?{...x,eliminada:true,inventarioRevertido:lineas.length>0,eliminadaPor:sesion?.nombre||null,eliminadaEn:ahora}:x);const borrado=next.find(x=>x.id===id);if(borrado&&upsertGasto)upsertGasto({...borrado,_updatedAt:ahora});return next;});
+  };
   const fil=gastos.filter(g=>!g.eliminada&&(!fMes||fechaLocal(g.fecha).startsWith(fMes))&&(fCat==="Todas"||g.categoria===fCat));
   // 💸 Salidas de caja del mismo rango — se muestran como una "categoría" más dentro de este reporte, si se incluye
   const salidasFil=incluirSalidas&&(fCat==="Todas"||fCat==="Salidas de caja")?(salidasCaja||[]).filter(s=>!s.eliminada&&!s.esCostoVenta&&(!fMes||s.fecha.startsWith(fMes))):[];
@@ -11127,7 +11158,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
       {tab==="depositos"&&<Depositos depositos={depositos} setDepositos={setDepositos} ventas={ventas} salidasCaja={salidasCaja} upsertDeposito={upsertDeposito}/>}
       {tab==="conciliacion"&&<Conciliacion ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} depositos={depositos} setDepositos={setDepositos} upsertDeposito={upsertDeposito}/>}
       {tab==="conciliacionBanco"&&<ConciliacionBancaria ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} depositos={depositos} setDepositos={setDepositos} upsertDeposito={upsertDeposito} gastos={gastos} setGastos={setGastos} upsertGasto={upsertGasto} empleadas={empleadas} rolesPago={rolesPago} estadosCuenta={estadosCuenta} setEstadosCuenta={setEstadosCuenta} upsertEstadoCuenta={upsertEstadoCuenta} sesion={sesion}/>}
-      {tab==="gastos"&&<Gastos empleadas={empleadas} rolesPago={rolesPago} gastosFijosConfig={gastosFijosConfig} setGastosFijosConfig={setGastosFijosConfig} upsertGastosFijosConfig={upsertGastosFijosConfig} gastos={gastos} setGastos={setGastos} sesion={sesion} upsertGasto={upsertGasto} salidasCaja={salidasCaja} activosFijos={activosFijos} setActivosFijos={setActivosFijos} upsertActivoFijo={upsertActivoFijo} inventario={inventario} setInventario={setInventario} upsertInventario={upsertInventario} kardexInsumos={kardexInsumos} setKardexInsumos={setKardexInsumos} upsertKardexInsumo={upsertKardexInsumo}/>}
+      {tab==="gastos"&&<Gastos compras={comprasInsumos} setCompras={setComprasInsumos} upsertCompra={upsertCompraInsumo} empleadas={empleadas} rolesPago={rolesPago} gastosFijosConfig={gastosFijosConfig} setGastosFijosConfig={setGastosFijosConfig} upsertGastosFijosConfig={upsertGastosFijosConfig} gastos={gastos} setGastos={setGastos} sesion={sesion} upsertGasto={upsertGasto} salidasCaja={salidasCaja} activosFijos={activosFijos} setActivosFijos={setActivosFijos} upsertActivoFijo={upsertActivoFijo} inventario={inventario} setInventario={setInventario} upsertInventario={upsertInventario} kardexInsumos={kardexInsumos} setKardexInsumos={setKardexInsumos} upsertKardexInsumo={upsertKardexInsumo}/>}
       {tab==="martinizingAdmin"&&<MartinizingAdmin ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} facturasMartinizing={facturasMartinizing} setFacturasMartinizing={setFacturasMartinizing} upsertFacturaMartinizing={upsertFacturaMartinizing} setSalidasCaja={setSalidasCaja} upsertSalida={upsertSalida} sesion={sesion}/>}
       {tab==="inventario"&&<Inventario inventario={inventario} setInventario={setInventario} upsertInventario={upsertInventario} kardexInsumos={kardexInsumos} setKardexInsumos={setKardexInsumos} upsertKardexInsumo={upsertKardexInsumo} empleadas={empleadas} sesion={sesion}/>}
       {tab==="comprasInsumos"&&<ComprasInsumos inventario={inventario} setInventario={setInventario} upsertInventario={upsertInventario} kardexInsumos={kardexInsumos} setKardexInsumos={setKardexInsumos} upsertKardexInsumo={upsertKardexInsumo} compras={comprasInsumos} setCompras={setComprasInsumos} upsertCompra={upsertCompraInsumo} gastos={gastos} setGastos={setGastos} upsertGasto={upsertGasto} sesion={sesion}/>}
