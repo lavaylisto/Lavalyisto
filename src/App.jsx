@@ -7182,7 +7182,7 @@ const periodoDecimo4=mesSel=>{const [y,m]=mesSel.split("-").map(Number);const in
 const mesesDelPeriodo=inicioClave=>{const [y0,m0]=inicioClave.split("-").map(Number);const arr=[];let y=y0,m=m0;for(let i=0;i<12;i++){arr.push(`${y}-${String(m).padStart(2,"0")}`);m++;if(m>12){m=1;y++;}}return arr;};
 function calcularRolDePago(e,mesSel,rolesPago){
   const [yy,mm]=mesSel.split("-").map(Number);
-  const diasDelMes=new Date(yy,mm,0).getDate(); // días reales de ese mes (28-31)
+  const diasDelMes=30; // mes comercial: la nómina siempre se calcula sobre 30 días, aunque el mes tenga 28, 29, 30 o 31
   const remuneracionCompleta=e.remuneracion!=null?parseFloat(e.remuneracion):SBU_2026;
   const guardado=(rolesPago||[]).find(r=>String(r.empleadaId)===String(e.id)&&r.mes===mesSel);
   const horasSupl=guardado?.horasSupl||0;
@@ -7205,9 +7205,9 @@ function calcularRolDePago(e,mesSel,rolesPago){
     const ing=new Date(e.fechaIngreso+"T00:00:00");
     const ingY=ing.getFullYear(),ingM=ing.getMonth()+1;
     if(yy<ingY||(yy===ingY&&mm<ingM))diasTrabajadosDefault=0;
-    else if(yy===ingY&&mm===ingM)diasTrabajadosDefault=Math.max(0,diasDelMes-ing.getDate()+1);
+    else if(yy===ingY&&mm===ingM)diasTrabajadosDefault=Math.max(0,diasDelMes-Math.min(ing.getDate(),30)+1);
   }
-  const diasTrabajados=guardado?.diasTrabajados!=null?guardado.diasTrabajados:diasTrabajadosDefault;
+  const diasTrabajados=Math.min(diasDelMes,guardado?.diasTrabajados!=null?guardado.diasTrabajados:diasTrabajadosDefault);
   const factorDias=Math.min(1,Math.max(0,diasTrabajados/diasDelMes));
   const remuneracion=remuneracionCompleta*factorDias;
   const valorHora=remuneracionCompleta/240;
@@ -7440,7 +7440,7 @@ function RolesDePago({empleadas,setEmpleadas,upsertEmpleada,ventas,rolesPago,set
   const [editandoDatos,setEditandoDatos]=useState(null); // id de la empleada cuyos datos base se están editando
   const [datosEd,setDatosEd]=useState({});
   const guardarDatosBase=e=>{
-    const cambios={remuneracion:parseFloat(datosEd.remuneracion)||e.remuneracion||SBU_2026,fechaIngreso:datosEd.fechaIngreso||e.fechaIngreso||null,cedula:datosEd.cedula!=null?datosEd.cedula:(e.cedula||""),mensualizaDecimos:datosEd.mensualizaDecimos!=null?!!datosEd.mensualizaDecimos:e.mensualizaDecimos!==false};
+    const cambios={remuneracion:parseFloat(datosEd.remuneracion)||e.remuneracion||SBU_2026,fechaIngreso:datosEd.fechaIngreso||e.fechaIngreso||null,nombreCompleto:datosEd.nombreCompleto!=null?datosEd.nombreCompleto.trim():(e.nombreCompleto||""),cedula:datosEd.cedula!=null?datosEd.cedula:(e.cedula||""),mensualizaDecimos:datosEd.mensualizaDecimos!=null?!!datosEd.mensualizaDecimos:e.mensualizaDecimos!==false};
     setEmpleadas(prev=>{
       const next=prev.map(x=>x.id===e.id?{...x,...cambios}:x);
       const updated=next.find(x=>x.id===e.id);
@@ -7503,7 +7503,7 @@ function RolesDePago({empleadas,setEmpleadas,upsertEmpleada,ventas,rolesPago,set
         <colgroup><col style="width:25%"/><col style="width:25%"/><col style="width:25%"/><col style="width:25%"/></colgroup>
         <tr><td class="t" colspan="4">ROL DE PAGOS</td></tr>
         <tr><td class="k">EMPLEADOR:</td><td colspan="3">${esc(cfgRoles.empleador)}</td></tr>
-        <tr><td class="k">TRABAJADOR:</td><td colspan="3">${esc(e.nombre)}</td></tr>
+        <tr><td class="k">TRABAJADOR:</td><td colspan="3">${esc(e.nombreCompleto||e.nombre)}</td></tr>
         <tr><td class="k">CÉDULA DE CIUDADANÍA:</td><td colspan="3">${esc(e.cedula)}</td></tr>
         <tr><td class="k">FECHA DE INGRESO:</td><td colspan="3">${fIng}</td></tr>
         <tr><td class="k">PERIODO:</td><td>${periodo}</td><td class="k" style="text-align:right">ROL N°</td><td style="text-align:center">${esc(r.numeroRol)}</td></tr>
@@ -7557,6 +7557,7 @@ function RolesDePago({empleadas,setEmpleadas,upsertEmpleada,ventas,rolesPago,set
                 <div><label style={S.lbl}>Remuneración mensual</label><input type="number" step="0.01" style={S.inp} value={datosEd.remuneracion??e.remuneracion??SBU_2026} onChange={ev=>setDatosEd({...datosEd,remuneracion:ev.target.value})}/></div>
                 <div><label style={S.lbl}>Fecha de ingreso</label><input type="date" style={S.inp} value={datosEd.fechaIngreso??e.fechaIngreso??""} onChange={ev=>setDatosEd({...datosEd,fechaIngreso:ev.target.value})}/></div>
               </div>
+              <div style={{marginTop:8}}><label style={S.lbl}>Nombre completo (como sale en el rol)</label><input style={S.inp} placeholder="Nombres y apellidos completos" value={datosEd.nombreCompleto??e.nombreCompleto??""} onChange={ev=>setDatosEd({...datosEd,nombreCompleto:ev.target.value})}/></div>
               <div style={{marginTop:8}}><label style={S.lbl}>Cédula de ciudadanía</label><input style={S.inp} placeholder="Cédula" value={datosEd.cedula??e.cedula??""} onChange={ev=>setDatosEd({...datosEd,cedula:ev.target.value})}/></div>
               <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,marginTop:8,cursor:"pointer"}}><input type="checkbox" checked={datosEd.mensualizaDecimos!=null?!!datosEd.mensualizaDecimos:e.mensualizaDecimos!==false} onChange={ev=>setDatosEd({...datosEd,mensualizaDecimos:ev.target.checked})}/>Décimos mensualizados (se pagan cada mes dentro del rol)</label>
               <div style={{display:"flex",gap:8,marginTop:8}}><button style={{...S.btnP,flex:1}} onClick={()=>guardarDatosBase(e)}>✓ Guardar</button><button style={S.btnC} onClick={()=>setEditandoDatos(null)}>Cancelar</button></div>
@@ -7565,7 +7566,9 @@ function RolesDePago({empleadas,setEmpleadas,upsertEmpleada,ventas,rolesPago,set
             <div style={{fontSize:11,color:"#888",marginBottom:8,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
               <span>Remuneración: ${r.remuneracionCompleta.toFixed(2)} · Ingreso: {e.fechaIngreso?fmtD(e.fechaIngreso):"—"}</span>
               {!e.fechaIngreso&&<span style={{color:"#e65100",fontWeight:600}}>⚠️ Falta fecha de ingreso (afecta el Fondo de Reserva)</span>}
-              <button style={{...S.btnS,fontSize:10,padding:"3px 8px"}} onClick={()=>{setEditandoDatos(e.id);setDatosEd({remuneracion:e.remuneracion,fechaIngreso:e.fechaIngreso,cedula:e.cedula||"",mensualizaDecimos:e.mensualizaDecimos!==false});}}>✏️ Editar</button>
+              {!e.nombreCompleto&&<span style={{color:"#e65100",fontWeight:600}}>⚠️ Falta nombre completo</span>}
+              {!e.cedula&&<span style={{color:"#e65100",fontWeight:600}}>⚠️ Falta cédula</span>}
+              <button style={{...S.btnS,fontSize:10,padding:"3px 8px"}} onClick={()=>{setEditandoDatos(e.id);setDatosEd({remuneracion:e.remuneracion,fechaIngreso:e.fechaIngreso,cedula:e.cedula||"",nombreCompleto:e.nombreCompleto||"",mensualizaDecimos:e.mensualizaDecimos!==false});}}>✏️ Editar</button>
             </div>
           )}
 
