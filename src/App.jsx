@@ -57,6 +57,8 @@ const SERVICIOS_DEFAULT = [
   {id:"037",label:"SACO 3/4",precio:9.00},
 ];
 const PAGOS = ["Efectivo","Transferencia Pichincha","Transferencia JEP","Tarjeta"];
+const PAGOS_GASTO=[...PAGOS,"Pendiente por pagar"]; // opciones de pago para gastos y compras (las ventas siguen usando PAGOS)
+const ACREEDORES=["Micaela","Natalia","Proveedor (crédito)","Otro"]; // a quién se le debe cuando queda pendiente
 const esTr = m => m && m.startsWith("Transferencia");
 const INSUMOS_DEFAULT = [
   {id:1,nombre:"Detergente (kg)",stock:10,min:3,unidad:"kg"},
@@ -5641,6 +5643,160 @@ function ProductosAdmin({productos,setProductos,upsertProducto,kardexProductos,s
   </div>);
 }
 
+// 📄 LECTURA DE FACTURAS EN PDF — funciona con PDFs que traen texto (los que genera el SRI o el proveedor).
+// Las fotos o escaneos no tienen texto y no se pueden leer así.
+let _pdfjsPromise=null;
+function cargarPdfJs(){
+  if(typeof window!=="undefined"&&window.pdfjsLib)return Promise.resolve(window.pdfjsLib);
+  if(_pdfjsPromise)return _pdfjsPromise;
+  const fuentes=[
+    ["https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js","https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"],
+    ["https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js","https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js"],
+  ];
+  const probar=i=>new Promise((res,rej)=>{
+    if(i>=fuentes.length){rej(new Error("No pude cargar el lector de PDF. Revisa tu internet e inténtalo otra vez."));return;}
+    const sc=document.createElement("script");
+    sc.src=fuentes[i][0];
+    sc.onload=()=>{window.pdfjsLib.GlobalWorkerOptions.workerSrc=fuentes[i][1];res(window.pdfjsLib);};
+    sc.onerror=()=>{sc.remove();probar(i+1).then(res,rej);};
+    document.head.appendChild(sc);
+  });
+  _pdfjsPromise=probar(0).catch(e=>{_pdfjsPromise=null;throw e;});
+  return _pdfjsPromise;
+}
+// Convierte cada página en filas de texto (agrupa por altura y ordena de izquierda a derecha)
+async function filasDePdf(pdf){
+  const filas=[];
+  for(let pg=1;pg<=pdf.numPages;pg++){
+    const page=await pdf.getPage(pg);
+    const content=await page.getTextContent();
+    const its=content.items.filter(it=>it.str&&it.str.trim()).map(it=>({s:it.str.trim(),x:it.transform[4],y:it.transform[5],w:it.width||0}));
+    its.sort((a,b)=>b.y-a.y||a.x-b.x);
+    let fila=null;
+    its.forEach(it=>{
+      if(!fila||Math.abs(fila.y-it.y)>3){fila={pagina:pg,y:it.y,items:[]};filas.push(fila);}
+      fila.items.push(it);
+    });
+  }
+  filas.forEach(f=>{f.items.sort((a,b)=>a.x-b.x);f.texto=f.items.map(i=>i.s).join(" ");});
+  return filas;
+}
+// Interpreta una factura (RIDE) a partir de las filas: encabezado, productos, subtotales e IVA
+function parseFacturaPDF(filas,compras){
+  const avisos=[];
+  const num=sv=>{
+    let t=String(sv).replace(/\s/g,"").replace(/^\$/,"");
+    if(!/^\d[\d.,]*$/.test(t))return null;
+    if(t.includes(",")&&t.includes("."))t=t.replace(/,/g,"");
+    else if(t.includes(","))t=/,\d{1,2}$/.test(t)?t.replace(",","."):t.replace(/,/g,"");
+    const v=parseFloat(t);return isNaN(v)?null:v;
+  };
+  // Separa los números que quedaron pegados al inicio o al final de un texto (ej. "DETERGENTE 20L 2.00")
+  const tokensDe=r=>{
+    const out=[];
+    r.items.forEach(it=>{
+      const words=it.s.split(/\s+/);
+      let a=0,b=words.length;const lead=[],trail=[];
+      while(a<b-1&&num(words[a])!=null){lead.push(words[a]);a++;}
+      while(b-1>a&&num(words[b-1])!=null){trail.unshift(words[b-1]);b--;}
+      lead.forEach(w=>out.push({s:w,v:num(w),sp:true}));
+      const mid=words.slice(a,b).join(" ");
+      out.push({s:mid,v:num(mid),sp:false});
+      trail.forEach(w=>out.push({s:w,v:num(w),sp:true}));
+    });
+    return out;
+  };
+  const numsDe=r=>tokensDe(r).filter(o=>o.v!=null);
+  const ultNum=r=>{const n=numsDe(r);return n.length?n[n.length-1].v:null;};
+  // 🔑 Clave de acceso (49 dígitos): trae fecha, RUC y número de factura
+  const buscarClave=txt=>{
+    for(let i=0;i+49<=txt.length;i++){
+      const k=txt.slice(i,i+49);
+      if(!/^\d{49}$/.test(k))continue;
+      const dd=+k.slice(0,2),mm=+k.slice(2,4),yy=+k.slice(4,8);
+      if(k.slice(8,10)==="01"&&dd>=1&&dd<=31&&mm>=1&&mm<=12&&yy>=2000&&yy<=2100)return k;
+    }
+    return "";
+  };
+  let clave="";
+  for(const r of filas){clave=buscarClave(r.texto.replace(/\s+/g,""));if(clave)break;}
+  if(!clave)clave=buscarClave(filas.map(r=>r.texto).join(" ").replace(/\s+/g,""));
+  let ruc="",numero="",fecha="";
+  if(clave){ruc=clave.slice(10,23);numero=`${clave.slice(24,27)}-${clave.slice(27,30)}-${clave.slice(30,39)}`;fecha=`${clave.slice(4,8)}-${clave.slice(2,4)}-${clave.slice(0,2)}`;}
+  const todo=filas.map(r=>r.texto).join("\n");
+  if(!ruc){const m=todo.match(/R\.?\s?U\.?\s?C\.?\s*:?\s*(\d{13})/i);if(m)ruc=m[1];}
+  if(!numero){const m=todo.match(/(\d{3})\s*-\s*(\d{3})\s*-\s*(\d{9})/);if(m)numero=`${m[1]}-${m[2]}-${m[3]}`;}
+  if(!fecha){const m=todo.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);if(m)fecha=`${m[3]}-${m[2].padStart(2,"0")}-${m[1].padStart(2,"0")}`;}
+  // 💰 Subtotales, IVA y total
+  let sub15=0,sub0=0,tarifa=0,total=null;
+  filas.forEach(r=>{
+    const tx=r.texto.toUpperCase(),v=ultNum(r);
+    if(/^\s*SUBTOTAL/.test(tx)&&v!=null){
+      const pm=tx.match(/(\d{1,2}(?:[.,]\d+)?)\s*%/);
+      if(/NO OBJETO|EXENTO/.test(tx)||(pm&&parseFloat(pm[1])===0))sub0+=v;
+      else if(pm){sub15+=v;tarifa=parseFloat(pm[1]);}
+    }
+    const mi=tx.match(/^\s*IVA\s*(\d{1,2})\s*%/);if(mi&&!tarifa)tarifa=parseInt(mi[1],10);
+    if(total==null&&/^\s*(VALOR|IMPORTE)\s+TOTAL/.test(tx)&&v!=null)total=v;
+  });
+  // 📦 Productos: en cada fila se busca cantidad × precio unitario (− descuento) = precio total
+  const hallar=ns=>{
+    const n=ns.length;if(n<3)return null;
+    const t=ns[n-1].v;
+    for(let j=n-2;j>=1;j--)for(let i=j-1;i>=0;i--){const q=ns[i].v,pu=ns[j].v;if(q>0&&Math.abs(q*pu-t)<=0.02+0.005*t)return{q,pu,usados:[ns[i],ns[j],ns[n-1]]};}
+    for(let k=n-2;k>=2;k--)for(let j=k-1;j>=1;j--)for(let i=j-1;i>=0;i--){const q=ns[i].v,pu=ns[j].v,d=ns[k].v;if(q>0&&Math.abs(q*pu-d-t)<=0.02)return{q,pu,usados:[ns[i],ns[j],ns[k],ns[n-1]]};}
+    return null;
+  };
+  let enTabla=false,ultimo=null;const items=[];
+  filas.forEach(r=>{
+    const tx=r.texto;
+    if(/descripci/i.test(tx)&&/(cant|precio|unitario)/i.test(tx)){enTabla=true;ultimo=null;return;}
+    if(!enTabla)return;
+    if(/subtotal|informaci[oó]n adicional|forma de pago|valor total|importe total/i.test(tx)){enTabla=false;ultimo=null;return;}
+    const toks=tokensDe(r);
+    const ns=toks.filter(o=>o.v!=null);
+    const h=hallar(ns);
+    if(h){
+      // texto del producto + números que venían pegados al texto y no se usaron en la cuenta (ej. "20" de "20 LITROS")
+      let partes=toks.filter(o=>o.v==null||(o.sp&&!h.usados.includes(o)&&!/^0\d+$|^\d{4,}$/.test(o.s))).map(o=>o.s);
+      if(partes.length>=2&&/^[A-Za-z0-9\-_./]{2,14}$/.test(partes[0])&&/\d/.test(partes[0]))partes=partes.slice(1); // quita el código del producto
+      const desc=partes.join(" ").trim();
+      if(!desc)return;
+      ultimo={descripcion:desc,cantidad:h.q,subtotal:ns[ns.length-1].v,pUnitSinIva:ns[ns.length-1].v/h.q,ivaPct:null};
+      items.push(ultimo);
+    }else if(ns.length===0&&ultimo&&toks.length){
+      ultimo.descripcion=(ultimo.descripcion+" "+toks.map(o=>o.s).join(" ")).trim(); // la descripción continúa en la fila de abajo
+    }
+  });
+  if(items.length===0)throw new Error("No pude identificar los productos en este PDF. Sube el XML o ingrésala a mano.");
+  // 🧮 IVA por producto: si hay subtotal 0%, se busca qué productos suman exactamente ese valor
+  const tar=tarifa||15;
+  let ceros=new Set();
+  if(sub0>0.004&&sub15>0.004){
+    const n=items.length;let hallado=null;
+    if(n<=18){for(let mask=1;mask<(1<<n)&&!hallado;mask++){let sm=0;for(let b=0;b<n;b++)if(mask&(1<<b))sm+=items[b].subtotal;if(Math.abs(sm-sub0)<=0.02)hallado=mask;}}
+    if(hallado){items.forEach((it,b)=>{if(hallado&(1<<b))ceros.add(b);});}
+    else avisos.push("No pude saber cuáles productos llevan IVA 0%: revisa el IVA de cada línea.");
+  }else if(sub0>0.004&&sub15<=0.004){items.forEach((_,b)=>ceros.add(b));}
+  items.forEach((it,b)=>{it.ivaPct=ceros.has(b)?0:tar;});
+  const sumaConIva=items.reduce((a,it)=>a+it.subtotal*(1+it.ivaPct/100),0);
+  if(total!=null&&Math.abs(sumaConIva-total)>0.05)avisos.push(`La suma que leí ($${sumaConIva.toFixed(2)}) no coincide con el total del PDF ($${total.toFixed(2)}): revisa los productos.`);
+  // 🏪 Proveedor: si el RUC ya lo conozco uso ese nombre; si no, intento leerlo de la parte de arriba
+  let proveedor="";
+  const conocido=(compras||[]).find(c=>c.ruc&&ruc&&c.ruc===ruc);
+  if(conocido)proveedor=conocido.proveedor;
+  else{
+    const prohibido=/FACTURA|R\.?U\.?C|N[UÚ]MERO|AUTORIZ|AMBIENTE|EMISI|CLAVE|DIRECCI|OBLIGADO|CONTABILIDAD|CONTRIBUYENTE|RIMPE|FECHA|POPULAR|R[EÉ]GIMEN|MATRIZ|SUCURSAL|TEL[EÉ]F|CORREO|\bSRI\b/i;
+    outer:for(const r of filas.filter(f=>f.pagina===1).slice(0,14)){
+      for(const it of r.items){
+        if(it.s.length>=5&&/[A-Za-zÁÉÍÓÚÑ]{4}/.test(it.s)&&!prohibido.test(it.s)&&!/\d{4,}/.test(it.s)){proveedor=it.s;break outer;}
+      }
+    }
+  }
+  if(!proveedor)avisos.push("No pude leer el nombre del proveedor: escríbelo.");
+  return{proveedor,ruc,numeroFactura:numero,fecha,importeTotal:total,detalles:items.map(it=>({descripcion:it.descripcion,cantidad:it.cantidad,pUnitSinIva:it.pUnitSinIva,ivaPct:it.ivaPct})),avisos};
+}
+
 // 🧾 Lee una factura electrónica del SRI (archivo .xml): proveedor, número, fecha y cada producto con su precio sin IVA y su IVA
 function parseFacturaXML(txt){
   let doc=new DOMParser().parseFromString(txt,"text/xml");
@@ -5678,7 +5834,7 @@ function ComprasInsumos({inventario,setInventario,upsertInventario,kardexInsumos
   const [lineas,setLineas]=useState([vacia()]);
   const [ivaEsCosto,setIvaEsCosto]=useState(true);
   const [err,setErr]=useState("");const [ok,setOk]=useState("");
-  const [origenXml,setOrigenXml]=useState(false);
+  const [origenXml,setOrigenXml]=useState(null); // "xml" | "pdf" | null
   const [mesF,setMesF]=useState(mesK(new Date()));
   const [abierta,setAbierta]=useState(null);
   const activos=(inventario||[]).filter(i=>!i.eliminada);
@@ -5705,9 +5861,26 @@ function ComprasInsumos({inventario,setInventario,upsertInventario,kardexInsumos
       const f=parseFacturaXML(await file.text());
       setCab(c=>({...c,proveedor:f.proveedor,ruc:f.ruc,numeroFactura:f.numeroFactura,fecha:f.fecha||c.fecha,totalFactura:f.importeTotal!=null?String(f.importeTotal):""}));
       setLineas(f.detalles.map(d=>{const ex=buscarInsumo(d.descripcion);return{nombre:ex?ex.nombre:d.descripcion,unidad:ex?ex.unidad:"pzas",cantidad:String(d.cantidad),factor:"1",pUnit:String(r4(d.pUnitSinIva)),iva:String(d.ivaPct)};}));
-      setOrigenXml(true);setErr("");
+      setOrigenXml("xml");setErr("");
       setOk(`✅ Factura ${f.numeroFactura||""} leída: ${f.detalles.length} producto(s). Revisa los datos y confirma abajo.`);
     }catch(e){setOk("");setErr(e.message||"No se pudo leer el archivo");}
+  };
+
+  const importarPDF=async ev=>{
+    const file=ev.target.files&&ev.target.files[0];ev.target.value="";
+    if(!file)return;
+    try{
+      setErr("");setOk("⏳ Leyendo el PDF...");
+      const lib=await cargarPdfJs();
+      const pdf=await lib.getDocument({data:new Uint8Array(await file.arrayBuffer())}).promise;
+      const filas=await filasDePdf(pdf);
+      if(filas.length===0)throw new Error("Este PDF no tiene texto (parece una foto o un escaneo), así que no lo puedo leer. Pídele al proveedor el XML o ingrésala a mano.");
+      const f=parseFacturaPDF(filas,compras);
+      setCab(c=>({...c,proveedor:f.proveedor||c.proveedor,ruc:f.ruc||c.ruc,numeroFactura:f.numeroFactura||c.numeroFactura,fecha:f.fecha||c.fecha,totalFactura:f.importeTotal!=null?String(f.importeTotal):""}));
+      setLineas(f.detalles.map(d=>{const ex=buscarInsumo(d.descripcion);return{nombre:ex?ex.nombre:d.descripcion,unidad:ex?ex.unidad:"pzas",cantidad:String(d.cantidad),factor:"1",pUnit:String(r4(d.pUnitSinIva)),iva:String(d.ivaPct)};}));
+      setOrigenXml("pdf");
+      setOk(`📄 Leí ${f.detalles.length} producto(s) del PDF. Revísalos con cuidado antes de registrar (la lectura de PDF no es exacta como la del XML).${f.avisos.length?" ⚠️ "+f.avisos.join(" "):""}`);
+    }catch(e){setOk("");setErr(e.message||"No se pudo leer el PDF");}
   };
 
   const guardar=()=>{
@@ -5735,8 +5908,8 @@ function ComprasInsumos({inventario,setInventario,upsertInventario,kardexInsumos
       lineasGuardar.push({insumoId:w.id,nombre:w.nombre,codigo:w.codigo||null,unidad:w.unidad,cantidad:c.cant,factor:c.factor,pUnitSinIva:c.pu,ivaPct:c.ivaP,pUnitConIva:r4(c.puConIva),subtotal:c.sub,iva:c.iva,total:c.total,unidadesTotales:c.unidades,costoUnitarioBase:r4(c.costoBase)});
       kardexIn.push({itemId:w.id,itemNombre:w.nombre,tipo:"entrada_factura",cantidad:c.unidades,folio:cab.numeroFactura.trim()||null,motivo:`Compra a ${cab.proveedor.trim()}${c.factor!==1?` (${c.cant} × ${c.factor})`:""}`,saldoResultante:nuevoStock,registradoPor:sesion?.nombre,precioUnitario:r4(c.costoBase),proveedor:cab.proveedor.trim()});
     });
-    const compra={id:idCompra,fecha:cab.fecha,proveedor:cab.proveedor.trim(),ruc:cab.ruc.trim(),numeroFactura:cab.numeroFactura.trim(),metodoPago:cab.metodoPago,notas:cab.notas.trim(),ivaEsCosto,lineas:lineasGuardar,subtotalSinIva:r2(tot.sub),ivaTotal:r2(tot.iva),total:r2(tot.total),totalFacturaDeclarado:cab.totalFactura!==""?parseFloat(cab.totalFactura):null,origen:origenXml?"xml":"manual",registradoPor:sesion?.nombre||null,fechaRegistro:ahora,anulada:false,gastoId:null};
-    const gasto={id:Date.now(),descripcion:`Compra de insumos · ${compra.proveedor}`,categoria:"Insumos/Suministros",proveedor:compra.proveedor,numeroFactura:compra.numeroFactura,monto:compra.total,fecha:cab.fecha,metodoPago:cab.metodoPago,notas:`Compra de insumos (${lineasGuardar.length} producto${lineasGuardar.length!==1?"s":""})`,subtotal:compra.subtotalSinIva,iva:compra.ivaTotal,registradoPor:sesion?.nombre,compraInsumosId:idCompra};
+    const compra={id:idCompra,fecha:cab.fecha,proveedor:cab.proveedor.trim(),ruc:cab.ruc.trim(),numeroFactura:cab.numeroFactura.trim(),metodoPago:cab.metodoPago,notas:cab.notas.trim(),ivaEsCosto,lineas:lineasGuardar,subtotalSinIva:r2(tot.sub),ivaTotal:r2(tot.iva),total:r2(tot.total),totalFacturaDeclarado:cab.totalFactura!==""?parseFloat(cab.totalFactura):null,origen:origenXml||"manual",registradoPor:sesion?.nombre||null,fechaRegistro:ahora,anulada:false,gastoId:null};
+    const gasto={id:Date.now(),descripcion:`Compra de insumos · ${compra.proveedor}`,categoria:"Insumos/Suministros",proveedor:compra.proveedor,numeroFactura:compra.numeroFactura,monto:compra.total,fecha:cab.fecha,metodoPago:cab.metodoPago,estadoPago:cab.metodoPago==="Pendiente por pagar"?"pendiente":"pagado",pendienteA:cab.metodoPago==="Pendiente por pagar"?(cab.pendienteA||"Proveedor (crédito)"):null,notas:`Compra de insumos (${lineasGuardar.length} producto${lineasGuardar.length!==1?"s":""})`,subtotal:compra.subtotalSinIva,iva:compra.ivaTotal,registradoPor:sesion?.nombre,compraInsumosId:idCompra};
     compra.gastoId=gasto.id;
     setCompras(prev=>[compra,...prev]);if(upsertCompra)upsertCompra({...compra,_updatedAt:ahora});
     setGastos(prev=>[gasto,...prev]);if(upsertGasto)upsertGasto({...gasto,_updatedAt:ahora});
@@ -5747,7 +5920,7 @@ function ComprasInsumos({inventario,setInventario,upsertInventario,kardexInsumos
     });
     Object.values(work).forEach(w=>{if(upsertInventario)upsertInventario({...w,_updatedAt:ahora});});
     kardexIn.forEach(k=>registrarKardex(k,{setKardex:setKardexInsumos,upsertKardex:upsertKardexInsumo}));
-    setCab(cabVacia());setLineas([vacia()]);setOrigenXml(false);
+    setCab(cabVacia());setLineas([vacia()]);setOrigenXml(null);
     setOk(`✅ Factura registrada por ${money(compra.total)}: el stock y el costo de cada insumo se actualizaron, y el gasto quedó en Gastos.`);
   };
 
@@ -5778,8 +5951,11 @@ function ComprasInsumos({inventario,setInventario,upsertInventario,kardexInsumos
   return(<div style={S.panel}>
     <h2 style={S.ptitle}>🧾 Compra de insumos</h2>
     <Card title="📄 Factura del proveedor">
-      <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:12}}>📎 Si tu proveedor te envía la <strong>factura electrónica (archivo .xml)</strong>, súbela aquí y se llena todo solo. Con foto o PDF todavía no la puedo leer: ahí se ingresa a mano.</div>
-      <label style={{...S.btnS,display:"block",textAlign:"center",cursor:"pointer",background:"#1a3c5e",color:"#fff",marginBottom:12}}>📎 Subir factura electrónica (XML)<input type="file" accept=".xml,text/xml,application/xml" style={{display:"none"}} onChange={importarXML}/></label>
+      <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:12}}>📎 <strong>XML</strong> (factura electrónica): lectura exacta, se llena todo solo. 📄 <strong>PDF</strong>: funciona si es el PDF digital que genera el SRI o el proveedor (con texto); la lectura es automática y hay que revisarla. Las fotos o escaneos no se pueden leer: ahí se ingresa a mano.</div>
+      <div style={{display:"flex",gap:8,marginBottom:12}}>
+        <label style={{...S.btnS,flex:1,textAlign:"center",cursor:"pointer",background:"#1a3c5e",color:"#fff"}}>📎 Subir XML<input type="file" accept=".xml,text/xml,application/xml" style={{display:"none"}} onChange={importarXML}/></label>
+        <label style={{...S.btnS,flex:1,textAlign:"center",cursor:"pointer",background:"#2563a8",color:"#fff"}}>📄 Subir PDF<input type="file" accept=".pdf,application/pdf" style={{display:"none"}} onChange={importarPDF}/></label>
+      </div>
       {err&&<div style={S.err}>{err}</div>}
       {ok&&<div style={{background:"#e8f5e9",color:"#2e7d32",borderRadius:8,padding:"8px 10px",fontSize:12,marginBottom:10}}>{ok}</div>}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
@@ -5787,7 +5963,14 @@ function ComprasInsumos({inventario,setInventario,upsertInventario,kardexInsumos
         <div><label style={S.lbl}>RUC</label><input style={S.inp} value={cab.ruc} onChange={e=>setCab({...cab,ruc:e.target.value})}/></div>
         <div><label style={S.lbl}>N° de factura</label><input style={S.inp} placeholder="001-001-000000123" value={cab.numeroFactura} onChange={e=>setCab({...cab,numeroFactura:e.target.value})}/></div>
         <div><label style={S.lbl}>Fecha</label><input type="date" style={S.inp} value={cab.fecha} onChange={e=>setCab({...cab,fecha:e.target.value})}/></div>
-        <div><label style={S.lbl}>Forma de pago</label><select style={S.inp} value={cab.metodoPago} onChange={e=>setCab({...cab,metodoPago:e.target.value})}>{PAGOS.map(pg=><option key={pg}>{pg}</option>)}</select></div>
+        <div><label style={S.lbl}>Forma de pago</label><select style={S.inp} value={cab.metodoPago} onChange={e=>setCab({...cab,metodoPago:e.target.value})}>{PAGOS_GASTO.map(pg=><option key={pg}>{pg}</option>)}</select></div>
+        {cab.metodoPago==="Pendiente por pagar"&&(
+          <div style={{gridColumn:"1/-1",background:"#fff3e0",borderRadius:8,padding:10}}>
+            <label style={S.lbl}>¿Quién lo pagó / a quién se le debe?</label>
+            <select style={S.inp} value={cab.pendienteA||"Proveedor (crédito)"} onChange={e=>setCab({...cab,pendienteA:e.target.value})}>{ACREEDORES.map(a=><option key={a}>{a}</option>)}</select>
+            <div style={{fontSize:10,color:"#a05a00",marginTop:4}}>Si lo pagó Micaela o Natalia con su dinero, queda como pendiente de reembolso en Gastos.</div>
+          </div>
+        )}
       </div>
     </Card>
 
@@ -5852,7 +6035,7 @@ function ComprasInsumos({inventario,setInventario,upsertInventario,kardexInsumos
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}} onClick={()=>setAbierta(abierta===c.id?null:c.id)}>
               <div>
                 <div style={{fontSize:13,fontWeight:700,color:"#1a3c5e"}}>{c.proveedor}{c.anulada?" · ⛔ ANULADA":""}</div>
-                <div style={{fontSize:11,color:"#888"}}>{c.numeroFactura?`Fact. ${c.numeroFactura} · `:""}{fmtD(c.fecha)} · {(c.lineas||[]).length} producto(s){c.origen==="xml"?" · 📎 XML":""}</div>
+                <div style={{fontSize:11,color:"#888"}}>{c.numeroFactura?`Fact. ${c.numeroFactura} · `:""}{fmtD(c.fecha)} · {(c.lineas||[]).length} producto(s){c.origen==="xml"?" · 📎 XML":c.origen==="pdf"?" · 📄 PDF":""}{(()=>{const gg=(gastos||[]).find(x=>x.id===c.gastoId);return gg&&gg.estadoPago==="pendiente"?<span style={{color:"#e65100",fontWeight:700}}> · ⏳ pendiente de pago{gg.pendienteA?` (${gg.pendienteA})`:""}</span>:null;})()}</div>
               </div>
               <strong style={{color:"#e53935"}}>${(c.total||0).toFixed(2)}</strong>
             </div>
@@ -6413,7 +6596,7 @@ function Gastos({empleadas,rolesPago,gastosFijosConfig,setGastosFijosConfig,upse
     if(modoMonto==="subtotal"&&!subtotalFactura){setErr("Escribe el subtotal de la factura (sin IVA)");return;}
     if(modoMonto==="total"&&!nv.monto){setErr("Escribe el monto total de la factura");return;}
     const montoFinal=modoMonto==="subtotal"?totalConIva:parseFloat(nv.monto);
-    const ng={...nv,id:Date.now(),monto:montoFinal,subtotal:modoMonto==="subtotal"?parseFloat(subtotalFactura):null,subtotal0:modoMonto==="subtotal"?(parseFloat(subtotal0)||0):null,iva:modoMonto==="subtotal"?ivaCalculado:null,registradoPor:sesion.nombre};
+    const ng={...nv,id:Date.now(),monto:montoFinal,estadoPago:nv.metodoPago==="Pendiente por pagar"?"pendiente":"pagado",pendienteA:nv.metodoPago==="Pendiente por pagar"?(nv.pendienteA||"Proveedor (crédito)"):null,subtotal:modoMonto==="subtotal"?parseFloat(subtotalFactura):null,subtotal0:modoMonto==="subtotal"?(parseFloat(subtotal0)||0):null,iva:modoMonto==="subtotal"?ivaCalculado:null,registradoPor:sesion.nombre};
     setGastos(prev=>[ng,...prev]);
     if(upsertGasto)upsertGasto({...ng,_updatedAt:new Date().toISOString()});
     // 📦 Si el tipo de factura es "Activo Fijo", se registra también en Activos Fijos automáticamente
@@ -6462,6 +6645,18 @@ function Gastos({empleadas,rolesPago,gastosFijosConfig,setGastosFijosConfig,upse
   const fijosFil=fMes&&(fCat==="Todas"||fCat==="Gastos fijos")?calcularGastosFijosMes(fMes,empleadas,rolesPago,gastosFijosConfig):[];
   const totFijos=fijosFil.reduce((a,i)=>a+i.monto,0);
   const tot=totGastos+totSalidas+totFijos;
+  // ⏳ Pendientes por pagar (de cualquier mes): lo que pagó Micaela/Natalia con su dinero o quedó a crédito
+  const pendientes=(gastos||[]).filter(g=>!g.eliminada&&g.estadoPago==="pendiente").sort((a,b)=>(a.fecha||"").localeCompare(b.fecha||""));
+  const totPend=pendientes.reduce((a,g)=>a+(g.monto||0),0);
+  const pendPorQuien={};pendientes.forEach(g=>{const k=g.pendienteA||"Proveedor (crédito)";pendPorQuien[k]=(pendPorQuien[k]||0)+(g.monto||0);});
+  const marcarPagado=g=>{
+    const m=window.prompt(`¿Con qué método se pagó ${g.descripcion} ($${(g.monto||0).toFixed(2)})?\nOpciones: ${PAGOS.join(", ")}`,"Efectivo");
+    if(m===null)return;
+    const metodo=PAGOS.find(x=>x.toLowerCase()===m.trim().toLowerCase())||m.trim()||"Efectivo";
+    const act={...g,estadoPago:"pagado",metodoPago:metodo,fechaPago:fechaHoyLocal(),pagadoRegistradoPor:sesion?.nombre||null};
+    setGastos(prev=>prev.map(x=>x.id===g.id?act:x));
+    if(upsertGasto)upsertGasto({...act,_updatedAt:new Date().toISOString()});
+  };
   const abrirEditorFijos=()=>{setFijosDraft({desde:gfCfg.desde||"",items:(gfCfg.items||[]).map(i=>({...i}))});setEditFijos(true);};
   const guardarFijos=()=>{
     const items=(fijosDraft.items||[]).filter(i=>(i.nombre||"").trim()).map((i,idx)=>({id:i.id||("f"+Date.now()+"_"+idx),nombre:i.nombre.trim(),monto:parseFloat(i.monto)||0,activo:i.activo!==false}));
@@ -6473,7 +6668,7 @@ function Gastos({empleadas,rolesPago,gastosFijosConfig,setGastosFijosConfig,upse
   const descargarGastosCSV=()=>{
     if(fil.length===0&&salidasFil.length===0&&fijosFil.length===0){alert("No hay gastos para descargar con los filtros actuales.");return;}
     const enc=["Fecha","Descripción","Categoría","Proveedor","N° Factura","Monto","Método de pago","Registrado por","Notas"];
-    const filas=fil.map(g=>[fmtD(g.fecha),g.descripcion||"",g.categoria||"",g.proveedor||"",g.numeroFactura||"","$"+(g.monto||0).toFixed(2),g.metodoPago||"",g.registradoPor||"",g.notas||""]);
+    const filas=fil.map(g=>[fmtD(g.fecha),g.descripcion||"",g.categoria||"",g.proveedor||"",g.numeroFactura||"","$"+(g.monto||0).toFixed(2),g.estadoPago==="pendiente"?`Pendiente por pagar (${g.pendienteA||"Proveedor (crédito)"})`:(g.metodoPago||""),g.registradoPor||"",g.notas||""]);
     salidasFil.forEach(s=>filas.push([fmtD(s.fecha),s.motivo||"","Salidas de caja","","","$"+(s.monto||0).toFixed(2),"Efectivo",s.quien||"","Salida de caja del día · "+(s.hora||"")]));
     fijosFil.forEach(f=>filas.push([fmtD(f.mes+"-01"),f.concepto,"Gastos fijos","","","$"+f.monto.toFixed(2),"Automático","Sistema",f.nota||""]));
     filas.push(["","","","","","","","",""]);
@@ -6554,7 +6749,14 @@ function Gastos({empleadas,rolesPago,gastosFijosConfig,setGastosFijosConfig,upse
         <div><label style={S.lbl}>Proveedor</label><input style={S.inp} list="lista-proveedores" value={nv.proveedor} onChange={e=>setNv({...nv,proveedor:e.target.value})}/><datalist id="lista-proveedores">{proveedoresConocidos.map(p=><option key={p} value={p}/>)}</datalist></div>
         <div><label style={S.lbl}>N° Factura</label><input style={S.inp} value={nv.numeroFactura} onChange={e=>setNv({...nv,numeroFactura:e.target.value})}/></div>
         <div><label style={S.lbl}>Fecha</label><input type="date" style={S.inp} value={nv.fecha} onChange={e=>setNv({...nv,fecha:e.target.value})}/></div>
-        <div><label style={S.lbl}>Metodo</label><select style={S.inp} value={nv.metodoPago} onChange={e=>setNv({...nv,metodoPago:e.target.value})}>{PAGOS.map(p=><option key={p}>{p}</option>)}</select></div>
+        <div><label style={S.lbl}>Metodo</label><select style={S.inp} value={nv.metodoPago} onChange={e=>setNv({...nv,metodoPago:e.target.value})}>{PAGOS_GASTO.map(p=><option key={p}>{p}</option>)}</select></div>
+        {nv.metodoPago==="Pendiente por pagar"&&(
+          <div style={{gridColumn:"1/-1",background:"#fff3e0",borderRadius:8,padding:10}}>
+            <label style={S.lbl}>¿Quién lo pagó / a quién se le debe?</label>
+            <select style={S.inp} value={nv.pendienteA||"Proveedor (crédito)"} onChange={e=>setNv({...nv,pendienteA:e.target.value})}>{ACREEDORES.map(a=><option key={a}>{a}</option>)}</select>
+            <div style={{fontSize:10,color:"#a05a00",marginTop:4}}>Si lo pagó Micaela o Natalia con su dinero, queda como pendiente de reembolso hasta que lo marques como pagado.</div>
+          </div>
+        )}
       </div>
 
       <div style={{marginTop:12,background:"#f8fbfd",borderRadius:10,padding:12,border:"1px solid #e8f0f7"}}>
@@ -6624,12 +6826,33 @@ function Gastos({empleadas,rolesPago,gastosFijosConfig,setGastosFijosConfig,upse
 
       <button style={{...S.btnP,marginTop:14,width:"100%"}} onClick={add}>💾 Registrar factura</button>
     </Card>
+    {pendientes.length>0&&(
+      <Card title={`⏳ Pendientes por pagar — $${totPend.toFixed(2)}`}>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
+          {Object.entries(pendPorQuien).map(([k,v])=>(<div key={k} style={{background:"#fff3e0",color:"#e65100",borderRadius:8,padding:"4px 10px",fontSize:12,fontWeight:700}}>{k}: ${v.toFixed(2)}</div>))}
+        </div>
+        {pendientes.map(g=>(
+          <div key={g.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid #f0f4f8"}}>
+            <div style={{minWidth:0}}>
+              <div style={{fontSize:13,fontWeight:600,color:"#1a3c5e"}}>{g.descripcion}</div>
+              <div style={{fontSize:11,color:"#888"}}>{fmtD(g.fecha)}{g.proveedor?` · 🏪 ${g.proveedor}`:""} · se le debe a <strong>{g.pendienteA||"Proveedor (crédito)"}</strong></div>
+            </div>
+            <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
+              <div style={{fontWeight:800,color:"#e65100"}}>${(g.monto||0).toFixed(2)}</div>
+              <button style={{...S.btnS,marginTop:4,fontSize:11,background:"#e8f5e9",color:"#2e7d32"}} onClick={()=>marcarPagado(g)}>✅ Marcar pagado</button>
+            </div>
+          </div>
+        ))}
+        <div style={{fontSize:10,color:"#888",marginTop:6}}>Siguen contando como gasto del mes; esto solo te recuerda lo que falta pagar o reembolsar.</div>
+      </Card>
+    )}
     <Card title={`🧾 Facturas (${fil.length})`}>
       {fil.length===0?<div style={S.empty}>Sin gastos</div>:fil.map(g=>(
         <div key={g.id} style={{...S.vcard,borderLeft:"4px solid #e53935"}}>
           <div style={{display:"flex",justifyContent:"space-between"}}>
             <div><div style={{fontWeight:700}}>{g.descripcion}</div><div style={{fontSize:11,color:"#888"}}>{g.categoria} · {fmtD(g.fecha)}</div>{g.proveedor&&<div style={{fontSize:11}}>🏪 {g.proveedor}</div>}{g.numeroFactura&&<div style={{fontSize:11,color:"#4db6e4"}}>🧾 {g.numeroFactura}</div>}</div>
-            <div style={{textAlign:"right"}}><div style={{fontWeight:800,color:"#e53935"}}>${(g.monto||0).toFixed(2)}</div><div style={{...S.badge,background:"#f3e8fd",color:"#7c3aed",marginTop:4}}>{g.metodoPago}</div>{sesion.rol==="Administrador"&&<button style={{...S.btnR,display:"block",marginTop:4}} onClick={()=>del(g.id)}>✕</button>}</div>
+            <div style={{textAlign:"right"}}><div style={{fontWeight:800,color:"#e53935"}}>${(g.monto||0).toFixed(2)}</div>{g.estadoPago==="pendiente"?<div style={{...S.badge,background:"#fff3e0",color:"#e65100",marginTop:4}}>⏳ Pendiente{g.pendienteA?` · ${g.pendienteA}`:""}</div>:<div style={{...S.badge,background:"#f3e8fd",color:"#7c3aed",marginTop:4}}>{g.metodoPago}</div>}
+            {g.estadoPago==="pendiente"&&<button style={{...S.btnS,marginTop:4,fontSize:11,background:"#e8f5e9",color:"#2e7d32"}} onClick={()=>marcarPagado(g)}>✅ Marcar pagado</button>}{sesion.rol==="Administrador"&&<button style={{...S.btnR,display:"block",marginTop:4}} onClick={()=>del(g.id)}>✕</button>}</div>
           </div>
         </div>
       ))}
@@ -7587,7 +7810,8 @@ function calcularRolDePago(e,mesSel,rolesPago){
     if(yy<ingY||(yy===ingY&&mm<ingM))diasTrabajadosDefault=0;
     else if(yy===ingY&&mm===ingM)diasTrabajadosDefault=Math.max(0,diasDelMes-Math.min(ing.getDate(),30)+1);
   }
-  const diasTrabajados=Math.min(diasDelMes,guardado?.diasTrabajados!=null?guardado.diasTrabajados:diasTrabajadosDefault);
+  // La fecha de ingreso manda: aunque haya días guardados de antes, un mes anterior al ingreso cuenta 0 y el mes de ingreso no pasa de los días reales desde esa fecha
+  const diasTrabajados=Math.min(diasTrabajadosDefault,guardado?.diasTrabajados!=null?guardado.diasTrabajados:diasTrabajadosDefault);
   const factorDias=Math.min(1,Math.max(0,diasTrabajados/diasDelMes));
   const remuneracion=remuneracionCompleta*factorDias;
   const valorHora=remuneracionCompleta/240;
@@ -7616,8 +7840,9 @@ function acumuladoDecimoDe(e,mesSel,rolesPago,tipo){ // tipo: 3 | 4
   if(e.mensualizaDecimos!==false)return{total:0,periodo};
   const meses=mesesDelPeriodo(periodo.inicio).filter(m=>m<=mesSel); // se va acumulando mes a mes: solo hasta el mes que se está viendo
   let total=0;
-  meses.forEach(m=>{const r=calcularRolDePago(e,m,rolesPago);total+=tipo===3?r.provisionDecimo3:r.provisionDecimo4;});
-  return{total,periodo};
+  const detalle=[];
+  meses.forEach(m=>{const r=calcularRolDePago(e,m,rolesPago);const v=tipo===3?r.provisionDecimo3:r.provisionDecimo4;total+=v;if(v>0.004)detalle.push({mes:m,monto:v});});
+  return{total,periodo,detalle};
 }
 // 🏖️ Saldo de vacaciones: se acumula desde la fecha de ingreso (1.25 días/mes = remuneración/24), y se
 // va restando lo que ya tomó (1 día de vacaciones = remuneración/30). El saldo que queda es lo disponible.
@@ -7756,7 +7981,7 @@ function ObligacionesPago({empleadas,rolesPago}){
     const d3=acumuladoDecimoDe(e,mes,rolesPago,3);
     const d4=acumuladoDecimoDe(e,mes,rolesPago,4);
     const vac=saldoVacacionesDe(e,mes,rolesPago);
-    return{nombre:e.nombre,...r,decimo3Acum:d3.total,periodo3:d3.periodo,decimo4Acum:d4.total,periodo4:d4.periodo,vacSaldo:vac.saldo,vacDias:vac.diasDisponibles};
+    return{nombre:e.nombre,...r,decimo3Acum:d3.total,periodo3:d3.periodo,decimo4Acum:d4.total,periodo4:d4.periodo,vacSaldo:vac.saldo,vacDias:vac.diasDisponibles,det3:d3.detalle||[],det4:d4.detalle||[],ingresoTxt:e.fechaIngreso?e.fechaIngreso.split('-').reverse().join('/'):'sin fecha de ingreso'};
   });
 
   const totalIessPersonal=filas.reduce((a,f)=>a+f.iessPersonal,0);
@@ -7798,12 +8023,12 @@ function ObligacionesPago({empleadas,rolesPago}){
     </Card>
 
     <Card title={`🎁 Décimo tercero — acumulado hasta el mes (período dic-nov, pago hasta ${periodo3?.pagoHasta||"—"})`}>
-      {filas.map(f=>(<div key={f.nombre} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"5px 0",borderBottom:"1px solid #f0f4f8"}}><span>{f.nombre}</span>{f.mensualizaDecimos?<span style={{fontSize:11,color:"#888"}}>mensualizado · se paga cada mes en el rol</span>:<strong>${f.decimo3Acum.toFixed(2)}</strong>}</div>))}
+      {filas.map(f=>(<div key={f.nombre} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"5px 0",borderBottom:"1px solid #f0f4f8"}}><span>{f.nombre}<span style={{display:"block",fontSize:10,color:"#888",fontWeight:400}}>Ingreso {f.ingresoTxt}{!f.mensualizaDecimos&&f.det3.length>0?" · suma: "+f.det3.map(x=>x.mes+" $"+x.monto.toFixed(2)).join(" + "):""}</span></span>{f.mensualizaDecimos?<span style={{fontSize:11,color:"#888"}}>mensualizado · se paga cada mes en el rol</span>:<strong>${f.decimo3Acum.toFixed(2)}</strong>}</div>))}
       <div style={{display:"flex",justifyContent:"space-between",fontSize:15,paddingTop:8,marginTop:4,borderTop:"1.5px solid #1a3c5e"}}><strong style={{color:"#1a3c5e"}}>TOTAL a depositar</strong><strong style={{color:"#2e7d32"}}>${totalDecimo3.toFixed(2)}</strong></div>
     </Card>
 
     <Card title={`🎒 Décimo cuarto — acumulado hasta el mes (período ago-jul, pago hasta ${periodo4?.pagoHasta||"—"})`}>
-      {filas.map(f=>(<div key={f.nombre} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"5px 0",borderBottom:"1px solid #f0f4f8"}}><span>{f.nombre}</span>{f.mensualizaDecimos?<span style={{fontSize:11,color:"#888"}}>mensualizado · se paga cada mes en el rol</span>:<strong>${f.decimo4Acum.toFixed(2)}</strong>}</div>))}
+      {filas.map(f=>(<div key={f.nombre} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"5px 0",borderBottom:"1px solid #f0f4f8"}}><span>{f.nombre}<span style={{display:"block",fontSize:10,color:"#888",fontWeight:400}}>Ingreso {f.ingresoTxt}{!f.mensualizaDecimos&&f.det4.length>0?" · suma: "+f.det4.map(x=>x.mes+" $"+x.monto.toFixed(2)).join(" + "):""}</span></span>{f.mensualizaDecimos?<span style={{fontSize:11,color:"#888"}}>mensualizado · se paga cada mes en el rol</span>:<strong>${f.decimo4Acum.toFixed(2)}</strong>}</div>))}
       <div style={{display:"flex",justifyContent:"space-between",fontSize:15,paddingTop:8,marginTop:4,borderTop:"1.5px solid #1a3c5e"}}><strong style={{color:"#1a3c5e"}}>TOTAL a depositar</strong><strong style={{color:"#2e7d32"}}>${totalDecimo4.toFixed(2)}</strong></div>
     </Card>
 
@@ -10515,6 +10740,7 @@ const { data: rolesPago, setData: setRolesPago, upsert: upsertRolPago } = useCol
 const { data: rolesConfig, setData: setRolesConfig, upsert: upsertRolesConfig } = useCollection("rolesConfig", "ll_roles_config", [{id:"config",empleador:""}]);
 const { data: gastosFijosConfig, setData: setGastosFijosConfig, upsert: upsertGastosFijosConfig } = useCollection("gastosFijosConfig", "ll_gastos_fijos_config", GASTOS_FIJOS_CONFIG_DEFAULT);
 const { data: comprasInsumos, setData: setComprasInsumos, upsert: upsertCompraInsumo } = useCollection("comprasInsumos", "ll_compras_insumos", []);
+const { data: estadosCuenta, setData: setEstadosCuenta, upsert: upsertEstadoCuenta } = useCollection("estadosCuenta", "ll_estados_cuenta", []);
 // 🎧 Calificaciones manuales de audios de atención (2 por semana, ~8 al mes)
 const { data: calificacionesAudio, setData: setCalificacionesAudio, upsert: upsertCalificacionAudio } = useCollection("calificacionesAudio", "ll_calificaciones_audio", []);
 const { data: evalConfigArr, setData: setEvalConfigArr, upsert: upsertEvalConfig } = useCollection("evalConfig", "ll_eval_config", EVAL_CONFIG_DEFAULT);
@@ -10709,14 +10935,14 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
     {id:"pendientes",icon:"⏳",l:"Pendientes",b:pCount},{id:"bi",icon:"🚀",l:"Dashboard"},
     {id:"clientes",icon:"👥",l:"Clientes"},{id:"clientesAnalisis",icon:"📊",l:"Análisis clientes"},{id:"promosAdmin",icon:"🎁",l:"Promos"},{id:"cupones",icon:"🎟️",l:"Cupones"},{id:"resumen",icon:"📈",l:"Resumen día"},{id:"satisfaccionAdmin",icon:"😊",l:"Satisfacción"},
     {id:"reportes",icon:"📊",l:"Reportes"},{id:"depositos",icon:"🏦",l:"Depósitos"},
-    {id:"conciliacion",icon:"🏛️",l:"Conciliación"},
+    {id:"conciliacion",icon:"🏛️",l:"Conciliación"},{id:"conciliacionBanco",icon:"🏦",l:"Concil. bancaria"},
     {id:"gastos",icon:"🛒",l:"Gastos"},{id:"martinizingAdmin",icon:"🧴",l:"Martinizing"},{id:"inventario",icon:"📦",l:"Inventario"},{id:"comprasInsumos",icon:"🧾",l:"Compra de insumos"},{id:"productosAdmin",icon:"🛍️",l:"Productos"},{id:"kardexAdmin",icon:"📒",l:"Kardex"},{id:"conteosAdmin",icon:"📋",l:"Conteos"},{id:"activosFijosAdmin",icon:"📦",l:"Activos Fijos"},{id:"deudasAdmin",icon:"💳",l:"Deudas"},{id:"sorteoAdmin",icon:"🎟️",l:"Sorteo"},
     {id:"equipo",icon:"👩",l:"Equipo"},{id:"incentivosAdmin",icon:"🎯",l:"Incentivos"},{id:"maquinasAdmin",icon:"🏭",l:"Máquinas"},{id:"reporteMaquinasAdmin",icon:"⏱️",l:"Uso de máquinas"},{id:"tiemposRopaAdmin",icon:"👕",l:"Tiempos x Servicio"},{id:"pinsAdmin",icon:"🔒",l:"PINs"},{id:"produccionAdmin",icon:"🧺",l:"Producción"},{id:"tareasAdmin",icon:"📋",l:"Tareas"},{id:"notasAdmin",icon:"📝",l:"Notas"},{id:"evaluacionAdmin",icon:"📋",l:"Evaluación"},{id:"calificacionManualAdmin",icon:"🎧",l:"Calificación manual"},{id:"evaluacionConfigAdmin",icon:"⚙️",l:"Config. Evaluación"},
     {id:"config",icon:"⚙️",l:"Config"},{id:"usuarios",icon:"🔑",l:"Usuarios"},{id:"rolesPago",icon:"💵",l:"Roles de Pago"},{id:"obligaciones",icon:"📋",l:"Obligaciones"},{id:"repartoSocias",icon:"🤝",l:"Reparto Socias"},
   ];
   // 🗂️ Agrupa las pestañas en categorías para que el panel admin se vea más ordenado (menos scroll horizontal, todo lo relacionado junto)
   const CATEGORIAS=[
-    {id:"ventas_caja",icon:"🧾",l:"Ventas",tabIds:["ventas","historial","pendientes","depositos","conciliacion","cupones","promosAdmin","reportes","resumen","satisfaccionAdmin"]},
+    {id:"ventas_caja",icon:"🧾",l:"Ventas",tabIds:["ventas","historial","pendientes","depositos","conciliacion","conciliacionBanco","cupones","promosAdmin","reportes","resumen","satisfaccionAdmin"]},
     {id:"personal",icon:"👥",l:"Personal",tabIds:["equipo","pinsAdmin","usuarios","tareasAdmin","notasAdmin","incentivosAdmin","evaluacionAdmin","calificacionManualAdmin","evaluacionConfigAdmin","reporteMaquinasAdmin","tiemposRopaAdmin","rolesPago","obligaciones","repartoSocias"]},
     {id:"inventario_cat",icon:"📦",l:"Inventario",tabIds:["inventario","comprasInsumos","productosAdmin","kardexAdmin","conteosAdmin","gastos","martinizingAdmin","maquinasAdmin","activosFijosAdmin","deudasAdmin"]},
     {id:"negocio",icon:"📊",l:"Negocio",tabIds:["bi","clientes","clientesAnalisis","sorteoAdmin","produccionAdmin","config"]},
@@ -10771,6 +10997,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
       {tab==="reportes"&&<Reportes ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja}/>}
       {tab==="depositos"&&<Depositos depositos={depositos} setDepositos={setDepositos} ventas={ventas} salidasCaja={salidasCaja} upsertDeposito={upsertDeposito}/>}
       {tab==="conciliacion"&&<Conciliacion ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} depositos={depositos} setDepositos={setDepositos} upsertDeposito={upsertDeposito}/>}
+      {tab==="conciliacionBanco"&&<ConciliacionBancaria ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} depositos={depositos} setDepositos={setDepositos} upsertDeposito={upsertDeposito} gastos={gastos} setGastos={setGastos} upsertGasto={upsertGasto} empleadas={empleadas} rolesPago={rolesPago} estadosCuenta={estadosCuenta} setEstadosCuenta={setEstadosCuenta} upsertEstadoCuenta={upsertEstadoCuenta} sesion={sesion}/>}
       {tab==="gastos"&&<Gastos empleadas={empleadas} rolesPago={rolesPago} gastosFijosConfig={gastosFijosConfig} setGastosFijosConfig={setGastosFijosConfig} upsertGastosFijosConfig={upsertGastosFijosConfig} gastos={gastos} setGastos={setGastos} sesion={sesion} upsertGasto={upsertGasto} salidasCaja={salidasCaja} activosFijos={activosFijos} setActivosFijos={setActivosFijos} upsertActivoFijo={upsertActivoFijo} inventario={inventario} setInventario={setInventario} upsertInventario={upsertInventario} kardexInsumos={kardexInsumos} setKardexInsumos={setKardexInsumos} upsertKardexInsumo={upsertKardexInsumo}/>}
       {tab==="martinizingAdmin"&&<MartinizingAdmin ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} facturasMartinizing={facturasMartinizing} setFacturasMartinizing={setFacturasMartinizing} upsertFacturaMartinizing={upsertFacturaMartinizing} setSalidasCaja={setSalidasCaja} upsertSalida={upsertSalida} sesion={sesion}/>}
       {tab==="inventario"&&<Inventario inventario={inventario} setInventario={setInventario} upsertInventario={upsertInventario} kardexInsumos={kardexInsumos} setKardexInsumos={setKardexInsumos} upsertKardexInsumo={upsertKardexInsumo} empleadas={empleadas} sesion={sesion}/>}
@@ -11159,6 +11386,461 @@ function Depositos({depositos,setDepositos,ventas,salidasCaja,upsertDeposito}){
 // ─── CONCILIACIÓN BANCARIA ─────────────────────────────────────────
 // Compara los movimientos del sistema contra el estado de cuenta del banco.
 // Cada movimiento tiene un check "conciliado" que se guarda en Firestore.
+// 🏦 CONCILIACIÓN BANCARIA AUTOMÁTICA — lee el estado de cuenta (PDF con texto o CSV), lo cruza con las transferencias,
+// depósitos y gastos del sistema y deja aparte lo que no se pudo conciliar, para resolverlo a mano.
+const MESES_BANCO={ene:1,feb:2,mar:3,abr:4,may:5,jun:6,jul:7,ago:8,sep:9,set:9,oct:10,nov:11,dic:12};
+const _fmtF=(y,m,d)=>{const yy=+y,mm=+m,dd=+d;if(!(yy>=2000&&yy<=2100&&mm>=1&&mm<=12&&dd>=1&&dd<=31))return null;return `${yy}-${String(mm).padStart(2,"0")}-${String(dd).padStart(2,"0")}`;};
+const _RE_F1=/\b(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\b/,_RE_F2=/\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})\b/,_RE_F3=/\b(\d{1,2})[-\s/]+([A-Za-zÁÉÍÓÚáéíóú]{3,10})\.?[-\s/,]+(\d{2,4})\b/;
+function fechaDeTextoBanco(t){
+  let m=t.match(_RE_F1);if(m)return _fmtF(m[1],m[2],m[3]);
+  m=t.match(_RE_F2);if(m){let y=+m[3];if(y<100)y+=2000;return _fmtF(y,m[2],m[1]);}
+  m=t.match(_RE_F3);
+  if(m){const mes=MESES_BANCO[normTxt(m[2]).slice(0,3)];if(mes){let y=+m[3];if(y<100)y+=2000;return _fmtF(y,mes,m[1]);}}
+  return null;
+}
+const quitarFechaTexto=t=>t.replace(_RE_F1,"").replace(_RE_F2,"").replace(_RE_F3,"").replace(/\s+/g," ").trim();
+const _RE_MONTO=/^[-+(]?\$?\s?(\d{1,3}(?:[.,]\d{3})+|\d+)[.,]\d{2}[-)]?$/;
+function montoDeTextoBanco(t){ // acepta 1,234.56 · 1.234,56 · -45.00 · 45.00- · (45.00)
+  const s=String(t).trim();
+  if(!_RE_MONTO.test(s))return null;
+  const neg=/^-|-$|^\(/.test(s);
+  const n=s.replace(/[^\d.,]/g,"");
+  const ult=Math.max(n.lastIndexOf("."),n.lastIndexOf(","));
+  const v=parseFloat(n.slice(0,ult).replace(/[.,]/g,"")+"."+n.slice(ult+1));
+  return isNaN(v)?null:(neg?-v:v);
+}
+// Si el sentido (entra/sale plata) no vino claro, se deduce: 1) con el saldo (sube o baja), 2) con palabras de la descripción
+function inferirTipos(movs){
+  const conSaldo=movs.filter(m=>m.saldo!=null).length;
+  if(movs.some(m=>m.tipo==null)&&conSaldo>=2){
+    let asc=0,desc=0;
+    for(let i=1;i<movs.length;i++){
+      const p=movs[i-1],c=movs[i];if(p.saldo==null||c.saldo==null)continue;
+      if(Math.abs(p.saldo+c.monto-c.saldo)<0.015||Math.abs(p.saldo-c.monto-c.saldo)<0.015)asc++;
+      if(Math.abs(c.saldo+p.monto-p.saldo)<0.015||Math.abs(c.saldo-p.monto-p.saldo)<0.015)desc++;
+    }
+    const ascendente=asc>=desc;
+    movs.forEach((m,i)=>{
+      if(m.tipo!=null)return;
+      const ref=ascendente?movs[i-1]:movs[i+1]; // la fila anterior en el tiempo
+      if(!ref||ref.saldo==null||m.saldo==null)return;
+      if(Math.abs(ref.saldo+m.monto-m.saldo)<0.015)m.tipo="credito";
+      else if(Math.abs(ref.saldo-m.monto-m.saldo)<0.015)m.tipo="debito";
+    });
+  }
+  const KW_CRE=/DEPOSITO|ACREDIT|RECIBID|A FAVOR|NOTA DE CREDITO|INTERES|ABONO|COBRO|TRANSF\.? ?RECIB/;
+  const KW_DEB=/DEBITO|RETIRO|COMISION|PAGO|COMPRA|IMPUESTO|SERVICIO|CHEQUE|ENVIAD|REALIZAD|A TERCEROS|TRANSF\.? ?ENV|ISD/;
+  movs.forEach(m=>{
+    if(m.tipo!=null)return;
+    const t=normTxt(m.descripcion||"").toUpperCase();
+    if(KW_CRE.test(t)&&!KW_DEB.test(t))m.tipo="credito";
+    else if(KW_DEB.test(t)&&!KW_CRE.test(t))m.tipo="debito";
+    else{m.tipo="credito";m.dudoso=true;}
+    if(!m.dudoso)m.dudoso=false;
+  });
+  return movs;
+}
+// 📄 Estado de cuenta en PDF (con texto): busca filas con fecha y valores; usa las columnas Débito/Crédito si existen
+function parseEstadoCuentaPDF(filas){
+  const avisos=[];
+  let cols=null;
+  const hdr=filas.find(r=>/d[eé]bito/i.test(r.texto)&&/cr[eé]dito/i.test(r.texto));
+  if(hdr){
+    const edge=it=>it?it.x+(it.w||0):null;
+    cols={deb:edge(hdr.items.find(i=>/d[eé]bito/i.test(i.s))),cre:edge(hdr.items.find(i=>/cr[eé]dito/i.test(i.s))),sal:edge(hdr.items.find(i=>/saldo/i.test(i.s)))};
+  }
+  // separa montos pegados al final de un texto (ej. "PAGO PROVEEDOR 25.00")
+  const expandir=items=>{
+    const out=[];
+    items.forEach(it=>{
+      const ws=it.s.split(/\s+/);
+      if(ws.length>1&&montoDeTextoBanco(ws[ws.length-1])!=null&&montoDeTextoBanco(it.s)==null){
+        const ult=ws[ws.length-1],resto=it.s.slice(0,it.s.length-ult.length).trim();
+        const frac=it.s.length?(it.s.length-ult.length)/it.s.length:1;
+        out.push({...it,s:resto,w:(it.w||0)*frac});
+        out.push({s:ult,x:it.x+(it.w||0)*frac,y:it.y,w:(it.w||0)*(1-frac)});
+      }else out.push(it);
+    });
+    return out;
+  };
+  const movs=[];let ultimo=null;
+  filas.forEach(r=>{
+    const tx=r.texto;
+    if(/d[eé]bito/i.test(tx)&&/(cr[eé]dito|saldo)/i.test(tx))return;
+    const items=expandir(r.items);
+    let fecha=null;
+    for(const it of items){const f=fechaDeTextoBanco(it.s);if(f){fecha=f;break;}}
+    const montos=items.map(it=>({it,v:montoDeTextoBanco(it.s)})).filter(o=>o.v!=null);
+    if(fecha&&montos.length>0){
+      let deb=null,cre=null,sal=null,monto=null,tipo=null;
+      if(cols){
+        montos.forEach(o=>{
+          const nr=o.it.x+(o.it.w||0);
+          const c=[["deb",cols.deb],["cre",cols.cre],["sal",cols.sal]].filter(x=>x[1]!=null);
+          let best=null,bd=1e9;c.forEach(([k,h])=>{const d=Math.abs(nr-h);if(d<bd){bd=d;best=k;}});
+          if(best==="deb")deb=Math.abs(o.v);else if(best==="cre")cre=Math.abs(o.v);else sal=o.v;
+        });
+        if(deb>0&&!(cre>0)){monto=deb;tipo="debito";}
+        else if(cre>0&&!(deb>0)){monto=cre;tipo="credito";}
+      }else{
+        const vals=montos.map(o=>o.v);
+        if(vals.length>=2){sal=vals[vals.length-1];monto=vals[vals.length-2];}else monto=vals[0];
+        const marca=items.map(it=>it.s.trim().toUpperCase()).find(x=>/^(D|C|DB|CR|DEB|CRE|D[EÉ]BITO|CR[EÉ]DITO)$/.test(x));
+        if(marca)tipo=/^C/.test(marca)?"credito":"debito";
+        else if(monto<0)tipo="debito";
+        monto=Math.abs(monto);
+      }
+      if(monto==null||!(monto>0))return;
+      const textos=items.filter(it=>montoDeTextoBanco(it.s)==null).map(it=>quitarFechaTexto(it.s)).filter(Boolean);
+      const refs=textos.filter(t=>/^\d{5,}$/.test(t));
+      const desc=textos.filter(t=>!/^\d{5,}$/.test(t)&&!/^(D|C|DB|CR)$/i.test(t)).join(" ").trim();
+      if(/SALDO\s+(ANTERIOR|INICIAL|FINAL|ACTUAL)|^TOTAL/i.test(desc))return;
+      ultimo={fecha,descripcion:desc,ref:refs[0]||"",monto,tipo,saldo:sal};
+      movs.push(ultimo);
+    }else if(!fecha&&montos.length===0&&ultimo&&!/saldo|total|p[aá]gina|estado de cuenta|fecha/i.test(tx)){
+      const extra=items.map(it=>it.s).join(" ").trim();
+      if(extra&&ultimo.descripcion.length<160)ultimo.descripcion=(ultimo.descripcion+" "+extra).trim();
+    }
+  });
+  inferirTipos(movs);
+  const dud=movs.filter(m=>m.dudoso).length;
+  if(!cols&&movs.length)avisos.push("Este estado de cuenta no trae columnas Débito/Crédito: deduje si entra o sale plata. Revisa la lista antes de conciliar.");
+  if(dud)avisos.push(`${dud} movimiento(s) con sentido dudoso (marcados en naranja): confirma si son ingreso o egreso con el botón ↔.`);
+  return{movimientos:movs,avisos};
+}
+// 📑 Estado de cuenta en CSV (más exacto que el PDF si tu banco lo permite descargar)
+function _csvLinea(l,d){const out=[];let cur="",q=false;for(let i=0;i<l.length;i++){const ch=l[i];if(ch==='"'){if(q&&l[i+1]==='"'){cur+='"';i++;}else q=!q;}else if(ch===d&&!q){out.push(cur);cur="";}else cur+=ch;}out.push(cur);return out.map(x=>x.trim());}
+function _numCsv(sv){
+  let t=String(sv==null?"":sv).replace(/[$\s]/g,"");if(!t)return null;
+  const neg=/^-|-$|^\(/.test(t);t=t.replace(/[^\d.,]/g,"");if(!t)return null;
+  const ult=Math.max(t.lastIndexOf("."),t.lastIndexOf(","));
+  let v;
+  if(ult<0)v=parseFloat(t);
+  else if(t.includes(".")&&t.includes(","))v=parseFloat(t.slice(0,ult).replace(/[.,]/g,"")+"."+t.slice(ult+1));
+  else{const dec=t.slice(ult+1);v=dec.length<=2?parseFloat(t.slice(0,ult).replace(/[.,]/g,"")+"."+dec):parseFloat(t.replace(/[.,]/g,""));}
+  return isNaN(v)?null:(neg?-v:v);
+}
+function parseEstadoCuentaCSV(txt){
+  const lineas=txt.replace(/^\uFEFF/,"").split(/\r?\n/).filter(l=>l.trim());
+  if(lineas.length<2)return{movimientos:[],avisos:[]};
+  const muestra=lineas.slice(0,6).join("\n");
+  const d=muestra.split(";").length>muestra.split(",").length?";":(muestra.includes("\t")?"\t":",");
+  const filas=lineas.map(l=>_csvLinea(l,d));
+  const hi=filas.findIndex(f=>f.some(c=>/fecha/i.test(c))&&f.some(c=>/(descrip|detalle|concepto|observ|glosa|referencia)/i.test(c)));
+  if(hi<0)return{movimientos:[],avisos:["No encontré la fila de títulos (Fecha, Descripción…) en el CSV."]};
+  const H=filas[hi].map(c=>normTxt(c));
+  const idx=re=>H.findIndex(c=>re.test(c));
+  const iF=idx(/fecha/),iD=idx(/descrip|detalle|concepto|observ|glosa/),iDeb=idx(/debito|egreso|retiro/),iCre=idx(/credito|ingreso|deposito/),iVal=idx(/^(valor|monto|importe)/),iSal=idx(/saldo/),iRef=idx(/referencia|documento|comprobante|numero/),iTipo=idx(/^(tipo|d\/c|naturaleza|movimiento)/);
+  const movs=[];
+  filas.slice(hi+1).forEach(f=>{
+    const fecha=fechaDeTextoBanco(f[iF]||"");if(!fecha)return;
+    const desc=(iD>=0?f[iD]:"")||"";
+    let monto=null,tipo=null;
+    if(iDeb>=0||iCre>=0){
+      const deb=Math.abs(_numCsv(f[iDeb])||0),cre=Math.abs(_numCsv(f[iCre])||0);
+      if(deb>0&&!(cre>0)){monto=deb;tipo="debito";}else if(cre>0&&!(deb>0)){monto=cre;tipo="credito";}
+    }else if(iVal>=0){
+      const v=_numCsv(f[iVal]);if(v==null)return;
+      monto=Math.abs(v);
+      if(iTipo>=0&&f[iTipo])tipo=/^(c|cr|cred|ingreso|dep)/i.test(normTxt(f[iTipo]))?"credito":"debito";
+      else if(v<0)tipo="debito";
+    }
+    if(monto==null||!(monto>0))return;
+    movs.push({fecha,descripcion:desc,ref:iRef>=0?(f[iRef]||""):"",monto,tipo,saldo:iSal>=0?_numCsv(f[iSal]):null});
+  });
+  inferirTipos(movs);
+  const dud=movs.filter(m=>m.dudoso).length;
+  return{movimientos:movs,avisos:dud?[`${dud} movimiento(s) con sentido dudoso (marcados en naranja): confirma si son ingreso o egreso con el botón ↔.`]:[]};
+}
+const _sumarDias=(f,n)=>{const d=new Date(f+"T00:00:00Z");d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10);};
+const _diasEntre=(a,b)=>Math.round((Date.parse(b+"T00:00:00Z")-Date.parse(a+"T00:00:00Z"))/86400000);
+// Lo que el sistema espera ver en el banco: transferencias cobradas, depósitos, gastos pagados por transferencia, sueldos e IESS
+function construirCandidatos(banco,ventas,depositos,gastos,empleadas,rolesPago,meses,usadosSint){
+  const bk=normTxt(banco);
+  const esBanco=t=>normTxt(t||"").includes(bk);
+  const credito=[],debito=[];
+  (ventas||[]).filter(v=>!v.anulada).forEach(v=>(v.abonos||[]).forEach((ab,idx)=>{
+    if(ab.conciliado||!/^Transferencia/i.test(ab.metodo||"")||!esBanco(ab.metodo))return;
+    credito.push({tipo:"abono",id:`${v.folio}#${idx}`,monto:ab.monto,fecha:fechaLocal(ab.fecha),desc:`${v.clienteNombre||"Cliente"} · ${v.folio}`,nombre:v.clienteNombre||"",ventana:[-1,6]});
+  }));
+  (depositos||[]).filter(d=>!d.eliminada&&!d.conciliado&&esBanco(d.banco)).forEach(d=>credito.push({tipo:"deposito",id:d.id,monto:parseFloat(d.monto)||0,fecha:d.fecha,desc:`Depósito ${d.comprobante||""}`.trim(),nombre:"",ventana:[-3,3]}));
+  (gastos||[]).filter(g=>!g.eliminada&&!g.conciliadoBanco&&g.estadoPago!=="pendiente"&&/^Transferencia/i.test(g.metodoPago||"")&&esBanco(g.metodoPago)).forEach(g=>debito.push({tipo:"gasto",id:g.id,monto:g.monto,fecha:fechaLocal(g.fecha),desc:g.descripcion||"Gasto",nombre:g.proveedor||"",ventana:[-3,7]}));
+  (meses||[]).forEach(mes=>{
+    let iess=0;
+    (empleadas||[]).filter(e=>e.activa&&e.recibeSueldo!==false).forEach(e=>{
+      const r=calcularRolDePago(e,mes,rolesPago);
+      if(r.netoAPagar>0.01&&!(usadosSint&&usadosSint.has("nomina"+`nom_${e.id}_${mes}`)))debito.push({tipo:"nomina",id:`nom_${e.id}_${mes}`,monto:Math.round(r.netoAPagar*100)/100,fecha:`${mes}-28`,desc:`Sueldo ${e.nombreCompleto||e.nombre} · ${mes}`,nombre:e.nombre,ventana:[-31,31],esperado:true});
+      iess+=r.iessPersonal+r.iessPatronal;
+    });
+    if(iess>0.01&&!(usadosSint&&usadosSint.has("iess"+`iess_${mes}`)))debito.push({tipo:"iess",id:`iess_${mes}`,monto:Math.round(iess*100)/100,fecha:`${mes}-28`,desc:`Pago IESS · ${mes}`,nombre:"IESS",ventana:[-31,31],esperado:true});
+  });
+  return{credito,debito};
+}
+// Cruce automático: mismo valor y fecha cercana (y si el nombre aparece en la descripción, mejor)
+function conciliarBanco(movs,cands){
+  const usados=new Set();
+  const res=movs.map(m=>({...m,estado:"pendiente"}));
+  const parecido=(nombre,desc)=>{const d=normTxt(desc||"");return normTxt(nombre||"").split(/\s+/).filter(w=>w.length>=3).some(w=>d.includes(w));};
+  [...res].sort((a,b)=>a.fecha.localeCompare(b.fecha)).forEach(m=>{
+    const lista=cands[m.tipo==="credito"?"credito":"debito"]||[];
+    let mejor=null,ms=1e9;
+    lista.forEach(c=>{
+      if(usados.has(c.tipo+c.id)||Math.abs(c.monto-m.monto)>0.011)return;
+      const dd=_diasEntre(c.fecha,m.fecha);
+      if(dd<c.ventana[0]||dd>c.ventana[1])return;
+      let sc=Math.abs(dd);if(c.nombre&&parecido(c.nombre,m.descripcion))sc-=0.5;
+      if(sc<ms){ms=sc;mejor=c;}
+    });
+    if(mejor){usados.add(mejor.tipo+mejor.id);m.estado="conciliado";m.refTipo=mejor.tipo;m.refId=mejor.id;m.refDesc=mejor.desc;}
+  });
+  return res;
+}
+
+function ConciliacionBancaria({ventas,setVentas,upsertVenta,depositos,setDepositos,upsertDeposito,gastos,setGastos,upsertGasto,empleadas,rolesPago,estadosCuenta,setEstadosCuenta,upsertEstadoCuenta,sesion}){
+  const [banco,setBanco]=useState("Pichincha");
+  const [borrador,setBorrador]=useState(null);
+  const [docId,setDocId]=useState(null);
+  const [abierto,setAbierto]=useState(null);const [asocSel,setAsocSel]=useState("");const [notaIgn,setNotaIgn]=useState("");
+  const [err,setErr]=useState("");const [ok,setOk]=useState("");const [cargando,setCargando]=useState(false);
+  const [verConc,setVerConc]=useState(false);
+  const money=n=>"$"+(Number(n)||0).toFixed(2);
+  const docs=(estadosCuenta||[]).slice().sort((a,b)=>(b.fechaCarga||"").localeCompare(a.fechaCarga||""));
+  const doc=docs.find(d=>d.id===docId)||docs[0]||null;
+
+  const leerArchivo=async ev=>{
+    const file=ev.target.files&&ev.target.files[0];ev.target.value="";
+    if(!file)return;
+    setErr("");setOk("");setCargando(true);
+    try{
+      let r;
+      if(/\.(csv|txt)$/i.test(file.name)||file.type==="text/csv"){r=parseEstadoCuentaCSV(await file.text());}
+      else{
+        const lib=await cargarPdfJs();
+        const pdf=await lib.getDocument({data:new Uint8Array(await file.arrayBuffer())}).promise;
+        const filas=await filasDePdf(pdf);
+        if(filas.length===0)throw new Error("Este PDF no tiene texto (parece un escaneo o una foto). Descarga el estado de cuenta desde la banca en línea (PDF o CSV) y súbelo de nuevo.");
+        r=parseEstadoCuentaPDF(filas);
+      }
+      if(!r.movimientos.length)throw new Error("No encontré movimientos en el archivo. Prueba con el CSV del banco, o mándame un ejemplo para ajustar la lectura.");
+      setBorrador({archivo:file.name,movimientos:r.movimientos.map((m,i)=>({...m,_k:i})),avisos:r.avisos||[]});
+    }catch(e){setErr(e.message||"No se pudo leer el archivo");}
+    setCargando(false);
+  };
+  const cambiarTipo=k=>setBorrador(b=>({...b,movimientos:b.movimientos.map(m=>m._k===k?{...m,tipo:m.tipo==="credito"?"debito":"credito",dudoso:false}:m)}));
+  const quitar=k=>setBorrador(b=>({...b,movimientos:b.movimientos.filter(m=>m._k!==k)}));
+  const invertirTodos=()=>setBorrador(b=>({...b,movimientos:b.movimientos.map(m=>({...m,tipo:m.tipo==="credito"?"debito":"credito",dudoso:false}))}));
+
+  // Marca como conciliado lo del sistema que se cruzó (abonos y depósitos usan el mismo check de la pantalla Conciliación)
+  const aplicarVarios=items=>{
+    const ahora=new Date().toISOString();
+    const porFolio={},deps={},gs={};
+    items.forEach(it=>{
+      if(it.refTipo==="abono"){const [folio,i]=String(it.refId).split("#");(porFolio[folio]=porFolio[folio]||{})[+i]=it.movId;}
+      else if(it.refTipo==="deposito")deps[it.refId]=it.movId;
+      else if(it.refTipo==="gasto")gs[it.refId]=it.movId;
+    });
+    const folios=Object.keys(porFolio);
+    if(folios.length){
+      const act=v=>({...v,abonos:(v.abonos||[]).map((ab,i)=>porFolio[v.folio][i]!=null?{...ab,conciliado:true,conciliadoBanco:true,movBanco:porFolio[v.folio][i]}:ab)});
+      setVentas(prev=>prev.map(v=>porFolio[v.folio]?act(v):v));
+      folios.forEach(f=>{const v=(ventas||[]).find(x=>x.folio===f);if(v&&upsertVenta)upsertVenta({...act(v),_updatedAt:ahora});});
+    }
+    if(Object.keys(deps).length){
+      const actD=d=>({...d,conciliado:true,conciliadoBanco:true,movBanco:deps[d.id]});
+      setDepositos(prev=>prev.map(d=>deps[d.id]!=null?actD(d):d));
+      (depositos||[]).filter(d=>deps[d.id]!=null).forEach(d=>{if(upsertDeposito)upsertDeposito({...actD(d),_updatedAt:ahora});});
+    }
+    if(Object.keys(gs).length){
+      const actG=g=>({...g,conciliadoBanco:true,movBanco:gs[g.id]});
+      setGastos(prev=>prev.map(g=>gs[g.id]!=null?actG(g):g));
+      (gastos||[]).filter(g=>gs[g.id]!=null).forEach(g=>{if(upsertGasto)upsertGasto({...actG(g),_updatedAt:new Date().toISOString()});});
+    }
+  };
+  const mesesDe=(desde,hasta)=>{const out=[];let [y,m]=desde.slice(0,7).split("-").map(Number);const [yf,mf]=hasta.slice(0,7).split("-").map(Number);
+    // incluye el mes anterior (los sueldos de un mes se pagan a inicios del siguiente)
+    m--;if(m<1){m=12;y--;}
+    while(y<yf||(y===yf&&m<=mf)){out.push(`${y}-${String(m).padStart(2,"0")}`);m++;if(m>12){m=1;y++;}}
+    return out;};
+  const sinteticosUsados=()=>{const u=new Set();(estadosCuenta||[]).forEach(d=>(d.movimientos||[]).forEach(m=>{if((m.estado==="conciliado"||m.estado==="manual")&&(m.refTipo==="nomina"||m.refTipo==="iess"))u.add(m.refTipo+m.refId);}));return u;};
+
+  const conciliar=()=>{
+    const movs=borrador.movimientos;
+    // Los estados de cuenta semanales se traslapan: lo que ya se cargó antes se omite
+    const previas=new Set();(estadosCuenta||[]).filter(d=>d.banco===banco).forEach(d=>(d.movimientos||[]).forEach(m=>previas.add(m.clave)));
+    const cont={};
+    const conClave=movs.map(m=>{const base=`${banco}|${m.fecha}|${m.tipo}|${m.monto.toFixed(2)}|${normTxt(m.descripcion).replace(/\s+/g," ").slice(0,40)}|${m.saldo!=null?m.saldo.toFixed(2):""}`;cont[base]=(cont[base]||0)+1;return{...m,clave:base+"|"+cont[base]};});
+    const nuevos=conClave.filter(m=>!previas.has(m.clave));
+    const repetidos=conClave.length-nuevos.length;
+    if(nuevos.length===0){setBorrador(null);setOk(`Los ${repetidos} movimientos de este archivo ya estaban cargados antes. No hay nada nuevo.`);return;}
+    const fechas=nuevos.map(m=>m.fecha).sort();const desde=fechas[0],hasta=fechas[fechas.length-1];
+    const cands=construirCandidatos(banco,ventas,depositos,gastos,empleadas,rolesPago,mesesDe(desde,hasta),sinteticosUsados());
+    const res=conciliarBanco(nuevos,cands);
+    const nuevoDoc={id:"ec_"+Date.now(),banco,desde,hasta,archivo:borrador.archivo,cargadoPor:sesion?.nombre||null,fechaCarga:new Date().toISOString(),
+      movimientos:res.map((m,i)=>({id:"m"+i,clave:m.clave,fecha:m.fecha,descripcion:m.descripcion||"",ref:m.ref||"",monto:m.monto,tipo:m.tipo,saldo:m.saldo!=null?m.saldo:null,estado:m.estado,refTipo:m.refTipo||null,refId:m.refId!=null?m.refId:null,refDesc:m.refDesc||"",nota:""}))};
+    aplicarVarios(nuevoDoc.movimientos.filter(m=>m.estado==="conciliado").map(m=>({refTipo:m.refTipo,refId:m.refId,movId:m.id})));
+    setEstadosCuenta(prev=>[nuevoDoc,...prev]);
+    if(upsertEstadoCuenta)upsertEstadoCuenta({...nuevoDoc,_updatedAt:new Date().toISOString()});
+    setDocId(nuevoDoc.id);setBorrador(null);
+    const nc=nuevoDoc.movimientos.filter(m=>m.estado==="conciliado").length;
+    setOk(`✅ ${nc} de ${nuevoDoc.movimientos.length} movimientos se conciliaron solos. Abajo está lo que falta resolver.${repetidos?` (${repetidos} ya estaban cargados y se omitieron.)`:""}`);
+  };
+
+  const actualizarMov=(movId,cambios)=>{
+    const nuevo={...doc,movimientos:doc.movimientos.map(m=>m.id===movId?{...m,...cambios}:m)};
+    setEstadosCuenta(prev=>prev.map(d=>d.id===doc.id?nuevo:d));
+    if(upsertEstadoCuenta)upsertEstadoCuenta({...nuevo,_updatedAt:new Date().toISOString()});
+  };
+  const asociar=(m,cand)=>{aplicarVarios([{refTipo:cand.tipo,refId:cand.id,movId:m.id}]);actualizarMov(m.id,{estado:"manual",refTipo:cand.tipo,refId:cand.id,refDesc:cand.desc});setAbierto(null);setAsocSel("");};
+  const ignorar=m=>{actualizarMov(m.id,{estado:"ignorado",nota:notaIgn.trim()});setAbierto(null);setNotaIgn("");};
+  const registrarGasto=m=>{
+    const g={id:Date.now(),descripcion:m.descripcion||"Movimiento bancario",categoria:"Otros",proveedor:"",numeroFactura:m.ref||"",monto:m.monto,fecha:m.fecha,metodoPago:"Transferencia "+doc.banco,estadoPago:"pagado",notas:"Registrado desde la conciliación bancaria",registradoPor:sesion?.nombre||"",conciliadoBanco:true,movBanco:m.id};
+    setGastos(prev=>[g,...prev]);if(upsertGasto)upsertGasto({...g,_updatedAt:new Date().toISOString()});
+    actualizarMov(m.id,{estado:"manual",refTipo:"gasto",refId:g.id,refDesc:"Gasto registrado desde el banco"});
+    setAbierto(null);
+  };
+  const candidatosManual=m=>{
+    const cs=construirCandidatos(doc.banco,ventas,depositos,gastos,empleadas,rolesPago,mesesDe(m.fecha,m.fecha),sinteticosUsados());
+    return (m.tipo==="credito"?cs.credito:cs.debito).slice().sort((a,b)=>Math.abs(a.monto-m.monto)-Math.abs(b.monto-m.monto)||Math.abs(_diasEntre(a.fecha,m.fecha))-Math.abs(_diasEntre(b.fecha,m.fecha))).slice(0,40);
+  };
+
+  const pendientes=doc?doc.movimientos.filter(m=>m.estado==="pendiente"):[];
+  const resueltos=doc?doc.movimientos.filter(m=>m.estado!=="pendiente"):[];
+  const sinBanco=doc?(()=>{
+    const cs=construirCandidatos(doc.banco,ventas,depositos,gastos,empleadas,rolesPago,mesesDe(doc.desde,doc.hasta),sinteticosUsados());
+    return [...cs.credito,...cs.debito].filter(c=>c.fecha>=_sumarDias(doc.desde,-5)&&c.fecha<=doc.hasta);
+  })():[];
+  const descargarPendientes=()=>{
+    const enc=["Estado","Fecha","Tipo","Descripción","Monto","Detalle"];
+    const filas=[...pendientes.map(m=>["Movimiento del banco sin conciliar",m.fecha,m.tipo==="credito"?"Ingreso":"Egreso",m.descripcion,m.monto.toFixed(2),m.ref||""]),
+      ...sinBanco.map(c=>["En el sistema, no aparece en el banco",c.fecha,c.tipo,c.desc,c.monto.toFixed(2),""])];
+    const csv=[enc,...filas].map(f=>f.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(",")).join("\n");
+    const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
+    const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`pendientes_conciliacion_${doc.banco}_${doc.hasta}.csv`;a.click();
+  };
+  const totCre=borrador?borrador.movimientos.filter(m=>m.tipo==="credito").reduce((a,m)=>a+m.monto,0):0;
+  const totDeb=borrador?borrador.movimientos.filter(m=>m.tipo==="debito").reduce((a,m)=>a+m.monto,0):0;
+
+  return(<div style={S.panel}>
+    <h2 style={S.ptitle}>🏦 Conciliación bancaria automática</h2>
+    <Card title="📥 Cargar estado de cuenta">
+      <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:12}}>Sube el estado de cuenta de la semana (PDF o CSV descargado de tu banca en línea). Se lee en tu navegador; solo se guardan fecha, descripción y valor de cada movimiento. Puedes subir cada semana: lo que ya cargaste antes se omite solo.</div>
+      {err&&<div style={S.err}>{err}</div>}
+      {ok&&<div style={{background:"#e8f5e9",color:"#2e7d32",borderRadius:8,padding:"8px 10px",fontSize:12,marginBottom:10}}>{ok}</div>}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 2fr",gap:8,alignItems:"end"}}>
+        <div><label style={S.lbl}>Banco</label><select style={S.inp} value={banco} onChange={e=>setBanco(e.target.value)}><option>Pichincha</option><option>JEP</option></select></div>
+        <label style={{...S.btnS,display:"block",textAlign:"center",cursor:"pointer",background:"#1a3c5e",color:"#fff",padding:"11px 8px"}}>{cargando?"⏳ Leyendo...":"📄 Subir PDF o CSV"}<input type="file" accept=".pdf,application/pdf,.csv,text/csv,.txt" style={{display:"none"}} onChange={leerArchivo} disabled={cargando}/></label>
+      </div>
+      <div style={{fontSize:10,color:"#888",marginTop:8}}>Se concilian las transferencias (Pichincha o JEP según elijas), los depósitos de efectivo y los gastos pagados por transferencia, además de los sueldos e IESS calculados. Los pagos con tarjeta no se concilian aquí todavía.</div>
+    </Card>
+
+    {borrador&&(
+      <Card title={`👀 Revisa lo que leí — ${borrador.archivo}`}>
+        {borrador.avisos.map((a,i)=><div key={i} style={{background:"#fff3e0",color:"#a05a00",borderRadius:8,padding:"6px 10px",fontSize:12,marginBottom:6}}>⚠️ {a}</div>)}
+        <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:8}}>
+          <span>{borrador.movimientos.length} movimientos</span>
+          <span style={{color:"#2e7d32"}}>Ingresos {money(totCre)}</span>
+          <span style={{color:"#c62828"}}>Egresos {money(totDeb)}</span>
+        </div>
+        <div style={{maxHeight:320,overflowY:"auto",border:"1px solid #e8f0f7",borderRadius:8}}>
+          {borrador.movimientos.map(m=>(
+            <div key={m._k} style={{display:"flex",alignItems:"center",gap:6,padding:"6px 8px",borderBottom:"1px solid #f0f4f8",background:m.dudoso?"#fff8e1":"#fff"}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:12,fontWeight:600,color:"#1a3c5e",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{m.descripcion||"(sin descripción)"}</div>
+                <div style={{fontSize:10,color:"#888"}}>{fmtD(m.fecha)}{m.ref?` · ${m.ref}`:""}</div>
+              </div>
+              <div style={{fontWeight:800,fontSize:13,color:m.tipo==="credito"?"#2e7d32":"#c62828"}}>{m.tipo==="credito"?"+":"−"}{money(m.monto)}</div>
+              <button style={{...S.btnS,padding:"3px 8px"}} title="Cambiar entre ingreso y egreso" onClick={()=>cambiarTipo(m._k)}>↔</button>
+              <button style={{...S.btnR,padding:"3px 8px"}} onClick={()=>quitar(m._k)}>✕</button>
+            </div>
+          ))}
+        </div>
+        <div style={{display:"flex",gap:8,marginTop:10,flexWrap:"wrap"}}>
+          <button style={{...S.btnP,flex:1}} onClick={conciliar}>✅ Conciliar automáticamente</button>
+          <button style={S.btnS} onClick={invertirTodos}>↔ Invertir todos</button>
+          <button style={S.btnC} onClick={()=>setBorrador(null)}>Cancelar</button>
+        </div>
+        <div style={{fontSize:10,color:"#888",marginTop:6}}>Si ves que los ingresos salen como egresos (o al revés), usa "Invertir todos". Quita con ✕ las líneas que no sean movimientos.</div>
+      </Card>
+    )}
+
+    {doc&&(
+      <>
+        <Card title="🗂️ Estado de cuenta">
+          <select style={S.inp} value={doc.id} onChange={e=>{setDocId(e.target.value);setAbierto(null);}}>
+            {docs.map(d=><option key={d.id} value={d.id}>{d.banco} · {fmtD(d.desde)} al {fmtD(d.hasta)} ({(d.movimientos||[]).length} mov.)</option>)}
+          </select>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}>
+            <div style={{background:"#e8f5e9",color:"#2e7d32",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700}}>✅ Conciliados: {resueltos.filter(m=>m.estado!=="ignorado").length}</div>
+            <div style={{background:pendientes.length?"#fff3e0":"#e8f5e9",color:pendientes.length?"#e65100":"#2e7d32",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700}}>⚠️ Por resolver: {pendientes.length}</div>
+            <div style={{background:"#f0f4f8",color:"#555",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700}}>🚫 Ignorados: {resueltos.filter(m=>m.estado==="ignorado").length}</div>
+          </div>
+          <div style={{fontSize:10,color:"#888",marginTop:6}}>Cargado el {fmtD(doc.fechaCarga)}{doc.cargadoPor?` por ${doc.cargadoPor}`:""} · {doc.archivo}</div>
+        </Card>
+
+        <Card title={`⚠️ No conciliados — para hacer a mano (${pendientes.length})`}>
+          {pendientes.length===0&&<div style={S.empty}>Todo conciliado ✅</div>}
+          {pendientes.map(m=>(
+            <div key={m.id} style={{padding:"8px 0",borderBottom:"1px solid #f0f4f8"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+                <div style={{minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:600,color:"#1a3c5e"}}>{m.descripcion||"(sin descripción)"}</div>
+                  <div style={{fontSize:11,color:"#888"}}>{fmtD(m.fecha)}{m.ref?` · ${m.ref}`:""} · {m.tipo==="credito"?"entró plata al banco, no está en el sistema":"salió plata del banco, no está registrada"}</div>
+                </div>
+                <div style={{textAlign:"right",flexShrink:0}}>
+                  <div style={{fontWeight:800,color:m.tipo==="credito"?"#2e7d32":"#c62828"}}>{m.tipo==="credito"?"+":"−"}{money(m.monto)}</div>
+                  <button style={{...S.btnS,marginTop:4,fontSize:11}} onClick={()=>{setAbierto(abierto===m.id?null:m.id);setAsocSel("");setNotaIgn("");}}>{abierto===m.id?"Cerrar":"Resolver"}</button>
+                </div>
+              </div>
+              {abierto===m.id&&(()=>{
+                const cands=candidatosManual(m);
+                return(
+                  <div style={{marginTop:8,background:"#f8fbfd",border:"1px solid #e8f0f7",borderRadius:8,padding:10}}>
+                    <label style={S.lbl}>🔗 Asociar con algo que ya está en el sistema</label>
+                    <select style={S.inp} value={asocSel} onChange={e=>setAsocSel(e.target.value)}>
+                      <option value="">{cands.length?"Elige...":"No hay registros pendientes de este banco"}</option>
+                      {cands.map(c=><option key={c.tipo+c.id} value={c.tipo+"|"+c.id}>{c.desc} · {money(c.monto)} · {fmtD(c.fecha)}</option>)}
+                    </select>
+                    <button style={{...S.btnP,width:"100%",marginTop:6}} disabled={!asocSel} onClick={()=>{const c=cands.find(x=>x.tipo+"|"+x.id===asocSel);if(c)asociar(m,c);}}>🔗 Asociar</button>
+                    {m.tipo==="debito"&&<button style={{...S.btnS,width:"100%",marginTop:6,background:"#e8f5e9",color:"#2e7d32"}} onClick={()=>registrarGasto(m)}>➕ Registrar como gasto (Otros) y conciliar</button>}
+                    <div style={{display:"flex",gap:6,marginTop:6}}>
+                      <input style={{...S.inp,flex:1}} placeholder="Nota (ej. comisión bancaria)" value={notaIgn} onChange={e=>setNotaIgn(e.target.value)}/>
+                      <button style={S.btnS} onClick={()=>ignorar(m)}>🚫 Ignorar</button>
+                    </div>
+                    {m.tipo==="credito"&&<div style={{fontSize:10,color:"#888",marginTop:6}}>Si es un cobro que no se registró, registra el abono en la venta correspondiente y luego asóciala aquí.</div>}
+                  </div>
+                );
+              })()}
+            </div>
+          ))}
+          {pendientes.length>0&&<button style={{...S.btnP,marginTop:10}} onClick={descargarPendientes}>📥 Descargar pendientes (CSV)</button>}
+        </Card>
+
+        <Card title={`📋 En el sistema, pero no aparece en el banco (${sinBanco.length})`}>
+          {sinBanco.length===0&&<div style={S.empty}>Todo lo del sistema aparece en el banco ✅</div>}
+          {sinBanco.slice().sort((a,b)=>a.fecha.localeCompare(b.fecha)).map(c=>(
+            <div key={c.tipo+c.id} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f0f4f8"}}>
+              <div style={{minWidth:0}}><div style={{fontSize:13,fontWeight:600,color:"#1a3c5e"}}>{c.desc}</div><div style={{fontSize:11,color:"#888"}}>{fmtD(c.fecha)} · {c.tipo==="abono"?"transferencia cobrada":c.tipo==="deposito"?"depósito":c.tipo==="gasto"?"gasto por transferencia":c.tipo==="nomina"?"sueldo calculado":"IESS calculado"}</div></div>
+              <strong style={{color:c.tipo==="abono"||c.tipo==="deposito"?"#2e7d32":"#c62828"}}>{money(c.monto)}</strong>
+            </div>
+          ))}
+          <div style={{fontSize:10,color:"#888",marginTop:6}}>Puede ser que el banco aún no lo acredite (llegará en el siguiente estado de cuenta), o que falte revisar si el cliente realmente pagó.</div>
+        </Card>
+
+        <Card title={`✅ Conciliados (${resueltos.length})`}>
+          <button style={S.btnS} onClick={()=>setVerConc(v=>!v)}>{verConc?"Ocultar":"Ver lista"}</button>
+          {verConc&&resueltos.map(m=>(
+            <div key={m.id} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f0f4f8",opacity:m.estado==="ignorado"?0.6:1}}>
+              <div style={{minWidth:0}}><div style={{fontSize:12,fontWeight:600,color:"#1a3c5e"}}>{m.descripcion||"(sin descripción)"}</div>
+                <div style={{fontSize:10,color:"#888"}}>{fmtD(m.fecha)} · {m.estado==="ignorado"?`🚫 ignorado${m.nota?": "+m.nota:""}`:`${m.estado==="manual"?"a mano":"automático"} → ${m.refDesc||m.refTipo}`}</div></div>
+              <div style={{fontWeight:700,color:m.tipo==="credito"?"#2e7d32":"#c62828"}}>{m.tipo==="credito"?"+":"−"}{money(m.monto)}</div>
+            </div>
+          ))}
+        </Card>
+      </>
+    )}
+  </div>);
+}
+
 function Conciliacion({ventas,setVentas,upsertVenta,depositos,setDepositos,upsertDeposito}){
   const [mesVer,setMesVer]=useState(mesK(new Date()));
   const [soloPend,setSoloPend]=useState(false);
