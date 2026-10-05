@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, Component } from "react";
+import { useState, useEffect, useRef, Component, Fragment } from "react";
 // 🛟 Red de seguridad adicional: errores que ocurren fuera del renderizado de React
 // (ej. dentro de un botón, o una función async) no los atrapa el ErrorBoundary — este sí.
 if(typeof window!=="undefined"){
@@ -5727,18 +5727,37 @@ function parseFacturaPDF(filas,compras){
   if(!ruc){const m=todo.match(/R\.?\s?U\.?\s?C\.?\s*:?\s*(\d{13})/i);if(m)ruc=m[1];}
   if(!numero){const m=todo.match(/(\d{3})\s*-\s*(\d{3})\s*-\s*(\d{9})/);if(m)numero=`${m[1]}-${m[2]}-${m[3]}`;}
   if(!fecha){const m=todo.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);if(m)fecha=`${m[3]}-${m[2].padStart(2,"0")}-${m[1].padStart(2,"0")}`;}
-  // 💰 Subtotales, IVA y total
-  let sub15=0,sub0=0,tarifa=0,total=null;
+  // 💰 Subtotales, IVA y total — se busca la ETIQUETA en cualquier parte de la fila y su valor a la derecha
+  // (en muchos RIDE la columna de "Información adicional" queda en la misma fila que el subtotal)
+  const tasas={}; // tarifa → base imponible (ej. {15:86.90, 0:3.59})
+  let total=null,formaPago="";
+  const valorDe=(r,idx)=>{
+    const it=r.items[idx];
+    const w=it.s.split(/\s+/);const pegado=w.length>1?num(w[w.length-1]):null; // "VALOR TOTAL 103.53" en un solo texto
+    if(pegado!=null&&!/%$/.test(w[w.length-1]))return pegado;
+    for(let k=idx+1;k<r.items.length;k++){const v=num(r.items[k].s);if(v!=null)return v;}
+    return null;
+  };
   filas.forEach(r=>{
-    const tx=r.texto.toUpperCase(),v=ultNum(r);
-    if(/^\s*SUBTOTAL/.test(tx)&&v!=null){
-      const pm=tx.match(/(\d{1,2}(?:[.,]\d+)?)\s*%/);
-      if(/NO OBJETO|EXENTO/.test(tx)||(pm&&parseFloat(pm[1])===0))sub0+=v;
-      else if(pm){sub15+=v;tarifa=parseFloat(pm[1]);}
-    }
-    const mi=tx.match(/^\s*IVA\s*(\d{1,2})\s*%/);if(mi&&!tarifa)tarifa=parseInt(mi[1],10);
-    if(total==null&&/^\s*(VALOR|IMPORTE)\s+TOTAL/.test(tx)&&v!=null)total=v;
+    r.items.forEach((it,idx)=>{
+      const tx=it.s.toUpperCase().trim();
+      if(/^SUBTOTAL/.test(tx)){
+        const v=valorDe(r,idx);if(v==null)return;
+        const pm=tx.match(/(\d{1,2}(?:[.,]\d+)?)\s*%/);
+        if(/NO OBJETO|EXENTO/.test(tx))tasas[0]=(tasas[0]||0)+v;
+        else if(pm){const t=parseFloat(pm[1].replace(",","."));tasas[t]=(tasas[t]||0)+v;}
+      }
+      if(total==null&&/^(VALOR|IMPORTE)\s+TOTAL/.test(tx)){const v=valorDe(r,idx);if(v!=null)total=v;}
+      if(!formaPago&&/^FORMA\s+DE\s+PAGO/.test(tx)){
+        const resto=r.items.slice(idx).map(x=>x.s).join(" ").toUpperCase();
+        if(/TARJETA/.test(resto))formaPago="Tarjeta";
+        else if(/EFECTIVO|SIN UTILIZACI/.test(resto))formaPago="Efectivo";
+      }
+    });
   });
+  const tasasConBase=Object.keys(tasas).map(Number).filter(t=>tasas[t]>0.004);
+  const tasasPositivas=tasasConBase.filter(t=>t>0);
+  const tarifa=tasasPositivas.length?tasasPositivas.reduce((m,t)=>tasas[t]>tasas[m]?t:m,tasasPositivas[0]):15;
   // 📦 Productos: en cada fila se busca cantidad × precio unitario (− descuento) = precio total
   const hallar=ns=>{
     const n=ns.length;if(n<3)return null;
@@ -5747,39 +5766,92 @@ function parseFacturaPDF(filas,compras){
     for(let k=n-2;k>=2;k--)for(let j=k-1;j>=1;j--)for(let i=j-1;i>=0;i--){const q=ns[i].v,pu=ns[j].v,d=ns[k].v;if(q>0&&Math.abs(q*pu-d-t)<=0.02)return{q,pu,usados:[ns[i],ns[j],ns[k],ns[n-1]]};}
     return null;
   };
-  let enTabla=false,ultimo=null;const items=[];
+  const esEncabezado=tx=>/descripci/i.test(tx)&&/(cant|precio|unitario)/i.test(tx);
+  const esFinTabla=tx=>/subtotal|informaci[oó]n adicional|forma de pago|valor total|importe total/i.test(tx);
+  const items=[];
+  // 🧭 Columnas a partir del encabezado: dónde empieza y termina la columna "Descripción"
+  const enc=filas.find(r=>esEncabezado(r.texto));
+  let col=null;
+  if(enc){
+    const its=enc.items;const iD=its.findIndex(it=>/descripci/i.test(it.s));
+    if(iD>=0){
+      const d=its[iD];
+      const izq=its.slice(0,iD);const der=its.slice(iD+1);
+      const left=izq.length?Math.max(...izq.map(it=>it.x+(it.w||0)))+1:0;
+      const right=der.length?((d.x+(d.w||0))+der[0].x)/2:Infinity; // a mitad de camino hacia la siguiente columna (ej. "Detalles adicionales")
+      col={left,right,pagina:enc.pagina,y:enc.y};
+    }
+  }
+  if(col){
+    // Filas de la tabla: entre el encabezado y los subtotales
+    const tabla=[];let dentro=false;
+    filas.forEach(r=>{
+      if(r===enc){dentro=true;return;}
+      if(!dentro)return;
+      if(esEncabezado(r.texto))return;
+      if(esFinTabla(r.texto)){dentro=false;return;}
+      tabla.push(r);
+    });
+    const enDesc=it=>it.x>=col.left-1&&it.x<col.right;
+    const productos=[],fragmentos=[];
+    tabla.forEach(r=>{
+      const desc=r.items.filter(enDesc);
+      const ns=r.items.filter(it=>!enDesc(it)&&num(it.s)!=null).map(it=>({s:it.s,v:num(it.s)})); // solo celdas 100% numéricas fuera de la descripción
+      const h=hallar(ns);
+      if(h)productos.push({r,q:h.q,subtotal:ns[ns.length-1].v,partes:[{y:r.y,t:desc.map(i=>i.s).join(" ")}]});
+      else if(desc.length)fragmentos.push({r,y:r.y,t:desc.map(i=>i.s).join(" ")});
+    });
+    // Cada pedazo de descripción (texto partido en 2 líneas, arriba o abajo) se une al producto más cercano
+    fragmentos.forEach(f=>{
+      let mejor=null,dist=Infinity;
+      productos.forEach(pr=>{if(pr.r.pagina!==f.r.pagina)return;const dd=Math.abs(pr.r.y-f.y);if(dd<dist){dist=dd;mejor=pr;}});
+      if(mejor&&dist<=14)mejor.partes.push({y:f.y,t:f.t});
+    });
+    productos.forEach(pr=>{
+      const desc=pr.partes.sort((x,y)=>y.y-x.y).map(x=>x.t).filter(Boolean).join(" ").replace(/\s+/g," ").trim();
+      if(desc)items.push({descripcion:desc,cantidad:pr.q,subtotal:pr.subtotal,pUnitSinIva:pr.subtotal/pr.q,ivaPct:null});
+    });
+  }
+  if(items.length===0){
+  // ↩️ Respaldo: lectura fila por fila (para RIDE sin encabezado de columnas claro)
+  let enTabla=false,ultimo=null;
   filas.forEach(r=>{
     const tx=r.texto;
-    if(/descripci/i.test(tx)&&/(cant|precio|unitario)/i.test(tx)){enTabla=true;ultimo=null;return;}
+    if(esEncabezado(tx)){enTabla=true;ultimo=null;return;}
     if(!enTabla)return;
-    if(/subtotal|informaci[oó]n adicional|forma de pago|valor total|importe total/i.test(tx)){enTabla=false;ultimo=null;return;}
+    if(esFinTabla(tx)){enTabla=false;ultimo=null;return;}
     const toks=tokensDe(r);
     const ns=toks.filter(o=>o.v!=null);
     const h=hallar(ns);
     if(h){
-      // texto del producto + números que venían pegados al texto y no se usaron en la cuenta (ej. "20" de "20 LITROS")
       let partes=toks.filter(o=>o.v==null||(o.sp&&!h.usados.includes(o)&&!/^0\d+$|^\d{4,}$/.test(o.s))).map(o=>o.s);
-      if(partes.length>=2&&/^[A-Za-z0-9\-_./]{2,14}$/.test(partes[0])&&/\d/.test(partes[0]))partes=partes.slice(1); // quita el código del producto
+      if(partes.length>=2&&/^[A-Za-z0-9\-_./]{2,14}$/.test(partes[0])&&/\d/.test(partes[0]))partes=partes.slice(1);
       const desc=partes.join(" ").trim();
       if(!desc)return;
       ultimo={descripcion:desc,cantidad:h.q,subtotal:ns[ns.length-1].v,pUnitSinIva:ns[ns.length-1].v/h.q,ivaPct:null};
       items.push(ultimo);
     }else if(ns.length===0&&ultimo&&toks.length){
-      ultimo.descripcion=(ultimo.descripcion+" "+toks.map(o=>o.s).join(" ")).trim(); // la descripción continúa en la fila de abajo
+      ultimo.descripcion=(ultimo.descripcion+" "+toks.map(o=>o.s).join(" ")).trim();
     }
   });
+  }
   if(items.length===0)throw new Error("No pude identificar los productos en este PDF. Sube el XML o ingrésala a mano.");
-  // 🧮 IVA por producto: si hay subtotal 0%, se busca qué productos suman exactamente ese valor
-  const tar=tarifa||15;
-  let ceros=new Set();
-  if(sub0>0.004&&sub15>0.004){
-    const n=items.length;let hallado=null;
-    if(n<=18){for(let mask=1;mask<(1<<n)&&!hallado;mask++){let sm=0;for(let b=0;b<n;b++)if(mask&(1<<b))sm+=items[b].subtotal;if(Math.abs(sm-sub0)<=0.02)hallado=mask;}}
-    if(hallado){items.forEach((it,b)=>{if(hallado&(1<<b))ceros.add(b);});}
-    else avisos.push("No pude saber cuáles productos llevan IVA 0%: revisa el IVA de cada línea.");
-  }else if(sub0>0.004&&sub15<=0.004){items.forEach((_,b)=>ceros.add(b));}
-  items.forEach((it,b)=>{it.ivaPct=ceros.has(b)?0:tar;});
-  const sumaConIva=items.reduce((a,it)=>a+it.subtotal*(1+it.ivaPct/100),0);
+  // 🧮 IVA por producto: la tarifa con más base es la principal; para las demás (0%, 5%...) se busca
+  // qué productos suman exactamente su subtotal
+  const asignado=new Array(items.length).fill(null);
+  if(tasasConBase.length>1){
+    const otras=tasasConBase.filter(t=>t!==tarifa).sort((x,y)=>tasas[x]-tasas[y]);
+    otras.forEach(t=>{
+      const libres=items.map((_,i)=>i).filter(i=>asignado[i]==null);
+      const n=libres.length;let hallado=null;
+      if(n<=20){for(let mask=1;mask<(1<<n)&&hallado==null;mask++){let sm=0;for(let b2=0;b2<n;b2++)if(mask&(1<<b2))sm+=items[libres[b2]].subtotal;if(Math.abs(sm-tasas[t])<=0.02)hallado=mask;}}
+      if(hallado!=null)libres.forEach((i,b2)=>{if(hallado&(1<<b2))asignado[i]=t;});
+      else avisos.push(`No pude saber cuáles productos llevan IVA ${t}%: revisa el IVA de cada línea.`);
+    });
+  }else if(tasasConBase.length===1&&tasasConBase[0]===0){items.forEach((_,i)=>{asignado[i]=0;});}
+  items.forEach((it,i)=>{it.ivaPct=asignado[i]!=null?asignado[i]:tarifa;});
+  const basePorT={};items.forEach(it=>{basePorT[it.ivaPct]=(basePorT[it.ivaPct]||0)+it.subtotal;});
+  const sumaConIva=Object.entries(basePorT).reduce((a,[t,bs])=>a+bs+Math.round(bs*parseFloat(t))/100,0);
   if(total!=null&&Math.abs(sumaConIva-total)>0.05)avisos.push(`La suma que leí ($${sumaConIva.toFixed(2)}) no coincide con el total del PDF ($${total.toFixed(2)}): revisa los productos.`);
   // 🏪 Proveedor: si el RUC ya lo conozco uso ese nombre; si no, intento leerlo de la parte de arriba
   let proveedor="";
@@ -5794,7 +5866,7 @@ function parseFacturaPDF(filas,compras){
     }
   }
   if(!proveedor)avisos.push("No pude leer el nombre del proveedor: escríbelo.");
-  return{proveedor,ruc,numeroFactura:numero,fecha,importeTotal:total,detalles:items.map(it=>({descripcion:it.descripcion,cantidad:it.cantidad,pUnitSinIva:it.pUnitSinIva,ivaPct:it.ivaPct})),avisos};
+  return{proveedor,ruc,numeroFactura:numero,fecha,importeTotal:total,formaPago,detalles:items.map(it=>({descripcion:it.descripcion,cantidad:it.cantidad,pUnitSinIva:it.pUnitSinIva,ivaPct:it.ivaPct})),avisos};
 }
 
 // 🧾 Lee una factura electrónica del SRI (archivo .xml): proveedor, número, fecha y cada producto con su precio sin IVA y su IVA
@@ -5819,9 +5891,55 @@ function parseFacturaXML(txt){
   const f=t(inf,"fechaEmision").split("/");
   const fecha=f.length===3?`${f[2]}-${f[1].padStart(2,"0")}-${f[0].padStart(2,"0")}`:"";
   const nroFac=[t(trib,"estab"),t(trib,"ptoEmi"),t(trib,"secuencial")].filter(Boolean).join("-");
-  return{proveedor:t(trib,"razonSocial")||t(trib,"nombreComercial"),ruc:t(trib,"ruc"),numeroFactura:nroFac,fecha,importeTotal:parseFloat(t(inf,"importeTotal"))||null,detalles};
+  const fp=t(inf,"formaPago"); // 01 efectivo · 16 tarjeta de débito · 19 tarjeta de crédito
+  const formaPago=fp==="01"?"Efectivo":(fp==="16"||fp==="19")?"Tarjeta":"";
+  return{proveedor:t(trib,"razonSocial")||t(trib,"nombreComercial"),ruc:t(trib,"ruc"),numeroFactura:nroFac,fecha,importeTotal:parseFloat(t(inf,"importeTotal"))||null,formaPago,detalles};
 }
 
+// 💳 EDITOR DE PAGO DE UN GASTO — cambia forma de pago, fecha de pago y estado (pagado / pendiente / aporte de socia)
+const SOCIAS=["Micaela","Natalia"];
+function estadoInicialPago(g){
+  if(g.aporteSocia)return"aporte";
+  return g.estadoPago==="pendiente"?"pendiente":"pagado";
+}
+function EditorPagoGasto({g,inicial,onGuardar,onCancelar}){
+  const metodoValido=PAGOS.includes(g.metodoPago)?g.metodoPago:"Efectivo";
+  const [estado,setEstado]=useState(inicial||estadoInicialPago(g));
+  const [metodo,setMetodo]=useState(metodoValido);
+  const [fechaPago,setFechaPago]=useState(g.fechaPago||(g.estadoPago==="pendiente"?fechaHoyLocal():(g.fecha||fechaHoyLocal())));
+  const [pendienteA,setPendienteA]=useState(g.pendienteA||"Micaela");
+  const [aporteDe,setAporteDe]=useState(g.aporteSocia||"Micaela");
+  const guardar=()=>{
+    let cambios;
+    if(estado==="pendiente")cambios={estadoPago:"pendiente",metodoPago:"Pendiente por pagar",pendienteA,fechaPago:null,aporteSocia:null};
+    else if(estado==="aporte")cambios={estadoPago:"pagado",metodoPago:`Aporte de socia (${aporteDe})`,aporteSocia:aporteDe,pendienteA:null,fechaPago};
+    else cambios={estadoPago:"pagado",metodoPago:metodo,fechaPago,pendienteA:null,aporteSocia:null};
+    onGuardar({...g,...cambios,pagoEditadoEn:new Date().toISOString()});
+  };
+  const op=(v,t)=>(<button key={v} onClick={()=>setEstado(v)} style={{...S.btnS,flex:1,fontSize:11,background:estado===v?"#1a3c5e":"#eef3f8",color:estado===v?"#fff":"#1a3c5e"}}>{t}</button>);
+  return(<div style={{background:"#f8fbfd",border:"1px solid #d6e4f0",borderRadius:10,padding:10,marginTop:8}}>
+    <div style={{fontSize:12,fontWeight:700,color:"#1a3c5e",marginBottom:6}}>💳 Pago de: {g.descripcion} · ${(g.monto||0).toFixed(2)}</div>
+    <div style={{display:"flex",gap:6,marginBottom:8}}>{op("pagado","✅ Pagado")}{op("pendiente","⏳ Pendiente")}{op("aporte","🤝 Aporte socia")}</div>
+    {estado==="pagado"&&(<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+      <div><label style={S.lbl}>Forma de pago</label><select style={S.inp} value={metodo} onChange={e=>setMetodo(e.target.value)}>{PAGOS.map(p=><option key={p}>{p}</option>)}</select></div>
+      <div><label style={S.lbl}>Fecha de pago</label><input type="date" style={S.inp} value={fechaPago} onChange={e=>setFechaPago(e.target.value)}/></div>
+    </div>)}
+    {estado==="pendiente"&&(<div>
+      <label style={S.lbl}>¿A quién se le debe?</label>
+      <select style={S.inp} value={pendienteA} onChange={e=>setPendienteA(e.target.value)}>{ACREEDORES.map(a=><option key={a}>{a}</option>)}</select>
+      <div style={{fontSize:10,color:"#a05a00",marginTop:4}}>Úsalo si Micaela o Natalia pagaron con su dinero y el negocio les debe devolver (reembolso), o si es crédito del proveedor.</div>
+    </div>)}
+    {estado==="aporte"&&(<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+      <div><label style={S.lbl}>¿Quién lo pagó?</label><select style={S.inp} value={aporteDe} onChange={e=>setAporteDe(e.target.value)}>{SOCIAS.map(a=><option key={a}>{a}</option>)}</select></div>
+      <div><label style={S.lbl}>Fecha de pago</label><input type="date" style={S.inp} value={fechaPago} onChange={e=>setFechaPago(e.target.value)}/></div>
+      <div style={{gridColumn:"1/-1",fontSize:10,color:"#1565c0"}}>La socia lo pagó con su dinero y NO se le devuelve: queda como gasto pagado, sin deuda pendiente.</div>
+    </div>)}
+    <div style={{display:"flex",gap:6,marginTop:10}}>
+      <button style={{...S.btnP,flex:1}} onClick={guardar}>💾 Guardar pago</button>
+      <button style={{...S.btnS,flex:1}} onClick={onCancelar}>Cancelar</button>
+    </div>
+  </div>);
+}
 // 🧾 COMPRA DE INSUMOS — se ingresa la factura tal como viene (precio unitario sin IVA, IVA y precio con IVA);
 // suma sola al inventario, calcula cuánto cuesta cada unidad y deja el gasto en Gastos.
 function ComprasInsumos({inventario,setInventario,upsertInventario,kardexInsumos,setKardexInsumos,upsertKardexInsumo,compras,setCompras,upsertCompra,gastos,setGastos,upsertGasto,sesion}){
@@ -5829,7 +5947,7 @@ function ComprasInsumos({inventario,setInventario,upsertInventario,kardexInsumos
   const r4=n=>Math.round((n+Number.EPSILON)*10000)/10000;
   const money=n=>{const v=Number(n)||0;return "$"+(v>0&&v<1?v.toFixed(4):v.toFixed(2));};
   const vacia=()=>({nombre:"",unidad:"pzas",cantidad:"",factor:"1",pUnit:"",iva:"15"});
-  const cabVacia=()=>({proveedor:"",ruc:"",numeroFactura:"",fecha:fechaHoyLocal(),metodoPago:"Efectivo",notas:"",totalFactura:""});
+  const cabVacia=()=>({proveedor:"",ruc:"",numeroFactura:"",fecha:fechaHoyLocal(),metodoPago:"Efectivo",fechaPago:fechaHoyLocal(),notas:"",totalFactura:""});
   const [cab,setCab]=useState(cabVacia());
   const [lineas,setLineas]=useState([vacia()]);
   const [ivaEsCosto,setIvaEsCosto]=useState(true);
@@ -5851,7 +5969,12 @@ function ComprasInsumos({inventario,setInventario,upsertInventario,kardexInsumos
     return{cant,factor,pu,ivaP,sub,iva,total,unidades,puConIva:pu*(1+ivaP/100),costoBase:unidades>0?(ivaEsCosto?total:sub)/unidades:0};
   };
   const lineasValidas=lineas.filter(l=>l.nombre.trim()&&(parseFloat(l.cantidad)||0)>0);
-  const tot=lineasValidas.reduce((a,l)=>{const c=calc(l);a.sub+=c.sub;a.iva+=c.iva;a.total+=c.total;return a;},{sub:0,iva:0,total:0});
+  const tot=(()=>{ // el SRI calcula el IVA sobre la suma de cada tarifa, no producto por producto (evita diferencias de centavos)
+    const porTasa={};let sub=0;
+    lineasValidas.forEach(l=>{const c=calc(l);sub+=c.sub;porTasa[c.ivaP]=(porTasa[c.ivaP]||0)+c.sub;});
+    const iva=Object.entries(porTasa).reduce((a,[t,bs])=>a+r2(bs*parseFloat(t)/100),0);
+    return{sub:r2(sub),iva:r2(iva),total:r2(sub+iva)};
+  })();
   const dif=cab.totalFactura!==""?r2((parseFloat(cab.totalFactura)||0)-tot.total):null;
 
   const importarXML=async ev=>{
@@ -5859,7 +5982,7 @@ function ComprasInsumos({inventario,setInventario,upsertInventario,kardexInsumos
     if(!file)return;
     try{
       const f=parseFacturaXML(await file.text());
-      setCab(c=>({...c,proveedor:f.proveedor,ruc:f.ruc,numeroFactura:f.numeroFactura,fecha:f.fecha||c.fecha,totalFactura:f.importeTotal!=null?String(f.importeTotal):""}));
+      setCab(c=>({...c,proveedor:f.proveedor,ruc:f.ruc,numeroFactura:f.numeroFactura,fecha:f.fecha||c.fecha,fechaPago:f.fecha||c.fechaPago,metodoPago:f.formaPago||c.metodoPago,totalFactura:f.importeTotal!=null?String(f.importeTotal):""}));
       setLineas(f.detalles.map(d=>{const ex=buscarInsumo(d.descripcion);return{nombre:ex?ex.nombre:d.descripcion,unidad:ex?ex.unidad:"pzas",cantidad:String(d.cantidad),factor:"1",pUnit:String(r4(d.pUnitSinIva)),iva:String(d.ivaPct)};}));
       setOrigenXml("xml");setErr("");
       setOk(`✅ Factura ${f.numeroFactura||""} leída: ${f.detalles.length} producto(s). Revisa los datos y confirma abajo.`);
@@ -5876,7 +5999,7 @@ function ComprasInsumos({inventario,setInventario,upsertInventario,kardexInsumos
       const filas=await filasDePdf(pdf);
       if(filas.length===0)throw new Error("Este PDF no tiene texto (parece una foto o un escaneo), así que no lo puedo leer. Pídele al proveedor el XML o ingrésala a mano.");
       const f=parseFacturaPDF(filas,compras);
-      setCab(c=>({...c,proveedor:f.proveedor||c.proveedor,ruc:f.ruc||c.ruc,numeroFactura:f.numeroFactura||c.numeroFactura,fecha:f.fecha||c.fecha,totalFactura:f.importeTotal!=null?String(f.importeTotal):""}));
+      setCab(c=>({...c,proveedor:f.proveedor||c.proveedor,ruc:f.ruc||c.ruc,numeroFactura:f.numeroFactura||c.numeroFactura,fecha:f.fecha||c.fecha,fechaPago:f.fecha||c.fechaPago||c.fecha,metodoPago:f.formaPago||c.metodoPago,totalFactura:f.importeTotal!=null?String(f.importeTotal):""}));
       setLineas(f.detalles.map(d=>{const ex=buscarInsumo(d.descripcion);return{nombre:ex?ex.nombre:d.descripcion,unidad:ex?ex.unidad:"pzas",cantidad:String(d.cantidad),factor:"1",pUnit:String(r4(d.pUnitSinIva)),iva:String(d.ivaPct)};}));
       setOrigenXml("pdf");
       setOk(`📄 Leí ${f.detalles.length} producto(s) del PDF. Revísalos con cuidado antes de registrar (la lectura de PDF no es exacta como la del XML).${f.avisos.length?" ⚠️ "+f.avisos.join(" "):""}`);
@@ -5908,8 +6031,8 @@ function ComprasInsumos({inventario,setInventario,upsertInventario,kardexInsumos
       lineasGuardar.push({insumoId:w.id,nombre:w.nombre,codigo:w.codigo||null,unidad:w.unidad,cantidad:c.cant,factor:c.factor,pUnitSinIva:c.pu,ivaPct:c.ivaP,pUnitConIva:r4(c.puConIva),subtotal:c.sub,iva:c.iva,total:c.total,unidadesTotales:c.unidades,costoUnitarioBase:r4(c.costoBase)});
       kardexIn.push({itemId:w.id,itemNombre:w.nombre,tipo:"entrada_factura",cantidad:c.unidades,folio:cab.numeroFactura.trim()||null,motivo:`Compra a ${cab.proveedor.trim()}${c.factor!==1?` (${c.cant} × ${c.factor})`:""}`,saldoResultante:nuevoStock,registradoPor:sesion?.nombre,precioUnitario:r4(c.costoBase),proveedor:cab.proveedor.trim()});
     });
-    const compra={id:idCompra,fecha:cab.fecha,proveedor:cab.proveedor.trim(),ruc:cab.ruc.trim(),numeroFactura:cab.numeroFactura.trim(),metodoPago:cab.metodoPago,notas:cab.notas.trim(),ivaEsCosto,lineas:lineasGuardar,subtotalSinIva:r2(tot.sub),ivaTotal:r2(tot.iva),total:r2(tot.total),totalFacturaDeclarado:cab.totalFactura!==""?parseFloat(cab.totalFactura):null,origen:origenXml||"manual",registradoPor:sesion?.nombre||null,fechaRegistro:ahora,anulada:false,gastoId:null};
-    const gasto={id:Date.now(),descripcion:`Compra de insumos · ${compra.proveedor}`,categoria:"Insumos/Suministros",proveedor:compra.proveedor,numeroFactura:compra.numeroFactura,monto:compra.total,fecha:cab.fecha,metodoPago:cab.metodoPago,estadoPago:cab.metodoPago==="Pendiente por pagar"?"pendiente":"pagado",pendienteA:cab.metodoPago==="Pendiente por pagar"?(cab.pendienteA||"Proveedor (crédito)"):null,notas:`Compra de insumos (${lineasGuardar.length} producto${lineasGuardar.length!==1?"s":""})`,subtotal:compra.subtotalSinIva,iva:compra.ivaTotal,registradoPor:sesion?.nombre,compraInsumosId:idCompra};
+    const compra={id:idCompra,fecha:cab.fecha,proveedor:cab.proveedor.trim(),ruc:cab.ruc.trim(),numeroFactura:cab.numeroFactura.trim(),metodoPago:cab.metodoPago,fechaPago:cab.metodoPago==="Pendiente por pagar"?null:(cab.fechaPago||cab.fecha),notas:cab.notas.trim(),ivaEsCosto,lineas:lineasGuardar,subtotalSinIva:r2(tot.sub),ivaTotal:r2(tot.iva),total:r2(tot.total),totalFacturaDeclarado:cab.totalFactura!==""?parseFloat(cab.totalFactura):null,origen:origenXml||"manual",registradoPor:sesion?.nombre||null,fechaRegistro:ahora,anulada:false,gastoId:null};
+    const gasto={id:Date.now(),descripcion:`Compra de insumos · ${compra.proveedor}`,categoria:"Insumos/Suministros",proveedor:compra.proveedor,numeroFactura:compra.numeroFactura,monto:compra.total,fecha:cab.fecha,metodoPago:cab.metodoPago,fechaPago:cab.metodoPago==="Pendiente por pagar"?null:(cab.fechaPago||cab.fecha),estadoPago:cab.metodoPago==="Pendiente por pagar"?"pendiente":"pagado",pendienteA:cab.metodoPago==="Pendiente por pagar"?(cab.pendienteA||"Proveedor (crédito)"):null,notas:`Compra de insumos (${lineasGuardar.length} producto${lineasGuardar.length!==1?"s":""})`,subtotal:compra.subtotalSinIva,iva:compra.ivaTotal,registradoPor:sesion?.nombre,compraInsumosId:idCompra};
     compra.gastoId=gasto.id;
     setCompras(prev=>[compra,...prev]);if(upsertCompra)upsertCompra({...compra,_updatedAt:ahora});
     setGastos(prev=>[gasto,...prev]);if(upsertGasto)upsertGasto({...gasto,_updatedAt:ahora});
@@ -5964,6 +6087,7 @@ function ComprasInsumos({inventario,setInventario,upsertInventario,kardexInsumos
         <div><label style={S.lbl}>N° de factura</label><input style={S.inp} placeholder="001-001-000000123" value={cab.numeroFactura} onChange={e=>setCab({...cab,numeroFactura:e.target.value})}/></div>
         <div><label style={S.lbl}>Fecha</label><input type="date" style={S.inp} value={cab.fecha} onChange={e=>setCab({...cab,fecha:e.target.value})}/></div>
         <div><label style={S.lbl}>Forma de pago</label><select style={S.inp} value={cab.metodoPago} onChange={e=>setCab({...cab,metodoPago:e.target.value})}>{PAGOS_GASTO.map(pg=><option key={pg}>{pg}</option>)}</select></div>
+        {cab.metodoPago!=="Pendiente por pagar"&&<div><label style={S.lbl}>Fecha de pago</label><input type="date" style={S.inp} value={cab.fechaPago||cab.fecha} onChange={e=>setCab({...cab,fechaPago:e.target.value})}/></div>}
         {cab.metodoPago==="Pendiente por pagar"&&(
           <div style={{gridColumn:"1/-1",background:"#fff3e0",borderRadius:8,padding:10}}>
             <label style={S.lbl}>¿Quién lo pagó / a quién se le debe?</label>
@@ -6574,6 +6698,7 @@ function Gastos({empleadas,rolesPago,gastosFijosConfig,setGastosFijosConfig,upse
   const [precioCod,setPrecioCod]=useState(""); // precio unitario pagado por este insumo en ESTA factura (para análisis de costos)
   const [fMes,setFMes]=useState(mesK(new Date()));const [fCat,setFCat]=useState("Todas");const [err,setErr]=useState("");
   const [incluirSalidas,setIncluirSalidas]=useState(true); // 💸 combinar salidas de caja en este reporte
+  const [editPago,setEditPago]=useState(null); // {id, inicial}
   const [editFijos,setEditFijos]=useState(false);const [fijosDraft,setFijosDraft]=useState(null);
   // 🔎 Busca el insumo por código o por nombre (coincidencia parcial)
   const insumoEncontrado=(inventario||[]).find(i=>!i.eliminada&&buscarCod.trim()&&((i.codigo||"").toLowerCase()===buscarCod.trim().toLowerCase()||(i.codigo||"").toLowerCase().includes(buscarCod.trim().toLowerCase())||(i.nombre||"").toLowerCase().includes(buscarCod.trim().toLowerCase())));
@@ -6596,7 +6721,7 @@ function Gastos({empleadas,rolesPago,gastosFijosConfig,setGastosFijosConfig,upse
     if(modoMonto==="subtotal"&&!subtotalFactura){setErr("Escribe el subtotal de la factura (sin IVA)");return;}
     if(modoMonto==="total"&&!nv.monto){setErr("Escribe el monto total de la factura");return;}
     const montoFinal=modoMonto==="subtotal"?totalConIva:parseFloat(nv.monto);
-    const ng={...nv,id:Date.now(),monto:montoFinal,estadoPago:nv.metodoPago==="Pendiente por pagar"?"pendiente":"pagado",pendienteA:nv.metodoPago==="Pendiente por pagar"?(nv.pendienteA||"Proveedor (crédito)"):null,subtotal:modoMonto==="subtotal"?parseFloat(subtotalFactura):null,subtotal0:modoMonto==="subtotal"?(parseFloat(subtotal0)||0):null,iva:modoMonto==="subtotal"?ivaCalculado:null,registradoPor:sesion.nombre};
+    const ng={...nv,id:Date.now(),monto:montoFinal,fechaPago:nv.metodoPago==="Pendiente por pagar"?null:(nv.fechaPago||nv.fecha),estadoPago:nv.metodoPago==="Pendiente por pagar"?"pendiente":"pagado",pendienteA:nv.metodoPago==="Pendiente por pagar"?(nv.pendienteA||"Proveedor (crédito)"):null,subtotal:modoMonto==="subtotal"?parseFloat(subtotalFactura):null,subtotal0:modoMonto==="subtotal"?(parseFloat(subtotal0)||0):null,iva:modoMonto==="subtotal"?ivaCalculado:null,registradoPor:sesion.nombre};
     setGastos(prev=>[ng,...prev]);
     if(upsertGasto)upsertGasto({...ng,_updatedAt:new Date().toISOString()});
     // 📦 Si el tipo de factura es "Activo Fijo", se registra también en Activos Fijos automáticamente
@@ -6649,14 +6774,13 @@ function Gastos({empleadas,rolesPago,gastosFijosConfig,setGastosFijosConfig,upse
   const pendientes=(gastos||[]).filter(g=>!g.eliminada&&g.estadoPago==="pendiente").sort((a,b)=>(a.fecha||"").localeCompare(b.fecha||""));
   const totPend=pendientes.reduce((a,g)=>a+(g.monto||0),0);
   const pendPorQuien={};pendientes.forEach(g=>{const k=g.pendienteA||"Proveedor (crédito)";pendPorQuien[k]=(pendPorQuien[k]||0)+(g.monto||0);});
-  const marcarPagado=g=>{
-    const m=window.prompt(`¿Con qué método se pagó ${g.descripcion} ($${(g.monto||0).toFixed(2)})?\nOpciones: ${PAGOS.join(", ")}`,"Efectivo");
-    if(m===null)return;
-    const metodo=PAGOS.find(x=>x.toLowerCase()===m.trim().toLowerCase())||m.trim()||"Efectivo";
-    const act={...g,estadoPago:"pagado",metodoPago:metodo,fechaPago:fechaHoyLocal(),pagadoRegistradoPor:sesion?.nombre||null};
-    setGastos(prev=>prev.map(x=>x.id===g.id?act:x));
-    if(upsertGasto)upsertGasto({...act,_updatedAt:new Date().toISOString()});
+  const marcarPagado=g=>setEditPago({id:g.id,inicial:"pagado"});
+  const guardarPago=act=>{
+    setGastos(prev=>prev.map(x=>x.id===act.id?{...act,pagadoRegistradoPor:sesion?.nombre||null}:x));
+    if(upsertGasto)upsertGasto({...act,pagadoRegistradoPor:sesion?.nombre||null,_updatedAt:new Date().toISOString()});
+    setEditPago(null);
   };
+  const editorPara=g=>editPago&&editPago.id===g.id?<EditorPagoGasto key={"ep"+g.id} g={g} inicial={editPago.inicial} onGuardar={guardarPago} onCancelar={()=>setEditPago(null)}/>:null;
   const abrirEditorFijos=()=>{setFijosDraft({desde:gfCfg.desde||"",items:(gfCfg.items||[]).map(i=>({...i}))});setEditFijos(true);};
   const guardarFijos=()=>{
     const items=(fijosDraft.items||[]).filter(i=>(i.nombre||"").trim()).map((i,idx)=>({id:i.id||("f"+Date.now()+"_"+idx),nombre:i.nombre.trim(),monto:parseFloat(i.monto)||0,activo:i.activo!==false}));
@@ -6750,6 +6874,7 @@ function Gastos({empleadas,rolesPago,gastosFijosConfig,setGastosFijosConfig,upse
         <div><label style={S.lbl}>N° Factura</label><input style={S.inp} value={nv.numeroFactura} onChange={e=>setNv({...nv,numeroFactura:e.target.value})}/></div>
         <div><label style={S.lbl}>Fecha</label><input type="date" style={S.inp} value={nv.fecha} onChange={e=>setNv({...nv,fecha:e.target.value})}/></div>
         <div><label style={S.lbl}>Metodo</label><select style={S.inp} value={nv.metodoPago} onChange={e=>setNv({...nv,metodoPago:e.target.value})}>{PAGOS_GASTO.map(p=><option key={p}>{p}</option>)}</select></div>
+        {nv.metodoPago!=="Pendiente por pagar"&&<div><label style={S.lbl}>Fecha de pago</label><input type="date" style={S.inp} value={nv.fechaPago||nv.fecha} onChange={e=>setNv({...nv,fechaPago:e.target.value})}/></div>}
         {nv.metodoPago==="Pendiente por pagar"&&(
           <div style={{gridColumn:"1/-1",background:"#fff3e0",borderRadius:8,padding:10}}>
             <label style={S.lbl}>¿Quién lo pagó / a quién se le debe?</label>
@@ -6831,8 +6956,8 @@ function Gastos({empleadas,rolesPago,gastosFijosConfig,setGastosFijosConfig,upse
         <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
           {Object.entries(pendPorQuien).map(([k,v])=>(<div key={k} style={{background:"#fff3e0",color:"#e65100",borderRadius:8,padding:"4px 10px",fontSize:12,fontWeight:700}}>{k}: ${v.toFixed(2)}</div>))}
         </div>
-        {pendientes.map(g=>(
-          <div key={g.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid #f0f4f8"}}>
+        {pendientes.map(g=>(<Fragment key={g.id}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid #f0f4f8"}}>
             <div style={{minWidth:0}}>
               <div style={{fontSize:13,fontWeight:600,color:"#1a3c5e"}}>{g.descripcion}</div>
               <div style={{fontSize:11,color:"#888"}}>{fmtD(g.fecha)}{g.proveedor?` · 🏪 ${g.proveedor}`:""} · se le debe a <strong>{g.pendienteA||"Proveedor (crédito)"}</strong></div>
@@ -6842,7 +6967,8 @@ function Gastos({empleadas,rolesPago,gastosFijosConfig,setGastosFijosConfig,upse
               <button style={{...S.btnS,marginTop:4,fontSize:11,background:"#e8f5e9",color:"#2e7d32"}} onClick={()=>marcarPagado(g)}>✅ Marcar pagado</button>
             </div>
           </div>
-        ))}
+          {editorPara(g)}
+        </Fragment>))}
         <div style={{fontSize:10,color:"#888",marginTop:6}}>Siguen contando como gasto del mes; esto solo te recuerda lo que falta pagar o reembolsar.</div>
       </Card>
     )}
@@ -6851,9 +6977,10 @@ function Gastos({empleadas,rolesPago,gastosFijosConfig,setGastosFijosConfig,upse
         <div key={g.id} style={{...S.vcard,borderLeft:"4px solid #e53935"}}>
           <div style={{display:"flex",justifyContent:"space-between"}}>
             <div><div style={{fontWeight:700}}>{g.descripcion}</div><div style={{fontSize:11,color:"#888"}}>{g.categoria} · {fmtD(g.fecha)}</div>{g.proveedor&&<div style={{fontSize:11}}>🏪 {g.proveedor}</div>}{g.numeroFactura&&<div style={{fontSize:11,color:"#4db6e4"}}>🧾 {g.numeroFactura}</div>}</div>
-            <div style={{textAlign:"right"}}><div style={{fontWeight:800,color:"#e53935"}}>${(g.monto||0).toFixed(2)}</div>{g.estadoPago==="pendiente"?<div style={{...S.badge,background:"#fff3e0",color:"#e65100",marginTop:4}}>⏳ Pendiente{g.pendienteA?` · ${g.pendienteA}`:""}</div>:<div style={{...S.badge,background:"#f3e8fd",color:"#7c3aed",marginTop:4}}>{g.metodoPago}</div>}
-            {g.estadoPago==="pendiente"&&<button style={{...S.btnS,marginTop:4,fontSize:11,background:"#e8f5e9",color:"#2e7d32"}} onClick={()=>marcarPagado(g)}>✅ Marcar pagado</button>}{sesion.rol==="Administrador"&&<button style={{...S.btnR,display:"block",marginTop:4}} onClick={()=>del(g.id)}>✕</button>}</div>
+            <div style={{textAlign:"right"}}><div style={{fontWeight:800,color:"#e53935"}}>${(g.monto||0).toFixed(2)}</div>{g.estadoPago==="pendiente"?<div style={{...S.badge,background:"#fff3e0",color:"#e65100",marginTop:4}}>⏳ Pendiente{g.pendienteA?` · ${g.pendienteA}`:""}</div>:<div style={{...S.badge,background:"#f3e8fd",color:"#7c3aed",marginTop:4}}>{g.metodoPago}{g.fechaPago?` · ${fmtD(g.fechaPago)}`:""}</div>}
+            {g.estadoPago==="pendiente"&&<button style={{...S.btnS,marginTop:4,fontSize:11,background:"#e8f5e9",color:"#2e7d32"}} onClick={()=>marcarPagado(g)}>✅ Marcar pagado</button>}<button style={{...S.btnS,display:"block",marginTop:4,fontSize:11}} onClick={()=>setEditPago(editPago&&editPago.id===g.id?null:{id:g.id,inicial:null})}>✏️ Pago</button>{sesion.rol==="Administrador"&&<button style={{...S.btnR,display:"block",marginTop:4}} onClick={()=>del(g.id)}>✕</button>}</div>
           </div>
+          {editorPara(g)}
         </div>
       ))}
     </Card>
