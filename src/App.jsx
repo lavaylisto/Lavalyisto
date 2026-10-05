@@ -7973,7 +7973,9 @@ function RepartoSocias({ventas,gastos,empleadas,rolesPago,gastosFijosConfig}){
 }
 
 function ObligacionesPago({empleadas,rolesPago}){
-  const [mes,setMes]=useState(mesK(new Date()));
+  const mesActual=mesK(new Date());
+  const [mesSelRaw,setMes]=useState(mesActual);
+  const mes=mesSelRaw>mesActual?mesActual:mesSelRaw; // 🔒 nunca se acumula más allá del mes en curso
   const activas=(empleadas||[]).filter(e=>e.activa&&e.recibeSueldo!==false); // solo quien recibe sueldo
 
   const filas=activas.map(e=>{
@@ -7998,7 +8000,7 @@ function ObligacionesPago({empleadas,rolesPago}){
     <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ Lo que se debe depositar/pagar, sumando a todas las colaboradoras activas. El IESS se paga cada mes; los décimos en su fecha única (24 dic / 15 ago); las vacaciones se acumulan como derecho hasta que alguien las tome.</div>
 
     <Card title="📅 Mes de referencia">
-      <input type="month" style={S.inp} value={mes} onChange={e=>setMes(e.target.value)}/>
+      <input type="month" style={S.inp} value={mes} max={mesActual} onChange={e=>setMes(e.target.value)}/>
     </Card>
 
     <Card title={`💵 Valores del mes — ${mes}`}>
