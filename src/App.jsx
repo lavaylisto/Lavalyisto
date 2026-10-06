@@ -93,6 +93,8 @@ const revertirEntradaInventario=({lineas,folio,proveedor,motivo,inventario,setIn
   kx.forEach(k=>registrarKardex(k,{setKardex:setKardexInsumos,upsertKardex:upsertKardexInsumo}));
   return kx.length;
 };
+// 🧴 Una salida de caja para pagar a Martinizing NO es gasto: es costo de venta que el cliente ya pagó
+const esSalidaMartinizing=s=>!!(s&&(s.esCostoVenta||s.tipo==="martinizing"||/martin/i.test(s.motivo||"")));
 const TIPO_KARDEX_LBL={venta:{label:"Venta",icon:"🛍️",color:"#c62828"},nota_credito:{label:"Nota de crédito",icon:"↩️",color:"#2e7d32"},ajuste_manual:{label:"Ajuste manual",icon:"✏️",color:"#1565c0"},ingreso_inicial:{label:"Ingreso inicial",icon:"🆕",color:"#7b1fa2"},entrada_factura:{label:"Entrada por factura",icon:"🧾",color:"#2e7d32"},consumo:{label:"Consumo/uso",icon:"📉",color:"#c62828"},entrega:{label:"Entrega",icon:"📤",color:"#c62828"},reposicion:{label:"Reposición",icon:"📦",color:"#2e7d32"}};
 // 🆕 Genera un código correlativo nuevo para un insumo (INS-0001, INS-0002...) buscando el mayor número ya usado
 const generarCodigoInsumo=inventario=>{
@@ -2087,7 +2089,12 @@ function MachinePicker({maquinas,tipoMaquina,tiempoSugerido,repetir,grupo,centri
 }
 
 // 🏭 PRODUCCIÓN — Fase 5: tablero completo — máquina + tiempo por etapa, notificaciones, y confirmación final de Listo
-function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProduccion,setEventosProduccion,upsertEvento,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga}){
+function Produccion({ventas:ventasTodas,setVentas,upsertVenta,empleadas,pins,eventosProduccion,setEventosProduccion,upsertEvento,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga}){
+  // 🛍️ Los PRODUCTOS (aromatizantes, detergentes, etc.) no pasan por lavado: en Producción solo se ven los servicios.
+  // Si la orden es solo de productos, se deja igual y abajo se excluye completa con esSoloProductos.
+  // 🧴 Igual el lavado en seco (Martinizing): no pasa por nuestras máquinas, se sigue en la pestaña Martinizing.
+  const sinProceso=it=>it.esProducto||esLavadoSeco(it.label);
+  const ventas=ventasTodas.map(v=>{const its=v.items||[];if(!its.some(sinProceso))return v;const proc=its.filter(it=>!sinProceso(it));return proc.length?{...v,items:proc}:{...v,_sinProceso:true};});
   const [pickerFor,setPickerFor]=useState(null); // {folio, tipoMaquina}
   const [clasifFor,setClasifFor]=useState(null); // {folio} — orden esperando revisión de prendas
   const [clasifExtraFor,setClasifExtraFor]=useState(null); // {folio,siguientePicker} — revisión de bolsillos para una carga ADICIONAL (2da/3ra lavadora)
@@ -2108,7 +2115,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
   const [detalleEstadoZap,setDetalleEstadoZap]=useState(null); // qué categoría del resumen de zapatos está expandida (ej. "enLavado")
 
   // 🛍️ Una venta de SOLO productos (perfumes, detergentes, etc. del catálogo) no pasa por ningún proceso de producción
-  const esSoloProductos=v=>(v.items||[]).length>0&&(v.items||[]).every(it=>it.esProducto);
+  const esSoloProductos=v=>v._sinProceso||((v.items||[]).length>0&&(v.items||[]).every(it=>it.esProducto));
   // 🧴 Lavado en seco es tercerizado (Martinizing) — no pasa por lavadoras/secadoras propias.
   // Solo se excluye del flujo de máquinas si TODA la orden es lavado en seco (no mixta con ropa normal).
   const esSoloLavadoSeco=v=>(v.items||[]).length>0&&(v.items||[]).every(it=>esLavadoSeco(it.label));
@@ -2539,7 +2546,12 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
     else if(accion==="retirar_centrifugado")retirarCarga(extra.carga,emp?.id);
     else if(accion==="doblado_inicio")registrar(folio,"doblado_inicio",emp?.id,null,extra?.grupo);
     else if(accion==="doblado_fin"){registrar(folio,"doblado_fin",emp?.id,null,extra?.grupo);const v=ventas.find(vv=>vv.folio===folio);const esZapNotif=extra?.grupo==="zapatos";notificar(esZapNotif?"📦 Empaquetado terminado":"🪄 Doblado terminado",`${v?.clienteNombre||folio} — falta cambiar a Listo para retirar`);}
-    else if(accion==="confirmar_listo")cambiarEstadoVenta(folio,"listo");
+    else if(accion==="confirmar_listo"){
+      // 🧴 Si la orden también tiene lavado en seco y todavía no se retira de Martinizing, no se puede marcar lista
+      const vOrig=ventasTodas.find(vv=>vv.folio===folio);
+      if(vOrig&&(vOrig.items||[]).some(it=>esLavadoSeco(it.label))&&!vOrig.martinizingRetiradoEn){alert("La ropa ya está lista, pero esta orden también tiene lavado en seco que todavía está en Martinizing.\n\nCuando la retiren, márcala en 🧴 Martinizing → 📥 Marcar retirado y ahí se avisa al cliente.");}
+      else cambiarEstadoVenta(folio,"listo");
+    }
     setPinFor(null);
   };
   const activarNotificaciones=async()=>{
@@ -2602,7 +2614,7 @@ function Produccion({ventas,setVentas,upsertVenta,empleadas,pins,eventosProducci
         {encontradas.map(v=>{
           const tieneZapD=(v.items||[]).some(it=>esZapatoLbl(it.label));
           const tieneOtroD=(v.items||[]).some(it=>!esZapatoLbl(it.label));
-          const soloProductosD=(v.items||[]).length>0&&(v.items||[]).every(it=>it.esProducto);
+          const soloProductosD=v._sinProceso||((v.items||[]).length>0&&(v.items||[]).every(it=>it.esProducto));
           const soloLavadoSecoD=(v.items||[]).length>0&&(v.items||[]).every(it=>esLavadoSeco(it.label));
           const enActivos=!v.anulada&&["recibido","proceso"].includes(v.estado||"recibido")&&!soloProductosD&&!soloLavadoSecoD;
           const enFlujosZapatos=enActivos&&((v.prodGrupos&&v.prodGrupos.includes("zapatos"))||(!v.prodGrupos&&tieneZapD&&!tieneOtroD));
@@ -6793,7 +6805,7 @@ function Gastos({compras,setCompras,upsertCompra,empleadas,rolesPago,gastosFijos
   };
   const fil=gastos.filter(g=>!g.eliminada&&(!fMes||fechaLocal(g.fecha).startsWith(fMes))&&(fCat==="Todas"||g.categoria===fCat));
   // 💸 Salidas de caja del mismo rango — se muestran como una "categoría" más dentro de este reporte, si se incluye
-  const salidasFil=incluirSalidas&&(fCat==="Todas"||fCat==="Salidas de caja")?(salidasCaja||[]).filter(s=>!s.eliminada&&!s.esCostoVenta&&(!fMes||s.fecha.startsWith(fMes))):[];
+  const salidasFil=incluirSalidas&&(fCat==="Todas"||fCat==="Salidas de caja")?(salidasCaja||[]).filter(s=>!s.eliminada&&!esSalidaMartinizing(s)&&(!fMes||s.fecha.startsWith(fMes))):[];
   const totGastos=fil.reduce((a,g)=>a+g.monto,0);
   const totSalidas=salidasFil.reduce((a,s)=>a+s.monto,0);
   // 📌 Gastos fijos del mes (nómina + arriendo y demás fijos): se calculan solos, no se registran a mano
@@ -8474,24 +8486,22 @@ function MartinizingAdmin({ventas,setVentas,upsertVenta,facturasMartinizing,setF
     });
   };
   const [waListoMartinizing,setWaListoMartinizing]=useState(null); // venta a la que hay que avisar "listo" tras retirar de Martinizing
+  // 🔧 La venta se toma directamente de la lista (antes se leía dentro de setVentas y a veces llegaba vacía, por eso no salía el aviso)
+  const otrasPartes=v=>(v.items||[]).some(it=>!it.esProducto&&!esLavadoSeco(it.label)); // ¿la orden también tiene ropa o zapatos?
   const marcarRetirado=folio=>{
-    let ventaActualizada=null;
-    setVentas(prev=>{
-      const next=prev.map(v=>{
-        if(v.folio!==folio)return v;
-        ventaActualizada={...v,martinizingRetiradoEn:{fecha:new Date().toISOString(),empleada:sesion?.nombre||null}};
-        return ventaActualizada;
-      });
-      const updated=next.find(v=>v.folio===folio);
-      if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
-      return next;
-    });
-    // 🔔 Ya está lista para retirar — se pide avisar al cliente por WhatsApp, igual que en el resto del sistema
+    const v0=(ventas||[]).find(v=>v.folio===folio);if(!v0)return;
+    const ventaActualizada={...v0,martinizingRetiradoEn:{fecha:new Date().toISOString(),empleada:sesion?.nombre||null}};
+    setVentas(prev=>prev.map(v=>v.folio===folio?{...v,martinizingRetiradoEn:ventaActualizada.martinizingRetiradoEn}:v));
+    if(upsertVenta)upsertVenta({...ventaActualizada,_updatedAt:new Date().toISOString()});
+    if(otrasPartes(v0)&&!window.confirm("Esta orden también tiene ropa o zapatos en producción.\n\n¿Ya está TODO listo para avisar al cliente?\n(Si eliges Cancelar, queda retirada de Martinizing y podrás avisar después desde 🔔 Retiradas, falta avisar.)"))return;
+    // 🔔 Ya está lista para retirar — se pide avisar al cliente por WhatsApp y la orden pasa a "Listo"
     setWaListoMartinizing(ventaActualizada);
   };
+  // 🔔 Retiradas de Martinizing que todavía no se marcaron como listas / no se avisó al cliente
+  const retiradasSinAviso=(ventas||[]).filter(v=>!v.anulada&&tieneLavadoSeco(v)&&v.martinizingRetiradoEn&&(["recibido","proceso"].includes(v.estado||"recibido")||((v.estado==="listo")&&!v.checkMsgRetiro&&!v.msgListo)));
   const confirmarListoMartinizing=info=>{
     setVentas(prev=>{
-      const next=prev.map(v=>v.folio===waListoMartinizing.folio?{...v,estado:"listo",checkMsgRetiro:info.enviado,msgListo:info}:v);
+      const next=prev.map(v=>v.folio===waListoMartinizing.folio?{...v,estado:"listo",fechaListo:v.fechaListo||new Date().toISOString(),checkMsgRetiro:info.enviado,msgListo:info}:v);
       const updated=next.find(v=>v.folio===waListoMartinizing.folio);
       if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
       return next;
@@ -8584,7 +8594,7 @@ function MartinizingAdmin({ventas,setVentas,upsertVenta,facturasMartinizing,setF
     )}
     </>)}
 
-    <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ El lavado en seco es tercerizado — no pasa por lavadoras/secadoras propias. El recorrido es: 🚚 Entregar a Martinizing (se paga ahí) → 🧾 Facturar → 📥 Retirar → 🔔 Listo para retirar.</div>
+    <div style={{...S.alrt,background:"#e8f5fd",color:"#1565c0",fontSize:12,marginBottom:14}}>☁️ El lavado en seco es tercerizado — no pasa por lavadoras/secadoras propias. El recorrido es: 🚚 Entregar a Martinizing (se paga ahí) → 🧾 Facturar → 📥 Retirar → 🔔 Avisar al cliente (la orden pasa a Listo). El pago a Martinizing NO cuenta como gasto: regístralo aquí con "Confirmar factura" o, si sale de caja, marca 🧴 Pago a Martinizing en la salida de caja (no hagas las dos cosas para el mismo pago).</div>
 
     <Card title={`🚚 Por entregar a Martinizing (${porEntregar.length})`}>
       {porEntregar.length===0&&<div style={S.empty}>No hay órdenes esperando llevarse a Martinizing.</div>}
@@ -8608,6 +8618,19 @@ function MartinizingAdmin({ventas,setVentas,upsertVenta,facturasMartinizing,setF
             <div style={{fontSize:11,color:"#888"}}>Entregada a Martinizing: {fmt(v.martinizingEntregadoEn.fecha)}{v.martinizingEntregadoEn.empleada?` · ${v.martinizingEntregadoEn.empleada}`:""}</div>
           </div>
           <button style={{...S.btnS,background:"#2e7d32",color:"#fff"}} onClick={()=>marcarRetirado(v.folio)}>📥 Marcar retirado</button>
+        </div>
+      ))}
+    </Card>
+
+    <Card title={`🔔 Retiradas, falta avisar al cliente (${retiradasSinAviso.length})`}>
+      {retiradasSinAviso.length===0&&<div style={S.empty}>Todas las órdenes retiradas ya están avisadas.</div>}
+      {retiradasSinAviso.map(v=>(
+        <div key={v.folio} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid #f0f4f8"}}>
+          <div>
+            <div style={{fontSize:13,fontWeight:600,color:"#1a3c5e"}}>{v.clienteNombre} <span style={{color:"#aaa",fontWeight:400,fontSize:11}}>({v.folio})</span></div>
+            <div style={{fontSize:11,color:"#888"}}>Retirada: {fmt(v.martinizingRetiradoEn.fecha)}{v.martinizingRetiradoEn.empleada?` · ${v.martinizingRetiradoEn.empleada}`:""}{otrasPartes(v)?" · ⚠️ también tiene ropa/zapatos":""}</div>
+          </div>
+          <button style={{...S.btnS,background:"#25D366",color:"#fff"}} onClick={()=>setWaListoMartinizing(v)}>🔔 Avisar listo</button>
         </div>
       ))}
     </Card>
@@ -9308,6 +9331,7 @@ function GestionUsuarios(){
 function SalidaCaja({sesion,salidasCaja,setSalidasCaja,onClose,upsertSalida}){
   const [monto,setMonto]=useState("");
   const [motivo,setMotivo]=useState("");
+  const [esMtz,setEsMtz]=useState(false); // 🧴 pago a Martinizing: sale de caja pero NO es gasto
   const hoy=fechaHoyLocal();
   const salidasHoy=(salidasCaja||[]).filter(s=>s.fecha===hoy&&!s.eliminada);
   const totHoy=salidasHoy.reduce((a,s)=>a+s.monto,0);
@@ -9319,11 +9343,12 @@ function SalidaCaja({sesion,salidasCaja,setSalidasCaja,onClose,upsertSalida}){
     const salida={
       id:Date.now(),fecha:hoy,
       hora:new Date().toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"}),
-      monto:m,motivo:motivo.trim(),
+      monto:m,motivo:(esMtz&&!/martin/i.test(motivo)?"Pago a Martinizing — ":"")+motivo.trim(),
       quien:sesion.nombre,quienId:sesion.id,
+      ...(esMtz||/martin/i.test(motivo)?{esCostoVenta:true,tipo:"martinizing"}:{}),
     };
     setSalidasCaja(prev=>[salida,...prev]);if(upsertSalida)upsertSalida({...salida,_updatedAt:new Date().toISOString()});
-    setMonto("");setMotivo("");
+    setMonto("");setMotivo("");setEsMtz(false);
   };
 
   const eliminar=id=>{
@@ -9350,7 +9375,11 @@ function SalidaCaja({sesion,salidasCaja,setSalidasCaja,onClose,upsertSalida}){
         <label style={S.lbl}>Monto de la salida *</label>
         <input type="number" style={{...S.inp,marginBottom:10,fontSize:18,fontWeight:700}} placeholder="$0.00" value={monto} onChange={e=>setMonto(e.target.value)}/>
         <label style={S.lbl}>Motivo *</label>
-        <input style={{...S.inp,marginBottom:14}} placeholder="Ej: Compra detergente, pago servicio..." value={motivo} onChange={e=>setMotivo(e.target.value)} onKeyDown={e=>e.key==="Enter"&&registrar()}/>
+        <input style={{...S.inp,marginBottom:10}} placeholder={esMtz?"Ej: Cliente Ana Pérez, 2 ternos":"Ej: Compra detergente, pago servicio..."} value={motivo} onChange={e=>setMotivo(e.target.value)} onKeyDown={e=>e.key==="Enter"&&registrar()}/>
+        <label style={{display:"flex",alignItems:"flex-start",gap:8,fontSize:12,background:esMtz?"#e8f5e9":"#f8fbfd",border:"1px solid #e8f0f7",borderRadius:8,padding:"8px 10px",marginBottom:14,cursor:"pointer"}}>
+          <input type="checkbox" checked={esMtz} onChange={e=>setEsMtz(e.target.checked)}/>
+          <span><strong>🧴 Pago a Martinizing</strong><span style={{display:"block",fontSize:11,color:"#666"}}>Sale de caja pero NO cuenta como gasto: es el lavado en seco que el cliente ya nos pagó.</span></span>
+        </label>
         <button style={{...S.btnP,background:"linear-gradient(135deg,#c62828,#e53935)",marginBottom:14}} onClick={registrar}>💸 Registrar salida</button>
         {salidasHoy.length>0&&(
           <div>
@@ -9358,7 +9387,7 @@ function SalidaCaja({sesion,salidasCaja,setSalidasCaja,onClose,upsertSalida}){
             {salidasHoy.map(s=>(
               <div key={s.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #f0f4f8"}}>
                 <div>
-                  <div style={{fontSize:13,fontWeight:600,color:"#c62828"}}>-${(s.monto||0).toFixed(2)} <span style={{color:"#555",fontWeight:400}}>{s.motivo}</span></div>
+                  <div style={{fontSize:13,fontWeight:600,color:"#c62828"}}>-${(s.monto||0).toFixed(2)} <span style={{color:"#555",fontWeight:400}}>{s.motivo}</span>{esSalidaMartinizing(s)&&<span style={{marginLeft:4,fontSize:10,background:"#e8f5e9",color:"#2e7d32",borderRadius:6,padding:"1px 6px"}}>🧴 no es gasto</span>}</div>
                   <div style={{fontSize:11,color:"#888"}}>{s.hora} · {s.quien}</div>
                 </div>
                 <button style={S.btnR} onClick={()=>eliminar(s.id)}>✕</button>
@@ -10534,7 +10563,77 @@ function Clientes({clientes,setClientes,upsertCliente,ventas,setVentas,upsertVen
 // La meta se calcula sola con el historial completo: promedio de los
 // últimos 3 meses cerrados + 10% de crecimiento (redondeado a $10).
 // Si aún no hay meses cerrados, usa la proyección del mes en curso.
-function DashboardBI({ventas,empleadas,gastos,rolesPago,gastosFijosConfig}){
+// 🧴 AROMATIZANTES — cómo se venden: ranking, unidades e ingresos del mes, comparación con el mes anterior
+function AromatizantesPanel({ventas,productos,empleadas,mesSel}){
+  const [verTodas,setVerTodas]=useState(false);
+  const aromas=(productos||[]).filter(p=>p.categoria==="aromatizador");
+  const ids=new Set(aromas.map(p=>String(p.id)));
+  const prodDe=id=>aromas.find(p=>String(p.id)===String(id));
+  const mesAnt=(()=>{const [y,m]=mesSel.split("-").map(Number);const d=new Date(y,m-2,1);return mesK(d);})();
+  const resumen=mes=>{
+    const porProd={},lineas=[];let unid=0,monto=0;
+    (ventas||[]).filter(v=>!v.anulada&&mesK(v.fecha)===mes).forEach(v=>{
+      const dev={};(v.notasCredito||[]).forEach(nc=>(nc.devoluciones||[]).forEach(d=>{dev[String(d.productoId)]=(dev[String(d.productoId)]||0)+(d.cantidad||0);}));
+      (v.items||[]).forEach(it=>{
+        if(!it.esProducto||!ids.has(String(it.productoId)))return;
+        const p=prodDe(it.productoId);const precio=it.precio!=null?it.precio:(p?.precio||0);
+        let cant=it.piezas||1;const k=String(it.productoId);
+        if(dev[k]){const d=Math.min(dev[k],cant);cant-=d;dev[k]-=d;}
+        if(cant<=0)return;
+        const r=porProd[k]||(porProd[k]={id:k,nombre:p?.nombre||it.label||"Aromatizante",unid:0,monto:0,ventas:0,stock:p?.stock});
+        r.unid+=cant;r.monto+=precio*cant;r.ventas++;unid+=cant;monto+=precio*cant;
+        lineas.push({fecha:v.fecha,folio:v.folio,cliente:v.clienteNombre||"—",producto:r.nombre,cant,monto:precio*cant,empleadaId:v.empleadaId});
+      });
+    });
+    return{porProd,lineas:lineas.sort((a,b)=>new Date(b.fecha)-new Date(a.fecha)),unid,monto};
+  };
+  const act=resumen(mesSel),ant=resumen(mesAnt);
+  const ranking=Object.values(act.porProd).sort((a,b)=>b.unid-a.unid||b.monto-a.monto);
+  aromas.filter(p=>!p.eliminada&&!act.porProd[String(p.id)]).forEach(p=>ranking.push({id:String(p.id),nombre:p.nombre,unid:0,monto:0,ventas:0,stock:p.stock}));
+  const maxU=Math.max(1,...ranking.map(r=>r.unid));
+  const top=ranking[0]&&ranking[0].unid>0?ranking[0]:null;
+  const ventasMes=(ventas||[]).filter(v=>!v.anulada&&mesK(v.fecha)===mesSel);
+  const totalVentasMes=ventasMes.reduce((a,v)=>a+(v.total||0),0);
+  const conAroma=new Set(act.lineas.map(l=>l.folio)).size;
+  const tasa=ventasMes.length?conAroma/ventasMes.length*100:0;
+  const varPct=(a,b)=>b>0?((a-b)/b*100):null;
+  const vU=varPct(act.unid,ant.unid),vM=varPct(act.monto,ant.monto);
+  const flecha=v=>v==null?<span style={{color:"#888"}}>—</span>:<span style={{color:v>=0?"#2e7d32":"#c62828",fontWeight:700}}>{v>=0?"▲":"▼"} {Math.abs(v).toFixed(0)}%</span>;
+  const porEmp={};act.lineas.forEach(l=>{const n=(empleadas||[]).find(e=>String(e.id)===String(l.empleadaId))?.nombre||"Sin asignar";porEmp[n]=(porEmp[n]||0)+l.cant;});
+  const box=(t,v,sub)=>(<div style={{flex:1,minWidth:110,background:"#f8fbfd",border:"1px solid #e8f0f7",borderRadius:10,padding:"10px 12px"}}><div style={{fontSize:11,color:"#888"}}>{t}</div><div style={{fontSize:20,fontWeight:800,color:"#1a3c5e"}}>{v}</div>{sub&&<div style={{fontSize:11,marginTop:2}}>{sub}</div>}</div>);
+  return(<Card title="🧴 Aromatizantes textiles — ventas del mes">
+    {aromas.length===0?<div style={S.empty}>No hay productos marcados como aromatizador. En Productos, elige la categoría 🧴 Aromatizador Textil.</div>:<>
+    <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
+      {box("Unidades vendidas",act.unid,<>vs mes anterior ({ant.unid}): {flecha(vU)}</>)}
+      {box("Ingresos",`$${act.monto.toFixed(2)}`,<>vs mes anterior (${ant.monto.toFixed(2)}): {flecha(vM)}</>)}
+      {box("Órdenes con aromatizante",`${tasa.toFixed(0)}%`,<span style={{color:"#888"}}>{conAroma} de {ventasMes.length} órdenes</span>)}
+      {box("Peso en ventas",`${totalVentasMes>0?(act.monto/totalVentasMes*100).toFixed(1):"0"}%`,<span style={{color:"#888"}}>del total vendido</span>)}
+    </div>
+    {top&&<div style={{background:"linear-gradient(135deg,#001847,#00396b)",color:"#fff",borderRadius:12,padding:"12px 14px",marginBottom:12}}>
+      <div style={{fontSize:11,color:"#00E5B8",fontWeight:700,textTransform:"uppercase",letterSpacing:0.5}}>🏆 Más vendido del mes</div>
+      <div style={{fontSize:17,fontWeight:800,marginTop:2}}>{top.nombre}</div>
+      <div style={{fontSize:12,color:"#cfe3f2"}}>{top.unid} unidades · ${top.monto.toFixed(2)} · {act.unid>0?(top.unid/act.unid*100).toFixed(0):0}% de los aromatizantes vendidos</div>
+    </div>}
+    <div style={{fontSize:12,fontWeight:700,color:"#1a3c5e",marginBottom:6}}>📊 Ranking</div>
+    {ranking.map((r,i)=>(<div key={r.id} style={{marginBottom:8}}>
+      <div style={{display:"flex",justifyContent:"space-between",fontSize:12}}><span><strong>{i+1}.</strong> {r.nombre}</span><span><strong>{r.unid}</strong> u · ${r.monto.toFixed(2)}{r.stock!=null?<span style={{color:(r.stock||0)<=3?"#c62828":"#888"}}> · stock {r.stock}</span>:null}</span></div>
+      <div style={{height:8,background:"#eef3f8",borderRadius:6,overflow:"hidden",marginTop:3}}><div style={{width:`${r.unid/maxU*100}%`,height:"100%",background:i===0?"#00E5B8":"#4DD9E8"}}/></div>
+    </div>))}
+    {Object.keys(porEmp).length>0&&<div style={{marginTop:10}}>
+      <div style={{fontSize:12,fontWeight:700,color:"#1a3c5e",marginBottom:4}}>👩 Por colaboradora</div>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{Object.entries(porEmp).sort((a,b)=>b[1]-a[1]).map(([n,c])=>(<div key={n} style={{background:"#e8f5fd",color:"#1565c0",borderRadius:8,padding:"4px 10px",fontSize:12,fontWeight:700}}>{n}: {c} u</div>))}</div>
+    </div>}
+    <div style={{fontSize:12,fontWeight:700,color:"#1a3c5e",margin:"12px 0 4px"}}>🧾 Vendido en el mes ({act.lineas.length})</div>
+    {act.lineas.length===0?<div style={{fontSize:12,color:"#aaa"}}>Todavía no se vende ningún aromatizante este mes.</div>:
+      (verTodas?act.lineas:act.lineas.slice(0,8)).map((l,i)=>(<div key={l.folio+"_"+i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"5px 0",borderBottom:"1px solid #f0f4f8"}}>
+        <span>{fmtD(fechaLocal(l.fecha))} · {l.cliente}<span style={{display:"block",fontSize:11,color:"#888"}}>{l.producto} × {l.cant}</span></span><strong>${l.monto.toFixed(2)}</strong>
+      </div>))}
+    {act.lineas.length>8&&<button style={{...S.btnS,marginTop:6,fontSize:11}} onClick={()=>setVerTodas(!verTodas)}>{verTodas?"Ver menos":`Ver las ${act.lineas.length}`}</button>}
+    </>}
+  </Card>);
+}
+
+function DashboardBI({ventas,empleadas,gastos,rolesPago,gastosFijosConfig,productos}){
   const hoyD=new Date();
   const mesAct=mesK(hoyD);
   const diaMes=hoyD.getDate();
@@ -10861,6 +10960,7 @@ function DashboardBI({ventas,empleadas,gastos,rolesPago,gastosFijosConfig}){
         </>
       )}
     </Card>
+    <AromatizantesPanel ventas={ventas} productos={productos} empleadas={empleadas} mesSel={mesSel}/>
   </div>);
 }
 
@@ -11147,7 +11247,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
       {tab==="ventas"&&<NuevaVenta ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} setTicket={setTicketV} servicios={serviciosActivos} sesion={sesion} upsertVenta={upsertVenta} upsertCliente={upsertCliente} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} cuponNuevoConfig={cuponNuevoConfig} setCuponNuevoConfig={setCuponNuevoConfig} upsertCuponNuevoConfig={upsertCuponNuevoConfig} promos={promos} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto} sorteos={sorteos} setSorteos={setSorteos} upsertSorteo={upsertSorteo} setBoletosSorteo={setBoletosSorteo} upsertBoletoSorteo={upsertBoletoSorteo} onBoletosGenerados={setBoletosParaImprimir}/>}
       {tab==="historial"&&<Historial ventas={ventas} setVentas={setVentas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} esAdmin={esAdmin} upsertVenta={upsertVenta} sesion={sesion} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto} setQuejas={setQuejas} upsertQueja={upsertQueja}/>}
       {tab==="pendientes"&&<Pendientes ventas={ventas} empleadas={empleadas} setTicket={setTicketV} addAbono={addAbono} setVentas={setVentas} upsertVenta={upsertVenta}/>}
-      {tab==="bi"&&<DashboardBI ventas={ventas} empleadas={empleadas} gastos={gastos} rolesPago={rolesPago} gastosFijosConfig={gastosFijosConfig}/>}
+      {tab==="bi"&&<DashboardBI productos={productos} ventas={ventas} empleadas={empleadas} gastos={gastos} rolesPago={rolesPago} gastosFijosConfig={gastosFijosConfig}/>}
       {tab==="clientes"&&<Clientes clientes={clientes} setClientes={setClientes} upsertCliente={upsertCliente} ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta}/>}
       {tab==="clientesAnalisis"&&<AnalisisClientes clientes={clientes} ventas={ventas}/>}
       {tab==="promosAdmin"&&<PromosAdmin promos={promos} setPromos={setPromos} upsertPromo={upsertPromo} servicios={servicios}/>}
