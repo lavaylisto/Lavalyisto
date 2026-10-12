@@ -1,5 +1,5 @@
 import { initializeApp } from "firebase/app";
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "firebase/firestore";
+import { initializeFirestore, memoryLocalCache } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 
@@ -30,15 +30,33 @@ const firebaseConfig = {
 
 export const firebaseListo = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId);
 
+// 🧹 Borra (una sola vez por equipo) la caché vieja de Firestore en IndexedDB, que se dañaba y provocaba
+// "FIRESTORE INTERNAL ASSERTION FAILED: Unexpected state". Ya no se usa: la app guarda su propia copia en localStorage.
+try {
+  if (typeof window !== "undefined" && window.indexedDB && !localStorage.getItem("ll_cache_fs_limpia_v1")) {
+    const marcar = () => { try { localStorage.setItem("ll_cache_fs_limpia_v1", "1"); } catch {} };
+    if (indexedDB.databases) {
+      indexedDB.databases().then((dbs) => {
+        (dbs || []).filter((d) => d && d.name && /firestore/i.test(d.name)).forEach((d) => { try { indexedDB.deleteDatabase(d.name); } catch {} });
+        marcar();
+      }).catch(marcar);
+    } else {
+      marcar();
+    }
+  }
+} catch {}
+
 let _db = null;
 let _storage = null; // 📷 Fotos de tareas (inventarios, evidencias) — mismo proyecto de Firebase, servicio Storage
 let _authReady = Promise.resolve(); // 🔒 se resuelve cuando ya se autenticó (anónimamente) contra Firebase
 if (firebaseListo) {
   try {
     const app = initializeApp(firebaseConfig);
-    // Caché offline persistente: la app funciona sin internet y sincroniza al volver la conexión
+    // 🔧 Caché en MEMORIA (antes: persistentLocalCache en IndexedDB). La caché en IndexedDB se dañaba con varias
+    // pestañas abiertas o con poco espacio en el equipo, y Firestore dejaba de guardar. Sin internet, los cambios
+    // quedan en cola mientras la pestaña siga abierta, y la app conserva su copia local en localStorage.
     _db = initializeFirestore(app, {
-      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+      localCache: memoryLocalCache(),
     });
     _storage = getStorage(app);
     // 🔒 SEGURIDAD: nos autenticamos de forma anónima automáticamente (sin pedirle nada a nadie).
