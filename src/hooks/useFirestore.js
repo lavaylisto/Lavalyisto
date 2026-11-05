@@ -7,11 +7,9 @@ import {
 // Hook local-first con SINCRONIZACIÓN INCREMENTAL.
 // - Al abrir la app usa la copia guardada en este equipo (localStorage) al instante.
 // - A Firebase solo le pide los documentos que CAMBIARON desde la última sincronización
-//   (campo _updatedAt), en tiempo real. Antes descargaba TODA la colección en cada apertura
-//   o recarga (≈200k lecturas/día → se pasaba del límite gratis de 50k).
-// - Si un equipo no tiene copia local (primera vez), descarga todo UNA sola vez.
-// - Los borrados se marcan con _deleted:true (en vez de borrar el documento) para que
-//   los otros equipos se enteren; la app nunca ve los marcados.
+//   confirmada por el servidor (campo _updatedAt), en tiempo real.
+// - Si un equipo no tiene marca de sincronización, descarga todo UNA sola vez.
+// - Los borrados se marcan con _deleted:true para que los otros equipos se enteren.
 
 const MARGEN_MS = 10 * 60 * 1000; // 10 min de margen por relojes desfasados entre equipos
 
@@ -26,7 +24,8 @@ const leerLocal = (key, def) => {
 const visibles = (arr) => (arr || []).filter((x) => !x || !x._deleted);
 
 export function useCollection(colName, localKey, defaultVal = []) {
-  const syncKey = localKey + "__sync";
+  // v2: la marca de sincronización SOLO se guarda con datos confirmados por el servidor
+  const syncKey = localKey + "__sync2";
   const [data, setData] = useState(() => visibles(leerLocal(localKey, defaultVal)));
   const [nube, setNube] = useState(false);
 
@@ -41,12 +40,6 @@ export function useCollection(colName, localKey, defaultVal = []) {
       try { ultimo = localStorage.getItem(syncKey); } catch {}
       const copia = (() => { try { return JSON.parse(localStorage.getItem(localKey)); } catch { return null; } })();
       const tieneCopia = Array.isArray(copia) && copia.length > 0;
-      // Primera vez con esta versión: si el equipo ya tiene copia local, arranca desde el cambio
-      // más reciente de esa copia (así NO vuelve a descargar todo).
-      if (!ultimo && tieneCopia) {
-        const max = copia.reduce((m, x) => (x && x._updatedAt && x._updatedAt > m ? x._updatedAt : m), "");
-        if (max) ultimo = max;
-      }
 
       let q;
       let completa = false;
@@ -54,29 +47,34 @@ export function useCollection(colName, localKey, defaultVal = []) {
         const desde = new Date(new Date(ultimo).getTime() - MARGEN_MS).toISOString();
         q = query(collection(db, colName), where("_updatedAt", ">", desde));
       } else {
-        q = query(collection(db, colName)); // primera vez en este equipo: descarga completa
+        q = query(collection(db, colName)); // sin marca confirmada: descarga completa una vez
         completa = true;
       }
 
       unsub = onSnapshot(q, (snap) => {
         setNube(true);
+        const delServidor = !snap.metadata.fromCache;
         let maxTs = ultimo || "";
         const cambios = [];
         snap.docChanges().forEach((ch) => {
           if (ch.type === "removed" && !completa) return; // salió del filtro, no es un borrado
           const d = { ...ch.doc.data(), _docId: ch.doc.id };
           if (ch.type === "removed") d._deleted = true;
-          if (d._updatedAt && d._updatedAt > maxTs) maxTs = d._updatedAt;
+          if (delServidor && !ch.doc.metadata.hasPendingWrites && d._updatedAt && d._updatedAt > maxTs) maxTs = d._updatedAt;
           cambios.push(d);
         });
 
         if (completa) {
-          // Descarga completa: el resultado ES la colección
           const docs = snap.docs.map((d) => ({ ...d.data(), _docId: d.id }));
-          docs.forEach((d) => { if (d._updatedAt && d._updatedAt > maxTs) maxTs = d._updatedAt; });
-          const lista = visibles(docs);
-          setData(lista);
-          try { localStorage.setItem(localKey, JSON.stringify(lista)); } catch {}
+          if (delServidor) docs.forEach((d) => { if (d._updatedAt && d._updatedAt > maxTs) maxTs = d._updatedAt; });
+          setData((prev) => {
+            // Se conserva lo creado en este equipo que todavía no llegó a la nube (sin _docId)
+            const enServidor = new Set(docs.map(claveDe));
+            const soloLocales = (prev || []).filter((it) => it && !it._docId && !enServidor.has(claveDe(it)));
+            const lista = [...visibles(docs), ...soloLocales];
+            try { localStorage.setItem(localKey, JSON.stringify(lista)); } catch {}
+            return lista;
+          });
         } else if (cambios.length) {
           setData((prev) => {
             const mapa = new Map();
@@ -93,10 +91,13 @@ export function useCollection(colName, localKey, defaultVal = []) {
           });
         }
 
-        if (!maxTs) maxTs = new Date().toISOString();
-        ultimo = maxTs;
-        try { localStorage.setItem(syncKey, maxTs); } catch {}
-        completa = false; // los siguientes snapshots ya son incrementales
+        // ☁️ La marca solo avanza con datos que vinieron del servidor
+        if (delServidor) {
+          if (!maxTs) maxTs = ultimo || new Date().toISOString();
+          ultimo = maxTs;
+          try { localStorage.setItem(syncKey, maxTs); } catch {}
+          completa = false;
+        }
       }, (err) => {
         console.error(`Firestore [${colName}]:`, err.message);
       });
