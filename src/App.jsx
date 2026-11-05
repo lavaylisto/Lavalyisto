@@ -27,6 +27,7 @@ if(typeof window!=="undefined"){
   window.addEventListener("unhandledrejection",e=>mostrarErrorGlobal("Promesa fallida: "+(e.reason?.message||e.reason)));
 }
 import { useCollection } from "./hooks/useFirestore";
+import Campanas from "./Campanas";
 import { storage } from "./firebase";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 
@@ -4549,6 +4550,21 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
     const res=validarCanjeCuponNuevo(code,clienteTelActual,cupones);
     if(!res.ok){setCupErr(`${res.motivo} ❌`);return;}
     const cup=res.cupon;
+    // 📣 Cupón de CAMPAÑA WhatsApp (generado en Negocio › Campañas)
+    if(cup.campana){
+      const DN=["domingo","lunes","martes","miércoles","jueves","viernes","sábado"];
+      if(cup.dias&&cup.dias.length&&!cup.dias.includes(new Date().getDay())){setCupErr(`Este cupón solo se puede usar los días ${cup.dias.map(d=>DN[d]).join(" y ")} ❌`);return;}
+      if(cup.tipo==="CAMP_EDREDON"){
+        const hayBase=items.some(it=>!it.custom&&!it.deCupon&&(()=>{const sv=servicios.find(x=>x.id===it.servId);return sv&&normTxt(sv.label).includes("edredon");})());
+        if(!hayBase){setCupErr("Agrega primero el primer edredón a la venta y luego valida el cupón ❌");return;}
+        setSegundaPromoActiva({id:"camp_"+cup.codigo,tipo:"segundo50",pct:50,filtro:"EDREDON",titulo:`Campaña 2º edredón 50% · ${cup.codigo}`,deCupon:true});
+      }else{
+        const precio=cup.tipo==="CAMP_ZAPATOS"?String(cup.precio??4.99):cup.tipo==="CAMP_ENTREGA"?"0":"";
+        setItems(prev=>[...prev,{servId:servicios[0]?.id,piezas:1,custom:true,deCupon:true,lC:`${cup.promoTitulo||"Promo campaña"} (cupón) · ${cup.codigo}`,pC:precio}]);
+      }
+      setCupApl(cup);setCupErr("");setCupInput("");
+      return;
+    }
     const t=cfg.tipos[cup.tipo];
     setItems(prev=>[...prev,{servId:servicios[0]?.id,piezas:t?.cantidad||1,custom:true,deCupon:true,lC:`${t?.label||cup.tipo} (cupón) · ${cup.codigo}`,pC:String(t?.precio||0)}]);
     setCupApl(cup);setCupErr("");setCupInput("");
@@ -4591,7 +4607,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
     const p=segundaPromoActiva;if(!p)return;
     const pct=p.pct||50;
     const precioProm=s.precio*(1-pct/100);
-    setItems(prev=>[...prev,{servId:s.id,piezas:1,custom:true,lC:`🎉 ${p.titulo} · ${s.label}`,pC:precioProm.toFixed(2)}]);
+    setItems(prev=>[...prev,{servId:s.id,piezas:1,custom:true,deCupon:!!p.deCupon,lC:`🎉 ${p.titulo} · ${s.label}`,pC:precioProm.toFixed(2)}]);
     setImpulsos(prev=>[...prev,{promoId:p.id,titulo:p.titulo,fecha:new Date().toISOString()}]); // 🎯 impulsación registrada
     setSegundaPromoActiva(null);
   };
@@ -4613,6 +4629,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
     if(cupApl){ // 🎟️ revalidación final del cupón
       const cup=cupones.find(c=>c.id===cupApl.id);
       if(!cup||cup.estado==="usado"){setErr("El cupón ya no está disponible — quítalo para continuar");return;}
+      if(cup.campana&&cup.dias?.length&&!cup.dias.includes(new Date().getDay())){setErr("Este cupón de campaña no aplica hoy — quítalo para continuar");return;}
       if(fechaHoyLocal()>cup.caduca){setErr(`El cupón caducó el ${fmtD(cup.caduca)} — quítalo para continuar`);return;}
       const min=cup.minCompra||((cup.promoTipo==="descuento")?CUPON_MIN_COMPRA_DESC:0);
       if(cup.promoTipo==="descuento"&&posActual()<min){setErr(`El cupón aplica en compras desde $${min.toFixed(2)}`);return;}
@@ -4947,7 +4964,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
       </div>
       </div>
       {showPromos&&!waVenta&&<PromosDelDia promos={promos} servicios={servicios} onAgregar={agregarPromo} onCerrar={()=>{setShowPromos(false);reg(true);}}/>}
-      {segundaPromoActiva&&<SegundaUnidadPicker promo={segundaPromoActiva} servicios={servicios} onElegir={elegirSegundaUnidad} onCancelar={()=>setSegundaPromoActiva(null)}/>}
+      {segundaPromoActiva&&<SegundaUnidadPicker promo={segundaPromoActiva} servicios={servicios} onElegir={elegirSegundaUnidad} onCancelar={()=>{if(segundaPromoActiva?.deCupon)setCupApl(null);setSegundaPromoActiva(null);}}/>}
       {waVenta&&<WhatsAppObligatorio venta={waVenta} tipo="recibido" onConfirm={confirmarWaRecibido}/>}
       {cuponRecienEmitido&&(()=>{
         const cfg=(cuponNuevoConfig&&cuponNuevoConfig[0])||CUPON_NUEVO_CONFIG_DEFAULT[0];
@@ -11020,6 +11037,7 @@ const { data: cajas, upsert: upsertCaja, nube } = useCollection("cajas", "ll_caj
 const { data: cupones, setData: setCupones, upsert: upsertCupon } = useCollection("cupones", "ll_cupones", []);
 const { data: cuponNuevoConfig, setData: setCuponNuevoConfig, upsert: upsertCuponNuevoConfig } = useCollection("cuponNuevoConfig", "ll_cupon_nuevo_config", CUPON_NUEVO_CONFIG_DEFAULT);
 const { data: promos, setData: setPromos, upsert: upsertPromo } = useCollection("promos", "ll_promos", []);
+const { data: campanasEnvios, setData: setCampanasEnvios, upsert: upsertCampanaEnvio } = useCollection("campanasEnvios", "ll_campanas_envios", []);
 const { data: incentivosArr, setData: setIncentivosArr, upsert: upsertIncentivo } = useCollection("configIncentivos", "ll_config_incentivos", INCENTIVOS_DEFAULT);
 const cfgInc = incentivosArr[0] || INCENTIVOS_DEFAULT[0];
 // 🏭 PRODUCCIÓN — Fase 1: colección de máquinas
@@ -11193,7 +11211,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
   const tabs=[
     {id:"ventas",icon:"🧾",l:"Venta"},{id:"historial",icon:"📋",l:"Historial"},
     {id:"pendientes",icon:"⏳",l:"Pendientes",b:pCount},{id:"bi",icon:"🚀",l:"Dashboard"},
-    {id:"clientes",icon:"👥",l:"Clientes"},{id:"clientesAnalisis",icon:"📊",l:"Análisis clientes"},{id:"promosAdmin",icon:"🎁",l:"Promos"},{id:"cupones",icon:"🎟️",l:"Cupones"},{id:"resumen",icon:"📈",l:"Resumen día"},{id:"satisfaccionAdmin",icon:"😊",l:"Satisfacción"},
+    {id:"clientes",icon:"👥",l:"Clientes"},{id:"clientesAnalisis",icon:"📊",l:"Análisis clientes"},{id:"promosAdmin",icon:"🎁",l:"Promos"},{id:"cupones",icon:"🎟️",l:"Cupones"},{id:"campanas",icon:"📣",l:"Campañas"},{id:"resumen",icon:"📈",l:"Resumen día"},{id:"satisfaccionAdmin",icon:"😊",l:"Satisfacción"},
     {id:"reportes",icon:"📊",l:"Reportes"},{id:"depositos",icon:"🏦",l:"Depósitos"},
     {id:"conciliacion",icon:"🏛️",l:"Conciliación"},{id:"conciliacionBanco",icon:"🏦",l:"Concil. bancaria"},
     {id:"gastos",icon:"🛒",l:"Gastos"},{id:"martinizingAdmin",icon:"🧴",l:"Martinizing"},{id:"inventario",icon:"📦",l:"Inventario"},{id:"comprasInsumos",icon:"🧾",l:"Compra de insumos"},{id:"productosAdmin",icon:"🛍️",l:"Productos"},{id:"kardexAdmin",icon:"📒",l:"Kardex"},{id:"conteosAdmin",icon:"📋",l:"Conteos"},{id:"activosFijosAdmin",icon:"📦",l:"Activos Fijos"},{id:"deudasAdmin",icon:"💳",l:"Deudas"},{id:"sorteoAdmin",icon:"🎟️",l:"Sorteo"},
@@ -11205,7 +11223,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
     {id:"ventas_caja",icon:"🧾",l:"Ventas",tabIds:["ventas","historial","pendientes","depositos","conciliacion","conciliacionBanco","cupones","promosAdmin","reportes","resumen","satisfaccionAdmin"]},
     {id:"personal",icon:"👥",l:"Personal",tabIds:["equipo","pinsAdmin","usuarios","tareasAdmin","notasAdmin","incentivosAdmin","evaluacionAdmin","calificacionManualAdmin","evaluacionConfigAdmin","reporteMaquinasAdmin","tiemposRopaAdmin","rolesPago","obligaciones","repartoSocias"]},
     {id:"inventario_cat",icon:"📦",l:"Inventario",tabIds:["inventario","comprasInsumos","productosAdmin","kardexAdmin","conteosAdmin","gastos","martinizingAdmin","maquinasAdmin","activosFijosAdmin","deudasAdmin"]},
-    {id:"negocio",icon:"📊",l:"Negocio",tabIds:["bi","clientes","clientesAnalisis","sorteoAdmin","produccionAdmin","config"]},
+    {id:"negocio",icon:"📊",l:"Negocio",tabIds:["bi","clientes","clientesAnalisis","campanas","sorteoAdmin","produccionAdmin","config"]},
   ];
   const categoriaDeTab=id=>CATEGORIAS.find(c=>c.tabIds.includes(id))?.id||CATEGORIAS[0].id;
   const [categoria,setCategoria]=useState(()=>categoriaDeTab(tab));
@@ -11250,6 +11268,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
       {tab==="bi"&&<DashboardBI productos={productos} ventas={ventas} empleadas={empleadas} gastos={gastos} rolesPago={rolesPago} gastosFijosConfig={gastosFijosConfig}/>}
       {tab==="clientes"&&<Clientes clientes={clientes} setClientes={setClientes} upsertCliente={upsertCliente} ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta}/>}
       {tab==="clientesAnalisis"&&<AnalisisClientes clientes={clientes} ventas={ventas}/>}
+      {tab==="campanas"&&<Campanas ventas={ventas} clientes={clientes} envios={campanasEnvios} setEnvios={setCampanasEnvios} upsertEnvio={upsertCampanaEnvio} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} sesion={sesion}/>}
       {tab==="promosAdmin"&&<PromosAdmin promos={promos} setPromos={setPromos} upsertPromo={upsertPromo} servicios={servicios}/>}
       {tab==="cupones"&&<Cupones cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} cuponNuevoConfig={cuponNuevoConfig} setCuponNuevoConfig={setCuponNuevoConfig} upsertCuponNuevoConfig={upsertCuponNuevoConfig} clientes={clientes} ventas={ventas} empleadas={empleadas} sesion={sesion}/>}
       {tab==="resumen"&&<ResumenDia ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja}/>}
