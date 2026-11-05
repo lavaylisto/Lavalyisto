@@ -28,6 +28,7 @@ if(typeof window!=="undefined"){
 }
 import { useCollection } from "./hooks/useFirestore";
 import Campanas from "./Campanas";
+import { RevisionCierres, FaltantesCaja, DiferenciasCierreDia, puedeAceptarCierres } from "./CierresRevision";
 import { storage } from "./firebase";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 
@@ -4063,7 +4064,7 @@ function PinsAdmin({empleadas,pins,setPins,upsertPin}){
   </div>);
 }
 
-function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,onIrProduccion,onIrTareas,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta,upsertSalida,upsertCliente,upsertCaja,cupones,setCupones,upsertCupon,cuponNuevoConfig,setCuponNuevoConfig,upsertCuponNuevoConfig,promos,cfgInc,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga,pins,eventosProduccion,setEventosProduccion,upsertEvento,productos,setProductos,upsertProducto,setKardexProductos,upsertKardexProducto,sorteos,setSorteos,upsertSorteo,setBoletosSorteo,upsertBoletoSorteo,boletosParaImprimir,setBoletosParaImprimir,depositos,setDepositos,upsertDeposito,setConteosInventario,upsertConteoInventario,ventasPerfumeReg,setVentasPerfumeReg,upsertVentaPerfume,tareasDiarias,quejas,evalConfig,calificacionesAudio,facturasMartinizing,setFacturasMartinizing,upsertFacturaMartinizing}){
+function PantallaEmpleada({cajas=[],ventas,setVentas,clientes,setClientes,empleadas,servicios,sesion,addAbono,onLogout,onIrProduccion,onIrTareas,cierreListo,onCierreListo,onResetCierre,salidasCaja,setSalidasCaja,upsertVenta,upsertSalida,upsertCliente,upsertCaja,cupones,setCupones,upsertCupon,cuponNuevoConfig,setCuponNuevoConfig,upsertCuponNuevoConfig,promos,cfgInc,maquinas,setMaquinas,upsertMaquina,cargas,setCargas,upsertCarga,pins,eventosProduccion,setEventosProduccion,upsertEvento,productos,setProductos,upsertProducto,setKardexProductos,upsertKardexProducto,sorteos,setSorteos,upsertSorteo,setBoletosSorteo,upsertBoletoSorteo,boletosParaImprimir,setBoletosParaImprimir,depositos,setDepositos,upsertDeposito,setConteosInventario,upsertConteoInventario,ventasPerfumeReg,setVentasPerfumeReg,upsertVentaPerfume,tareasDiarias,quejas,evalConfig,calificacionesAudio,facturasMartinizing,setFacturasMartinizing,upsertFacturaMartinizing}){
   const [tab,setTab]=useState("hoy");const [busq,setBusq]=useState("");
   const [showNueva,setShowNueva]=useState(false);
   const [filtroTile,setFiltroTile]=useState(null); // 🔎 filtro rápido al tocar un contador (recibido/proceso/listo/entregado_pend)
@@ -4136,7 +4137,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         </div>
       )}
       <div style={{background:"#fff",display:"flex",overflowX:"auto",borderBottom:"2px solid #e8f0f7",position:"sticky",top:0,zIndex:10}}>
-        {[{id:"hoy",l:"📋 Ordenes",c:pendientesRaw.length},{id:"cobrar",l:"💸 Recibido",c:porCob.length},{id:"proceso",l:"🔄 En proceso",c:porProc.length},{id:"entregar",l:"📦 Listo para retirar",c:porEnt.length},{id:"clientes",l:"👥 Clientes"},...(puedeFacturarAqui?[{id:"resumen",l:"📊 Resumen"},{id:"depositosEmp",l:"🏦 Depósitos"},{id:"conteoEmp",l:"📋 Conteo inventario"}]:[]),{id:"martinizingEmp",l:"🧴 Martinizing"},{id:"tiemposEmp",l:"⏱️ Tiempos"},{id:"satisfaccionEmp",l:"😊 Satisfacción"},{id:"miEvaluacion",l:"📋 Mi Evaluación"},{id:"bonos",l:"📈 Bonos"},{id:"nueva",l:"➕ Nuevo"}].map(t=>(
+        {[{id:"hoy",l:"📋 Ordenes",c:pendientesRaw.length},{id:"cobrar",l:"💸 Recibido",c:porCob.length},{id:"proceso",l:"🔄 En proceso",c:porProc.length},{id:"entregar",l:"📦 Listo para retirar",c:porEnt.length},{id:"clientes",l:"👥 Clientes"},...(puedeFacturarAqui?[{id:"resumen",l:"📊 Resumen"},{id:"depositosEmp",l:"🏦 Depósitos"},{id:"conteoEmp",l:"📋 Conteo inventario"}]:[]),{id:"martinizingEmp",l:"🧴 Martinizing"},{id:"tiemposEmp",l:"⏱️ Tiempos"},{id:"satisfaccionEmp",l:"😊 Satisfacción"},{id:"miEvaluacion",l:"📋 Mi Evaluación"},{id:"bonos",l:"📈 Bonos"},{id:"faltantesEmp",l:"⚠️ Faltantes de caja"},...(puedeAceptarCierres(sesion,empleadas)?[{id:"revisionCierres",l:"✅ Aceptar cierres"}]:[]),{id:"nueva",l:"➕ Nuevo"}].map(t=>(
           <button key={t.id} style={{flexShrink:0,minWidth:76,padding:"12px 8px",border:"none",background:"transparent",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:tab===t.id?700:500,color:tab===t.id?"#1a3c5e":"#888",borderBottom:tab===t.id?"2px solid #4db6e4":"none",marginBottom:-2,fontSize:11,whiteSpace:"nowrap",position:"relative"}}
             onClick={()=>t.id==="nueva"?setShowNueva(true):setTab(t.id)}>
             {t.l}{t.c>0&&<span style={{position:"absolute",top:5,right:3,background:"#e53935",color:"#fff",borderRadius:10,fontSize:9,fontWeight:800,padding:"1px 4px"}}>{t.c}</span>}
@@ -4144,7 +4145,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
         ))}
       </div>
       <div style={{padding:12}}>
-        {tab!=="bonos"&&tab!=="resumen"&&tab!=="clientes"&&tab!=="depositosEmp"&&tab!=="conteoEmp"&&tab!=="miEvaluacion"&&tab!=="martinizingEmp"&&tab!=="tiemposEmp"&&tab!=="satisfaccionEmp"&&(<div style={{display:"flex",gap:8,marginBottom:12}}>
+        {tab!=="bonos"&&tab!=="faltantesEmp"&&tab!=="revisionCierres"&&tab!=="resumen"&&tab!=="clientes"&&tab!=="depositosEmp"&&tab!=="conteoEmp"&&tab!=="miEvaluacion"&&tab!=="martinizingEmp"&&tab!=="tiemposEmp"&&tab!=="satisfaccionEmp"&&(<div style={{display:"flex",gap:8,marginBottom:12}}>
           <input style={{...S.inp,flex:1}} placeholder="🔍 Buscar cliente o folio..." value={busq} onChange={e=>setBusq(e.target.value)}/>
         </div>)}
         {tab==="hoy"&&(<>
@@ -4173,7 +4174,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
           :tab==="resumen"
             ?<ResumenDia ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja}/>
           :tab==="depositosEmp"
-            ?<Depositos depositos={depositos} setDepositos={setDepositos} ventas={ventas} salidasCaja={salidasCaja} upsertDeposito={upsertDeposito}/>
+            ?<Depositos depositos={depositos} setDepositos={setDepositos} ventas={ventas} salidasCaja={salidasCaja} upsertDeposito={upsertDeposito} cajas={cajas} upsertCaja={upsertCaja} esAdmin={false} sesion={sesion}/>
           :tab==="conteoEmp"
             ?<ConteoProductos productos={productos} setConteos={setConteosInventario} upsertConteo={upsertConteoInventario} sesion={sesion}/>
           :tab==="martinizingEmp"
@@ -4184,6 +4185,10 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
             ?<SatisfaccionClientes ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta}/>
           :tab==="miEvaluacion"
             ?<EvaluacionDesempeno empleadas={empleadas} ventas={ventas} eventosProduccion={eventosProduccion} tareasDiarias={tareasDiarias} quejas={quejas} cargas={cargas} evalConfig={evalConfig||EVAL_CONFIG_DEFAULT[0]} esAdmin={false} miEmpleadaId={miEmpleadaSesionPE?.id} calificacionesAudio={calificacionesAudio} ventasPerfumeReg={ventasPerfumeReg}/>
+          :tab==="faltantesEmp"
+            ?<FaltantesCaja cajas={cajas} sesion={sesion}/>
+          :tab==="revisionCierres"
+            ?<RevisionCierres cajas={cajas} upsertCaja={upsertCaja} sesion={sesion}/>
           :tab==="clientes"
             ?<Clientes clientes={clientes} setClientes={setClientes} upsertCliente={upsertCliente} ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} esAdmin={false}/>
           :filtrados.length===0
@@ -4209,7 +4214,7 @@ function PantallaEmpleada({ventas,setVentas,clientes,setClientes,empleadas,servi
               <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e"}}>💰 Caja</div>
               <button style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:"#888"}} onClick={()=>setShowCaja(false)}>✕</button>
             </div>
-            <CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={onCierreListo} onResetCierre={onResetCierre} sesion={sesion} salidasCaja={salidasCaja} setVentas={setVentas} upsertVenta={upsertVenta} upsertCaja={upsertCaja} eventosProduccion={eventosProduccion} cargas={cargas} maquinas={maquinas}/>
+            <CierreCaja cajas={cajas} ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={onCierreListo} onResetCierre={onResetCierre} sesion={sesion} salidasCaja={salidasCaja} setVentas={setVentas} upsertVenta={upsertVenta} upsertCaja={upsertCaja} eventosProduccion={eventosProduccion} cargas={cargas} maquinas={maquinas}/>
           </div>
         </div>
       )}
@@ -9418,7 +9423,7 @@ function SalidaCaja({sesion,salidasCaja,setSalidasCaja,onClose,upsertSalida}){
 }
 
 
-function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesion,salidasCaja,setVentas,upsertVenta,upsertCaja,eventosProduccion,cargas,maquinas}){
+function CierreCaja({cajas=[],ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesion,salidasCaja,setVentas,upsertVenta,upsertCaja,eventosProduccion,cargas,maquinas}){
   const hoy=fechaHoyLocal();
   const uid=sesion?.id||"admin";
   // AK: apertura de esta sesion especifica (sessionStorage = se borra al cerrar sesion)
@@ -9434,6 +9439,13 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
   // cg SIEMPRE empieza null - nunca leer del localStorage al montar
   // Esto garantiza que cada sesion empieza con cierre limpio
   const [cg,setCg]=useState(null);
+  // 🔒 UN CIERRE POR CADA APERTURA: se puede abrir y cerrar caja varias veces al día (otro turno),
+  // pero una vez confirmado un cierre NO se puede repetir para "arreglar" el resultado. Para volver a
+  // cerrar hay que abrir caja de nuevo (nueva apertura).
+  const cierreHoyNube=(cajas||[]).find(c=>c.tipo==="cierre"&&!c.anulado&&String(c.empleadaId)===String(uid)&&(
+    (ap?.id&&c.aperturaId===ap.id)||(!ap?.id&&c.sesId&&c.sesId===sesId)
+  ));
+  const cgV=cg||cierreHoyNube||null;
   const [aEmp,setAEmp]=useState(empleadas[0]?.id||null);const [fondo,setFondo]=useState("20.00");
   // empId ya no se usa — el cierre filtra por sesion.id automaticamente
   const [bills,setBills]=useState(()=>Object.fromEntries(BILLETES.map(b=>[b,""])));
@@ -9500,7 +9512,8 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
   const dEf=parseFloat((efN-espEf).toFixed(2));
   const dTr=parseFloat((totTr-espTr).toFixed(2));
   const dTa=parseFloat((totTa-espTa).toFixed(2));
-  const dTot=parseFloat((vR-espTot).toFixed(2));
+  // 💵 Solo se cuadra el EFECTIVO — transferencias y tarjeta son informativas (se toman del sistema)
+  const dTot=dEf;
   const DB=({d})=><span style={{fontWeight:700,fontSize:13,color:d===0?"#2e7d32":d>0?"#1565c0":"#c62828"}}>{d===0?"✅ Cuadra":d>0?`+$${d.toFixed(2)}`:`⚠️ Falta $${Math.abs(d).toFixed(2)}`}</span>;
   const CD=({valor,cantidad,onChange,tipo})=>(
     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid #f0f4f8"}}>
@@ -9543,7 +9556,7 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
     const rowB=BILLETES.filter(b=>(parseFloat(d.bills[b])||0)>0).map(b=>'<div class="row"><span>$'+b+"×"+d.bills[b]+"</span><span>$"+(b*d.bills[b]).toFixed(2)+"</span></div>").join("");
     const rowM=MONEDAS.filter(m=>(parseFloat(d.coins[m])||0)>0).map(m=>'<div class="row"><span>$'+m+"×"+d.coins[m]+"</span><span>$"+(m*d.coins[m]).toFixed(2)+"</span></div>").join("");
     const resClass=d.dTot===0?"res ok":d.dTot>0?"res info":"res bad";
-    const resText=d.dTot===0?"CAJA CUADRADA":d.dTot>0?"SOBRA $"+d.dTot.toFixed(2):"FALTA $"+Math.abs(d.dTot).toFixed(2);
+    const resText=d.dTot===0?"EFECTIVO CUADRADO":d.dTot>0?"SOBRANTE $"+d.dTot.toFixed(2):"FALTANTE $"+Math.abs(d.dTot).toFixed(2)+(d.soloEfectivo?" (se descuenta a fin de mes)":"");
     const html="<html><head><title>Cierre</title><style>body{font-family:sans-serif;padding:16px;max-width:360px;margin:0 auto}h2{text-align:center;color:#1a3c5e}.row{display:flex;justify-content:space-between;margin:4px 0;font-size:13px}.div{border-top:1px dashed #ccc;margin:10px 0}.res{text-align:center;font-size:20px;font-weight:800;padding:12px;border-radius:8px;margin:12px 0}.ok{color:#2e7d32;background:#e8f5e9}.bad{color:#c62828;background:#ffebee}.info{color:#1565c0;background:#e3f2fd}</style></head><body>"
       +"<div style='text-align:center;font-size:32px'>🫧</div><h2>Lava&amp;Listo — CIERRE</h2>"
       +"<div class='div'></div>"
@@ -9556,11 +9569,12 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
       +"<div class='row'><strong>Efectivo neto</strong><strong>$"+d.efN.toFixed(2)+"</strong></div>"
       +(d.totMisSalidas>0?"<div class='row' style='color:#c62828'><span>💸 Salidas de caja</span><span>-$"+d.totMisSalidas.toFixed(2)+"</span></div><div class='row' style='color:#c62828'><strong>Efectivo esperado (neto)</strong><strong>$"+d.espEf.toFixed(2)+"</strong></div>":"")
       +"<div class='div'></div>"
-      +"<div class='row'><span>Pichincha</span><span>$"+d.tPic.toFixed(2)+"</span></div>"
-      +"<div class='row'><span>JEP</span><span>$"+d.tJep.toFixed(2)+"</span></div>"
-      +"<div class='row'><span>Tarjeta</span><span>$"+d.totTa.toFixed(2)+"</span></div>"
+      +(d.soloEfectivo
+        ?"<div class='row'><span>🏦 Transferencias (sistema)</span><span>$"+(d.totTr||0).toFixed(2)+"</span></div>"+((d.totTa||0)>0?"<div class='row'><span>💳 Tarjeta (sistema)</span><span>$"+d.totTa.toFixed(2)+"</span></div>":"")+"<div style='font-size:10px;color:#888'>Solo se cuadra el efectivo</div>"
+        :"<div class='row'><span>Pichincha</span><span>$"+d.tPic.toFixed(2)+"</span></div><div class='row'><span>JEP</span><span>$"+d.tJep.toFixed(2)+"</span></div><div class='row'><span>Tarjeta</span><span>$"+d.totTa.toFixed(2)+"</span></div>")
       +"<div class='div'></div>"
       +"<div class='"+resClass+"'>"+resText+"</div>"
+      +(d.soloEfectivo?"<div class='row'><strong>🏦 Valor a depositar</strong><strong>$"+d.efN.toFixed(2)+"</strong></div>":"")
       +"<p style='text-align:center;font-size:10px;color:#aaa'>Lava&amp;Listo · "+new Date().toLocaleString("es-MX")+"</p>"
       +"<scr"+"ipt>window.print();window.close();</"+"script></body></html>";
     w.document.write(html);
@@ -9568,7 +9582,8 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
   };
   const confirmar=()=>{
     const hoyC=fechaHoyLocal();
-    const d={id:"ci_"+hoyC+"_"+(sesion?.id||"x")+"_"+Date.now(),tipo:"cierre",dia:hoyC,empleadaId:sesion?.id,fecha:new Date().toISOString(),emp:sesion?.nombre||"",bills,coins,totEf,fd,efN,tPic:parseFloat(tPic)||0,tJep:parseFloat(tJep)||0,totTr,totTa,dEf,dTr,dTa,dTot,espEf,espEfBruto,espTr,espTa,espTot,totMisSalidas,misSalidas,nv:todosAbonos.length,tv:todosAbonos.reduce((a,ab)=>a+ab.monto,0)};
+    if(cierreHoyNube||cg){alert("Este cierre ya fue confirmado y no se puede repetir. Para otro turno, abre caja nuevamente.");return;}
+    const d={id:"ci_"+hoyC+"_"+(sesion?.id||"x")+"_"+Date.now(),tipo:"cierre",dia:hoyC,empleadaId:sesion?.id,fecha:new Date().toISOString(),emp:sesion?.nombre||"",bills,coins,totEf,fd,efN,tPic:0,tJep:0,totTr:espTr,totTa:espTa,dEf,dTr:0,dTa:0,dTot:dEf,soloEfectivo:true,aperturaId:ap?.id||null,sesId,difTipo:dEf>0?"sobrante":dEf<0?"faltante":"cuadra",estadoRevision:"pendiente",espEf,espEfBruto,espTr,espTa,espTot,totMisSalidas,misSalidas,nv:todosAbonos.length,tv:todosAbonos.reduce((a,ab)=>a+ab.monto,0)};
     try{localStorage.setItem(CK,JSON.stringify(d));}catch{}
     if(upsertCaja)upsertCaja(d); // ☁️ cierre guardado en la nube
     setCg(d);
@@ -9585,23 +9600,27 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
     setAp(d);setModo("cierre");
   };
   // Si ya hay cierre de esta sesion, mostrar resultado pero permitir nuevo cierre
-  if(cg){return(
+  if(cgV){const cg=cgV;return(
     <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#1a3c5e,#2563a8)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:20,fontFamily:"'DM Sans',sans-serif"}}>
       <div style={{background:"#fff",borderRadius:20,padding:"32px 28px",width:"100%",maxWidth:380,textAlign:"center",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}}>
         <div style={{fontSize:48,marginBottom:8}}>{cg.dTot===0?"✅":cg.dTot>0?"📈":"⚠️"}</div>
         <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,color:"#1a3c5e",marginBottom:6}}>
-          {cg.dTot===0?"¡Caja Cuadrada!":cg.dTot>0?`Sobran $${cg.dTot.toFixed(2)}`:`Faltan $${Math.abs(cg.dTot).toFixed(2)}`}
+          {cg.dTot===0?"¡Efectivo cuadrado!":cg.dTot>0?`Sobrante $${cg.dTot.toFixed(2)}`:`Faltante $${Math.abs(cg.dTot).toFixed(2)}`}
         </div>
+        {cg.dTot<0&&<div style={{fontSize:12,color:"#c62828",marginBottom:8}}>Este faltante se descontará a fin de mes. Puedes verlo en ⚠️ Faltantes de caja.</div>}
+        {cg.dTot>0&&<div style={{fontSize:12,color:"#1565c0",marginBottom:8}}>El sobrante queda registrado en el cierre y lo regulariza la administradora.</div>}
+        <div style={{fontSize:12,color:"#2e7d32",fontWeight:700,marginBottom:8}}>🔒 Cierre confirmado — no se puede volver a hacer. Para otro turno, abre caja nuevamente.</div>
         <div style={{fontSize:13,color:"#888",marginBottom:16}}>{new Date(cg.fecha).toLocaleString("es-MX")}</div>
         <div style={{background:"#f0f4f8",borderRadius:10,padding:"12px 16px",marginBottom:16,fontSize:13}}>
           <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span>💵 Efectivo neto</span><strong>${(cg.efN||0).toFixed(2)}</strong></div>
-          <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span>🏦 Transferencias</span><strong>${(cg.totTr||0).toFixed(2)}</strong></div>
-          <div style={{display:"flex",justifyContent:"space-between"}}><span>💳 Tarjeta</span><strong>${(cg.totTa||0).toFixed(2)}</strong></div>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span>🏦 Transferencias (sistema)</span><strong>${(cg.totTr||0).toFixed(2)}</strong></div>
+          {(cg.totTa||0)>0&&<div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span>💳 Tarjeta (sistema)</span><strong>${(cg.totTa||0).toFixed(2)}</strong></div>}
+          {(cg.totMisSalidas||0)>0&&<div style={{display:"flex",justifyContent:"space-between",marginBottom:4,color:"#c62828"}}><span>💸 Salidas de caja</span><strong>-${(cg.totMisSalidas||0).toFixed(2)}</strong></div>}
+          <div style={{display:"flex",justifyContent:"space-between",borderTop:"1px dashed #ccc",paddingTop:4}}><span>🏦 Valor a depositar</span><strong>${(cg.efN||0).toFixed(2)}</strong></div>
         </div>
         <button style={{width:"100%",padding:"12px",background:"#1a3c5e",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:8}} onClick={()=>imprimir(cg)}>🖨️ Reimprimir ticket</button>
         <button style={{width:"100%",padding:"12px",background:"linear-gradient(135deg,#7b1fa2,#9c27b0)",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:8}} onClick={imprimirMisTiempos}>🖨️ Reimprimir mi reporte de tiempos</button>
-        <button style={{width:"100%",padding:"12px",background:"linear-gradient(135deg,#2e7d32,#388e3c)",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:8}} onClick={()=>{setCg(null);setPaso(0);setRevisado(false);setCorreccionUsada(false);setModo("cierre");if(onResetCierre)onResetCierre();}}>🔄 Realizar otro cierre</button>
-        <button style={{width:"100%",padding:"12px",background:"linear-gradient(135deg,#c62828,#e53935)",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer"}} onClick={()=>{if(onLogout)onLogout();}}>🚪 Salir</button>
+        <button style={{width:"100%",padding:"12px",background:"linear-gradient(135deg,#c62828,#e53935)",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer"}} onClick={()=>{if(onCierreListo)onCierreListo();if(onLogout)onLogout();}}>🚪 Salir</button>
       </div>
     </div>
   );}
@@ -9625,7 +9644,7 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
         <div style={{fontSize:11,color:"#1565c0",marginTop:4}}>💡 Cuenta el efectivo físico en caja tal como está — el sistema te dirá al final si cuadra.</div>
       </div>}
       <div style={{display:"flex",gap:6,marginBottom:14,overflowX:"auto"}}>
-        {[{n:0,l:"📋 Revisión"},{n:1,l:"💵 Billetes"},{n:2,l:"🪙 Monedas"},{n:3,l:"🏦 Digital"},{n:4,l:"✅ Confirmar"}].map(p=>{
+        {[{n:0,l:"📋 Revisión"},{n:1,l:"💵 Billetes"},{n:2,l:"🪙 Monedas"},{n:4,l:"✅ Confirmar"}].map(p=>{
           const puedeSaltar=paso>p.n&&(paso<4||!correccionUsada); // 🔒 una vez llegado a Confirmar, solo se puede regresar una vez
           return(
             <div key={p.n} style={{...S.badge,background:paso>=p.n?"#1a3c5e":"#e8f0f7",color:paso>=p.n?"#fff":"#888",padding:"6px 10px",fontSize:11,whiteSpace:"nowrap",cursor:puedeSaltar?"pointer":"default"}} onClick={()=>{if(puedeSaltar){if(paso===4)setCorreccionUsada(true);setPaso(p.n);}}}>{p.n}. {p.l}</div>
@@ -9696,7 +9715,7 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
       {paso===2&&<Card title="🪙 Paso 2 — Monedas">
         {MONEDAS.map(m=><CD key={m} valor={m} cantidad={coins[m]} tipo="moneda" onChange={v=>setCoins(prev=>({...prev,[m]:v}))}/>)}
         <div style={{background:"#e8f5e9",borderRadius:8,padding:"10px",marginTop:10,display:"flex",justifyContent:"space-between"}}><span style={{fontWeight:700}}>Total efectivo:</span><span style={{fontWeight:800,fontSize:16,color:"#1a3c5e"}}>${totEf.toFixed(2)}</span></div>
-        <div style={{display:"flex",gap:8,marginTop:10}}><button style={{...S.btnC,flex:1}} onClick={()=>setPaso(1)}>← Billetes</button><button style={{...S.btnP,flex:2}} onClick={()=>setPaso(3)}>Digital →</button></div>
+        <div style={{display:"flex",gap:8,marginTop:10}}><button style={{...S.btnC,flex:1}} onClick={()=>setPaso(1)}>← Billetes</button><button style={{...S.btnP,flex:2}} onClick={()=>setPaso(4)}>Ver resultado →</button></div>
       </Card>}
       {paso===3&&<Card title="🏦 Paso 3 — Pagos digitales">
         <label style={S.lbl}>🏦 Pichincha</label><input type="number" style={{...S.inp,marginBottom:10}} placeholder="$0.00" value={tPic} onChange={e=>setTPic(e.target.value)}/>
@@ -9713,27 +9732,37 @@ function CierreCaja({ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesio
             <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#e65100"}}><span>— Fondo caja</span><span>-${fd.toFixed(2)}</span></div>
             <div style={{display:"flex",justifyContent:"space-between",fontWeight:800,color:"#1a3c5e"}}><span>Efectivo neto</span><span>${efN.toFixed(2)}</span></div>
           </div>
-          <div style={{borderTop:"1px dashed #d0dce8",paddingTop:8,marginBottom:8}}>
-            <div style={{display:"flex",justifyContent:"space-between",fontSize:13}}><span>🏦 Pichincha</span><strong>${(parseFloat(tPic)||0).toFixed(2)}</strong></div>
-            <div style={{display:"flex",justifyContent:"space-between",fontSize:13}}><span>🏦 JEP</span><strong>${(parseFloat(tJep)||0).toFixed(2)}</strong></div>
-            <div style={{display:"flex",justifyContent:"space-between",fontSize:13}}><span>💳 Tarjeta</span><strong>${totTa.toFixed(2)}</strong></div>
-          </div>
-          <div style={{borderTop:"2px solid #1a3c5e",paddingTop:8}}>
-            {[{l:"💵 Efectivo",c:efN,e:espEf,d:dEf},{l:"🏦 Transferencias",c:totTr,e:espTr,d:dTr},{l:"💳 Tarjeta",c:totTa,e:espTa,d:dTa}].map(r=>(
+          {false&&<div style={{borderTop:"1px dashed #d0dce8",paddingTop:8,marginBottom:8}}>
+            <div style={{fontSize:11,color:"#888",fontWeight:700,marginBottom:2}}>RESUMEN DE VENTAS (del sistema)</div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:13}}><span>💵 Efectivo de ventas</span><strong>${espEfBruto.toFixed(2)}</strong></div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:13}}><span>🏦 Transferencias</span><strong>${espTr.toFixed(2)}</strong></div>
+            {espTa>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:13}}><span>💳 Tarjeta</span><strong>${espTa.toFixed(2)}</strong></div>}
+            {misSalidas.map(s=><div key={s.id} style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#c62828"}}><span>💸 {s.motivo||"Salida de caja"}</span><span>-${(s.monto||0).toFixed(2)}</span></div>)}
+            {totMisSalidas>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:13,color:"#c62828"}}><strong>Total salidas de caja</strong><strong>-${totMisSalidas.toFixed(2)}</strong></div>}
+            <div style={{fontSize:11,color:"#888",marginTop:4}}>Las transferencias no se cuadran: solo se cuenta el efectivo.</div>
+          </div>}
+          {false&&<div style={{borderTop:"2px solid #1a3c5e",paddingTop:8}}>
+            {[{l:"💵 Efectivo",c:efN,e:espEf,d:dEf}].map(r=>(
               <div key={r.l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderBottom:"1px solid #f0f4f8"}}>
                 <div><div style={{fontSize:13,fontWeight:600}}>{r.l}</div><div style={{fontSize:11,color:"#888"}}>Contado ${r.c.toFixed(2)} / Esperado ${r.e.toFixed(2)}</div></div>
                 <DB d={r.d}/>
               </div>
             ))}
+          </div>}
+          <div style={{background:"#f0f4f8",borderRadius:10,padding:12,marginTop:10,textAlign:"center",fontSize:13,color:"#1a3c5e"}}>
+            🔒 El resultado (si cuadra, sobra o falta) se mostrará <strong>después de confirmar</strong>. Revisa bien tu conteo.
           </div>
-          <div style={{background:dTot===0?"#e8f5e9":dTot>0?"#e3f2fd":"#ffebee",borderRadius:10,padding:14,marginTop:10,textAlign:"center"}}>
-            <div style={{fontSize:22,fontWeight:800,color:dTot===0?"#2e7d32":dTot>0?"#1565c0":"#c62828"}}>{dTot===0?"✅ CAJA CUADRADA":dTot>0?`📈 SOBRA $${dTot.toFixed(2)}`:`⚠️ FALTA $${Math.abs(dTot).toFixed(2)}`}</div>
-          </div>
+          {false&&          <div style={{background:dTot===0?"#e8f5e9":dTot>0?"#e3f2fd":"#ffebee",borderRadius:10,padding:14,marginTop:10,textAlign:"center"}}>
+            <div style={{fontSize:22,fontWeight:800,color:dTot===0?"#2e7d32":dTot>0?"#1565c0":"#c62828"}}>{dTot===0?"✅ EFECTIVO CUADRADO":dTot>0?`📈 SOBRANTE $${dTot.toFixed(2)}`:`⚠️ FALTANTE $${Math.abs(dTot).toFixed(2)}`}</div>
+            {dTot<0&&<div style={{fontSize:12,color:"#c62828",marginTop:4}}>El faltante queda registrado y se descontará a fin de mes.</div>}
+            {dTot>0&&<div style={{fontSize:12,color:"#1565c0",marginTop:4}}>El sobrante queda registrado en el cierre tal como está.</div>}
+            <div style={{fontSize:14,fontWeight:700,color:"#1a3c5e",marginTop:6}}>🏦 Valor a depositar: ${efN.toFixed(2)}</div>
+          </div>}
         </Card>
-        <div style={{background:"#fff3e0",borderRadius:8,padding:"10px 14px",marginBottom:10,fontSize:13,color:"#e65100"}}>⚠️ Al confirmar <strong>no podras modificarlo</strong> y la sesion se cerrara.</div>
+        <div style={{background:"#fff3e0",borderRadius:8,padding:"10px 14px",marginBottom:10,fontSize:13,color:"#e65100"}}>⚠️ Al confirmar verás el resultado. <strong>No podrás volver a hacer este cierre</strong> y la sesión se cerrará.</div>
         <div style={{display:"flex",gap:8}}>
           {!correccionUsada
-            ?<button style={{...S.btnC,flex:1}} onClick={()=>{setCorreccionUsada(true);setPaso(3);}}>← Corregir (única vez)</button>
+            ?<button style={{...S.btnC,flex:1}} onClick={()=>{setCorreccionUsada(true);setPaso(1);}}>← Corregir (única vez)</button>
             :<button style={{...S.btnC,flex:1,opacity:0.5,cursor:"not-allowed"}} onClick={()=>alert("Ya usaste tu única corrección — no se puede volver a editar. Si algo está mal, avísale a la administradora después de confirmar.")}>🔒 Ya no puedes corregir</button>
           }
           <button style={{...S.btnP,flex:2,background:"linear-gradient(135deg,#2e7d32,#388e3c)"}} onClick={confirmar}>✅ Confirmar e imprimir</button>
@@ -11207,12 +11236,12 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
     empleadas={empleadas}
     upsertCaja={upsertCaja}
   />;
-  if(!esAdmin)return <PantallaEmpleada ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={serviciosActivos} sesion={sesion} addAbono={addAbono} onLogout={onLogout} onIrProduccion={()=>setVista("produccion")} onIrTareas={()=>setVista("tareas")} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} upsertVenta={upsertVenta} upsertSalida={upsertSalida} upsertCliente={upsertCliente} upsertCaja={upsertCaja} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} cuponNuevoConfig={cuponNuevoConfig} setCuponNuevoConfig={setCuponNuevoConfig} upsertCuponNuevoConfig={upsertCuponNuevoConfig} promos={promos} cfgInc={cfgInc} maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga} pins={pins} eventosProduccion={eventosProduccion} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto} sorteos={sorteos} setSorteos={setSorteos} upsertSorteo={upsertSorteo} setBoletosSorteo={setBoletosSorteo} upsertBoletoSorteo={upsertBoletoSorteo} boletosParaImprimir={boletosParaImprimir} setBoletosParaImprimir={setBoletosParaImprimir} depositos={depositos} setDepositos={setDepositos} upsertDeposito={upsertDeposito} setConteosInventario={setConteosInventario} upsertConteoInventario={upsertConteoInventario} ventasPerfumeReg={ventasPerfumeReg} setVentasPerfumeReg={setVentasPerfumeReg} upsertVentaPerfume={upsertVentaPerfume} tareasDiarias={tareasDiarias} quejas={quejas} evalConfig={evalConfig} calificacionesAudio={calificacionesAudio} facturasMartinizing={facturasMartinizing} setFacturasMartinizing={setFacturasMartinizing} upsertFacturaMartinizing={upsertFacturaMartinizing}/>;
+  if(!esAdmin)return <PantallaEmpleada cajas={cajas} ventas={ventas} setVentas={setVentas} clientes={clientes} setClientes={setClientes} empleadas={empleadas} servicios={serviciosActivos} sesion={sesion} addAbono={addAbono} onLogout={onLogout} onIrProduccion={()=>setVista("produccion")} onIrTareas={()=>setVista("tareas")} cierreListo={cierreOk} onCierreListo={handleCierreListo} onResetCierre={()=>{setCierreOk(false);setEsperandoApertura(true);}} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} upsertVenta={upsertVenta} upsertSalida={upsertSalida} upsertCliente={upsertCliente} upsertCaja={upsertCaja} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} cuponNuevoConfig={cuponNuevoConfig} setCuponNuevoConfig={setCuponNuevoConfig} upsertCuponNuevoConfig={upsertCuponNuevoConfig} promos={promos} cfgInc={cfgInc} maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga} pins={pins} eventosProduccion={eventosProduccion} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} productos={productos} setProductos={setProductos} upsertProducto={upsertProducto} setKardexProductos={setKardexProductos} upsertKardexProducto={upsertKardexProducto} sorteos={sorteos} setSorteos={setSorteos} upsertSorteo={upsertSorteo} setBoletosSorteo={setBoletosSorteo} upsertBoletoSorteo={upsertBoletoSorteo} boletosParaImprimir={boletosParaImprimir} setBoletosParaImprimir={setBoletosParaImprimir} depositos={depositos} setDepositos={setDepositos} upsertDeposito={upsertDeposito} setConteosInventario={setConteosInventario} upsertConteoInventario={upsertConteoInventario} ventasPerfumeReg={ventasPerfumeReg} setVentasPerfumeReg={setVentasPerfumeReg} upsertVentaPerfume={upsertVentaPerfume} tareasDiarias={tareasDiarias} quejas={quejas} evalConfig={evalConfig} calificacionesAudio={calificacionesAudio} facturasMartinizing={facturasMartinizing} setFacturasMartinizing={setFacturasMartinizing} upsertFacturaMartinizing={upsertFacturaMartinizing}/>;
   const tabs=[
     {id:"ventas",icon:"🧾",l:"Venta"},{id:"historial",icon:"📋",l:"Historial"},
     {id:"pendientes",icon:"⏳",l:"Pendientes",b:pCount},{id:"bi",icon:"🚀",l:"Dashboard"},
     {id:"clientes",icon:"👥",l:"Clientes"},{id:"clientesAnalisis",icon:"📊",l:"Análisis clientes"},{id:"promosAdmin",icon:"🎁",l:"Promos"},{id:"cupones",icon:"🎟️",l:"Cupones"},{id:"campanas",icon:"📣",l:"Campañas"},{id:"resumen",icon:"📈",l:"Resumen día"},{id:"satisfaccionAdmin",icon:"😊",l:"Satisfacción"},
-    {id:"reportes",icon:"📊",l:"Reportes"},{id:"depositos",icon:"🏦",l:"Depósitos"},
+    {id:"reportes",icon:"📊",l:"Reportes"},{id:"depositos",icon:"🏦",l:"Depósitos"},{id:"revisionCierres",icon:"✅",l:"Aceptar cierres"},
     {id:"conciliacion",icon:"🏛️",l:"Conciliación"},{id:"conciliacionBanco",icon:"🏦",l:"Concil. bancaria"},
     {id:"gastos",icon:"🛒",l:"Gastos"},{id:"martinizingAdmin",icon:"🧴",l:"Martinizing"},{id:"inventario",icon:"📦",l:"Inventario"},{id:"comprasInsumos",icon:"🧾",l:"Compra de insumos"},{id:"productosAdmin",icon:"🛍️",l:"Productos"},{id:"kardexAdmin",icon:"📒",l:"Kardex"},{id:"conteosAdmin",icon:"📋",l:"Conteos"},{id:"activosFijosAdmin",icon:"📦",l:"Activos Fijos"},{id:"deudasAdmin",icon:"💳",l:"Deudas"},{id:"sorteoAdmin",icon:"🎟️",l:"Sorteo"},
     {id:"equipo",icon:"👩",l:"Equipo"},{id:"incentivosAdmin",icon:"🎯",l:"Incentivos"},{id:"maquinasAdmin",icon:"🏭",l:"Máquinas"},{id:"reporteMaquinasAdmin",icon:"⏱️",l:"Uso de máquinas"},{id:"tiemposRopaAdmin",icon:"👕",l:"Tiempos x Servicio"},{id:"pinsAdmin",icon:"🔒",l:"PINs"},{id:"produccionAdmin",icon:"🧺",l:"Producción"},{id:"tareasAdmin",icon:"📋",l:"Tareas"},{id:"notasAdmin",icon:"📝",l:"Notas"},{id:"evaluacionAdmin",icon:"📋",l:"Evaluación"},{id:"calificacionManualAdmin",icon:"🎧",l:"Calificación manual"},{id:"evaluacionConfigAdmin",icon:"⚙️",l:"Config. Evaluación"},
@@ -11220,7 +11249,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
   ];
   // 🗂️ Agrupa las pestañas en categorías para que el panel admin se vea más ordenado (menos scroll horizontal, todo lo relacionado junto)
   const CATEGORIAS=[
-    {id:"ventas_caja",icon:"🧾",l:"Ventas",tabIds:["ventas","historial","pendientes","depositos","conciliacion","conciliacionBanco","cupones","promosAdmin","reportes","resumen","satisfaccionAdmin"]},
+    {id:"ventas_caja",icon:"🧾",l:"Ventas",tabIds:["ventas","historial","pendientes","depositos","revisionCierres","conciliacion","conciliacionBanco","cupones","promosAdmin","reportes","resumen","satisfaccionAdmin"]},
     {id:"personal",icon:"👥",l:"Personal",tabIds:["equipo","pinsAdmin","usuarios","tareasAdmin","notasAdmin","incentivosAdmin","evaluacionAdmin","calificacionManualAdmin","evaluacionConfigAdmin","reporteMaquinasAdmin","tiemposRopaAdmin","rolesPago","obligaciones","repartoSocias"]},
     {id:"inventario_cat",icon:"📦",l:"Inventario",tabIds:["inventario","comprasInsumos","productosAdmin","kardexAdmin","conteosAdmin","gastos","martinizingAdmin","maquinasAdmin","activosFijosAdmin","deudasAdmin"]},
     {id:"negocio",icon:"📊",l:"Negocio",tabIds:["bi","clientes","clientesAnalisis","campanas","sorteoAdmin","produccionAdmin","config"]},
@@ -11274,7 +11303,8 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
       {tab==="resumen"&&<ResumenDia ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja}/>}
       {tab==="satisfaccionAdmin"&&<SatisfaccionClientes ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta}/>}
       {tab==="reportes"&&<Reportes ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja}/>}
-      {tab==="depositos"&&<Depositos depositos={depositos} setDepositos={setDepositos} ventas={ventas} salidasCaja={salidasCaja} upsertDeposito={upsertDeposito}/>}
+      {tab==="depositos"&&<Depositos depositos={depositos} setDepositos={setDepositos} ventas={ventas} salidasCaja={salidasCaja} upsertDeposito={upsertDeposito} cajas={cajas} upsertCaja={upsertCaja} esAdmin={true} sesion={sesion}/>}
+      {tab==="revisionCierres"&&<RevisionCierres cajas={cajas} upsertCaja={upsertCaja} sesion={sesion}/>}
       {tab==="conciliacion"&&<Conciliacion ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} depositos={depositos} setDepositos={setDepositos} upsertDeposito={upsertDeposito}/>}
       {tab==="conciliacionBanco"&&<ConciliacionBancaria ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} depositos={depositos} setDepositos={setDepositos} upsertDeposito={upsertDeposito} gastos={gastos} setGastos={setGastos} upsertGasto={upsertGasto} empleadas={empleadas} rolesPago={rolesPago} estadosCuenta={estadosCuenta} setEstadosCuenta={setEstadosCuenta} upsertEstadoCuenta={upsertEstadoCuenta} sesion={sesion}/>}
       {tab==="gastos"&&<Gastos compras={comprasInsumos} setCompras={setComprasInsumos} upsertCompra={upsertCompraInsumo} empleadas={empleadas} rolesPago={rolesPago} gastosFijosConfig={gastosFijosConfig} setGastosFijosConfig={setGastosFijosConfig} upsertGastosFijosConfig={upsertGastosFijosConfig} gastos={gastos} setGastos={setGastos} sesion={sesion} upsertGasto={upsertGasto} salidasCaja={salidasCaja} activosFijos={activosFijos} setActivosFijos={setActivosFijos} upsertActivoFijo={upsertActivoFijo} inventario={inventario} setInventario={setInventario} upsertInventario={upsertInventario} kardexInsumos={kardexInsumos} setKardexInsumos={setKardexInsumos} upsertKardexInsumo={upsertKardexInsumo}/>}
@@ -11301,7 +11331,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
       {tab==="evaluacionConfigAdmin"&&<EvaluacionConfigAdmin evalConfig={evalConfig} setEvalConfigArr={setEvalConfigArr} upsertEvalConfig={upsertEvalConfig}/>}
       {tab==="reporteMaquinasAdmin"&&<ReporteMaquinas cargas={cargas} maquinas={maquinas} ventas={ventas} evalConfig={evalConfig}/>}
       {tab==="tiemposRopaAdmin"&&<TiemposRopaAdmin ventas={ventas} eventosProduccion={eventosProduccion} cargas={cargas} maquinas={maquinas} empleadas={empleadas}/>}
-      {tab==="caja"&&<CierreCaja ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={handleCierreListo} onResetCierre={()=>setCierreOk(false)} sesion={sesion} salidasCaja={salidasCaja} setVentas={setVentas} upsertVenta={upsertVenta} upsertCaja={upsertCaja} eventosProduccion={eventosProduccion} cargas={cargas} maquinas={maquinas}/>}
+      {tab==="caja"&&<CierreCaja cajas={cajas} ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={handleCierreListo} onResetCierre={()=>setCierreOk(false)} sesion={sesion} salidasCaja={salidasCaja} setVentas={setVentas} upsertVenta={upsertVenta} upsertCaja={upsertCaja} eventosProduccion={eventosProduccion} cargas={cargas} maquinas={maquinas}/>}
       {tab==="config"&&<Configuracion servicios={servicios} setServicios={setServicios} exportarDatos={exportarDatos} importarDatos={importarDatos} upsertVenta={upsertVenta} upsertServicio={upsertServicio}/>}
       {tab==="usuarios"&&<GestionUsuarios/>}
       {tab==="rolesPago"&&<RolesDePago empleadas={empleadas} setEmpleadas={setEmpleadas} upsertEmpleada={upsertEmpleada} ventas={ventas} rolesPago={rolesPago} setRolesPago={setRolesPago} upsertRolPago={upsertRolPago} rolesConfig={rolesConfig} setRolesConfig={setRolesConfig} upsertRolesConfig={upsertRolesConfig} sesion={sesion}/>}
@@ -11496,7 +11526,7 @@ function ResumenDia({ventas,empleadas,salidasCaja}){
 
 
 // ─── DEPÓSITOS ─────────────────────────────────────────────────────
-function Depositos({depositos,setDepositos,ventas,salidasCaja,upsertDeposito}){
+function Depositos({depositos,setDepositos,ventas,salidasCaja,upsertDeposito,cajas=[],upsertCaja,esAdmin=false,sesion}){
   const hoy=fechaHoyLocal();
   const [mesVer,setMesVer]=useState(mesK(new Date()));
   const [formDia,setFormDia]=useState(null); // dia seleccionado para ingresar deposito
@@ -11599,6 +11629,7 @@ function Depositos({depositos,setDepositos,ventas,salidasCaja,upsertDeposito}){
                   <div style={{background:"#f0f4f8",color:"#888",padding:"4px 10px",borderRadius:8,fontSize:12}}>{datos.ventas.length} venta{datos.ventas.length!==1?"s":""}</div>
                 </div>
 
+                <DiferenciasCierreDia dia={dia} cajas={cajas} upsertCaja={upsertCaja} esAdmin={esAdmin} sesion={sesion}/>
                 {/* DEPÓSITOS REGISTRADOS */}
                 {deps.length>0&&(
                   <div style={{marginBottom:10}}>
