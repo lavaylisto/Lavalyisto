@@ -600,6 +600,12 @@ const EMO = {
   corazon:"\u{1F499}", pin:"\u{1F4CD}", fiesta:"\u{1F389}", brillo:"\u2728",
   hora:"\u{1F550}"
 };
+// 🧴 Un artículo es "producto" (no pasa por producción) si está marcado como producto o es un aromatizador/perfume suelto
+const esItemProducto=it=>!!(it&&(it.esProducto||/AROMATIZ|\bPERFUME\b/i.test(String(it.label||it.lC||""))));
+// ✅ ¿La orden ya tiene la revisión de prendas real? (no cuenta si solo se agregaron extras después)
+const revisadoV=v=>!!(v?.clasificacion&&!v.clasificacion._soloExtras);
+// 🧾 Extras (restregado / artículos) que aún esperan respuesta del cliente o no se han avisado
+const extrasPendientes=v=>(v?.clasificacion?.serviciosAdicionales||[]).filter(s=>!s.estado||s.estado==="pendiente_confirmar").length+(v?.clasificacion?.restregadoEstado==="pendiente_confirmar"?1:0);
 const msgWa = (v, tipo) => {
   const L = "\u2501".repeat(15);
   const E = EMO;
@@ -621,7 +627,12 @@ const msgWa = (v, tipo) => {
   // 🧾 Servicios adicionales encontrados (zapatos, sábanas, peluches, etc.) ya resueltos con el cliente
   const decididos=(v.clasificacion?.serviciosAdicionales||[]).filter(s=>s.estado==="autorizado"||s.estado==="rechazado");
   const adicionalesLinea=decididos.length>0?`\n${decididos.map(s=>s.estado==="autorizado"?`${E.item} *Incluye ${s.descripcion} autorizado:* $${s.costo.toFixed(2)}`:`${E.item} *${s.descripcion}:* no autorizado por el cliente`).join("\n")}\n${L}`:"";
-  return `${E.burbuja} *LAVA & LISTO* ${E.burbuja}\n_Lavanderia & Limpieza Especializada_\n${L}\n¡Hola *${v.clienteNombre}*! ${E.fiesta}\n\nTu pedido *${v.folio}* ya esta\n${E.brillo} *LISTO PARA RETIRAR* ${E.brillo}\n${L}${restregadoLinea}${adicionalesLinea}${objetosLinea}${pend>0?`\n${E.reloj} *Saldo al retirar:* $${pend.toFixed(2)}\n${L}`:""}\n${E.hora} Te esperamos en nuestro local\n¡Gracias por tu preferencia! ${E.corazon}\n${E.pin} Ricaurte, Cuenca`;
+  // 🛍️ Número de fundas y 📝 nota para el cliente (ej. mancha que no salió, cobro adicional)
+  const nFundas=v._numFundas!=null?v._numFundas:v.msgListo?.numFundas;
+  const notaCli=(v._notaCliente!=null?v._notaCliente:v.msgListo?.notaCliente)||"";
+  const fundasLinea=nFundas!=null&&nFundas!==""?`\n🛍️ *Número de fundas:* ${nFundas}\n${L}`:"";
+  const notaLinea=notaCli.trim()?`\n📝 *Nota importante:* ${notaCli.trim()}\n${L}`:"";
+  return `${E.burbuja} *LAVA & LISTO* ${E.burbuja}\n_Lavanderia & Limpieza Especializada_\n${L}\n¡Hola *${v.clienteNombre}*! ${E.fiesta}\n\nTu pedido *${v.folio}* ya esta\n${E.brillo} *LISTO PARA RETIRAR* ${E.brillo}\n${L}${fundasLinea}${notaLinea}${restregadoLinea}${adicionalesLinea}${objetosLinea}${pend>0?`\n${E.reloj} *Saldo al retirar:* $${pend.toFixed(2)}\n${L}`:""}\n${E.hora} Te esperamos en nuestro local\n¡Gracias por tu preferencia! ${E.corazon}\n${E.pin} Ricaurte, Cuenca`;
 };
 
 // ===== Cumpleaños =====
@@ -674,9 +685,15 @@ const waCumpleUrl=c=>{
 // Si el cliente no tiene teléfono válido, se registra la excepción con motivo.
 function WhatsAppObligatorio({venta,tipo,onConfirm,onCancel}){
   const [abierto,setAbierto]=useState(false);
+  const esListo=tipo==="listo";
+  const [fundas,setFundas]=useState(venta.msgListo?.numFundas!=null?String(venta.msgListo.numFundas):"");
+  const [notaCli,setNotaCli]=useState(venta.msgListo?.notaCliente||"");
+  const fundasOk=!esListo||(fundas!==""&&!isNaN(parseInt(fundas))&&parseInt(fundas)>=0);
   const tel=telWa(venta.clienteTel);
-  const msg=msgWa(venta,tipo);
-  const abrir=()=>{window.open(`https://api.whatsapp.com/send/?phone=${tel}&text=${encodeURIComponent(msg)}`,"_blank");setAbierto(true);};
+  const msg=msgWa(esListo?{...venta,_numFundas:fundas===""?null:parseInt(fundas),_notaCliente:notaCli}:venta,tipo);
+  const extraInfo=esListo?{numFundas:parseInt(fundas),notaCliente:notaCli.trim()}:{};
+  const NOTAS_RAP=["No salió por completo la mancha de ","Se cobrará un valor adicional de $"," por ","El zapato tenía la mancha de "," que no se pudo retirar"];
+  const abrir=()=>{if(!fundasOk){alert("Escribe el número de fundas del cliente");return;}window.open(`https://api.whatsapp.com/send/?phone=${tel}&text=${encodeURIComponent(msg)}`,"_blank");setAbierto(true);};
   return(
     <div style={S.ov}>
       <div style={S.tbox}>
@@ -692,13 +709,27 @@ function WhatsAppObligatorio({venta,tipo,onConfirm,onCancel}){
         {tel
           ? <div style={S.trow}><span>WhatsApp</span><strong style={{color:"#2e7d32"}}>+{tel}</strong></div>
           : <div style={{...S.err,marginTop:8}}>⚠️ El cliente no tiene un número de WhatsApp válido registrado.</div>}
+        {esListo&&(
+          <div style={{background:"#f8fbfd",border:"1.5px solid #d0dce8",borderRadius:10,padding:10,marginTop:10}}>
+            <label style={{...S.lbl,color:fundasOk?"#1a3c5e":"#c62828"}}>🛍️ Número de fundas del cliente *</label>
+            <input type="number" min="0" style={{...S.inp,fontSize:18,fontWeight:700,marginBottom:8}} placeholder="Ej: 2" value={fundas} onChange={e=>{setFundas(e.target.value);setAbierto(false);}}/>
+            <label style={S.lbl}>📝 Nota para el cliente (opcional)</label>
+            <textarea rows={2} style={{...S.inp,fontSize:13}} placeholder="Ej: No salió por completo la mancha de café del zapato izquierdo" value={notaCli} onChange={e=>{setNotaCli(e.target.value);setAbierto(false);}}/>
+            <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4}}>
+              {["No salió por completo la mancha de ","Se cobrará un valor adicional de $ por ","El zapato tenía una mancha que no se pudo retirar: "].map(t=>(
+                <button key={t} style={{...S.btnS,fontSize:10,padding:"3px 7px"}} onClick={()=>{setNotaCli(n=>(n?n+" ":"")+t);setAbierto(false);}}>+ {t.trim()}</button>
+              ))}
+            </div>
+            {!fundasOk&&<div style={{fontSize:11,color:"#c62828",marginTop:6,fontWeight:600}}>Escribe el número de fundas para poder enviar el mensaje.</div>}
+          </div>
+        )}
         <div style={{background:"#f0f4f8",borderRadius:10,padding:"10px 12px",fontSize:12,color:"#555",whiteSpace:"pre-wrap",margin:"10px 0",maxHeight:160,overflowY:"auto"}}>{msg}</div>
         {tel&&(<>
           <button style={{width:"100%",padding:"12px",background:"linear-gradient(135deg,#25d366,#128c7e)",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:8}} onClick={abrir}>📲 Abrir WhatsApp con el mensaje</button>
-          <button disabled={!abierto} style={{width:"100%",padding:"12px",background:abierto?"linear-gradient(135deg,#2e7d32,#388e3c)":"#e0e0e0",color:abierto?"#fff":"#999",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:abierto?"pointer":"not-allowed",marginBottom:8}} onClick={()=>onConfirm({enviado:true,fecha:new Date().toISOString()})}>✅ Ya envié el mensaje</button>
+          <button disabled={!abierto} style={{width:"100%",padding:"12px",background:abierto?"linear-gradient(135deg,#2e7d32,#388e3c)":"#e0e0e0",color:abierto?"#fff":"#999",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:abierto?"pointer":"not-allowed",marginBottom:8}} onClick={()=>{if(!fundasOk){alert("Escribe el número de fundas del cliente");return;}onConfirm({enviado:true,fecha:new Date().toISOString(),...extraInfo});}}>✅ Ya envié el mensaje</button>
           {!abierto&&<div style={{fontSize:11,color:"#888",textAlign:"center",marginBottom:8}}>Primero abre WhatsApp y envía el mensaje para poder confirmar.</div>}
         </>)}
-        {!tel&&<button style={{width:"100%",padding:"12px",background:"#fff3e0",color:"#e65100",border:"1.5px solid #e65100",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",marginBottom:8}} onClick={()=>{const m=window.prompt("Motivo (ej: cliente sin celular, se avisará por llamada):");if(m===null)return;onConfirm({enviado:false,sinTelefono:true,motivo:m,fecha:new Date().toISOString()});}}>⚠️ Continuar sin WhatsApp (registrar motivo)</button>}
+        {!tel&&<button style={{width:"100%",padding:"12px",background:"#fff3e0",color:"#e65100",border:"1.5px solid #e65100",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",marginBottom:8}} onClick={()=>{const m=window.prompt("Motivo (ej: cliente sin celular, se avisará por llamada):");if(m===null)return;if(!fundasOk){alert("Escribe el número de fundas del cliente");return;}onConfirm({enviado:false,sinTelefono:true,motivo:m,fecha:new Date().toISOString(),...extraInfo});}}>⚠️ Continuar sin WhatsApp (registrar motivo)</button>}
         {onCancel&&<button style={{width:"100%",padding:"10px",background:"transparent",color:"#888",border:"1px solid #d0dce8",borderRadius:10,fontSize:13,cursor:"pointer"}} onClick={onCancel}>Cancelar</button>}
       </div>
     </div>
@@ -769,7 +800,7 @@ const expCSVProduccion=(desde,hasta,{cargas,eventosProduccion,ventas,empleadas},
   const enRango=iso=>{if(!iso)return false;const d=fechaLocal(iso);return d>=desde&&d<=hasta;};
   const filasRaw=[]; // [tsISO, folio(s), cliente(s), tipo, maquina, minProgramados, duracionMin, empIni, empFin, obs]
 
-  ventas.filter(v=>v.clasificacion&&enRango(v.clasificacion.timestamp)).forEach(v=>{
+  ventas.filter(v=>revisadoV(v)&&enRango(v.clasificacion.timestamp)).forEach(v=>{
     const c=v.clasificacion;
     const obs=[c.objetosEncontrados?`Objetos: ${c.objetosEncontrados}`:"",c.manchasDetectadas?"Manchas":"",c.requiereRestregado?`Restregado extra $${(c.restregadoCosto||0).toFixed(2)}`:""].filter(Boolean).join(" · ");
     filasRaw.push([c.timestamp,v.folio,v.clienteNombre||"","Revisión","-","-","-",nombreDe(c.empleadaId),"-",obs]);
@@ -1607,16 +1638,109 @@ function TareasScreen({sesion,onVolver,onIrFacturacion,onIrProduccion,onLogout,t
 }
 
 // OrdenCard es componente SEPARADO (no dentro de map ni de PantallaEmpleada)
+
+// ➕ EXTRA EN CUALQUIER ETAPA: restregado extra u otro artículo que aparece después de crear la orden
+// (incluso secando o doblando). Siempre obliga a avisar al cliente por WhatsApp y luego marcar Autorizó / Rechazó.
+const guardarVentaFn=(setVentas,upsertVenta,folio,fn)=>setVentas(prev=>{
+  const next=prev.map(vv=>vv.folio===folio?fn(vv):vv);
+  const updated=next.find(vv=>vv.folio===folio);
+  if(updated&&upsertVenta)upsertVenta({...updated,_updatedAt:new Date().toISOString()});
+  return next;
+});
+const resolverExtra=(v,itemId,autorizado,setVentas,upsertVenta)=>{
+  const item=(v.clasificacion?.serviciosAdicionales||[]).find(s=>s.id===itemId);
+  if(!item)return;
+  guardarVentaFn(setVentas,upsertVenta,v.folio,vv=>{
+    const sa=(vv.clasificacion?.serviciosAdicionales||[]).map(s=>s.id===itemId?{...s,estado:autorizado?"autorizado":"rechazado",confirmadoEn:new Date().toISOString()}:s);
+    if(autorizado){
+      const nuevoItem={servId:null,custom:true,piezas:1,label:`🧾 ${item.descripcion} (autorizado)`,lC:`🧾 ${item.descripcion} (autorizado)`,precio:item.costo,pC:item.costo.toFixed(2)};
+      return{...vv,items:[...(vv.items||[]),nuevoItem],total:(vv.total||0)+item.costo,clasificacion:{...vv.clasificacion,serviciosAdicionales:sa}};
+    }
+    const notaTxt=`🧾 ${item.descripcion} rechazado por el cliente (hubiera costado $${item.costo.toFixed(2)})`;
+    return{...vv,notas:[vv.notas,notaTxt].filter(Boolean).join(" · "),clasificacion:{...vv.clasificacion,serviciosAdicionales:sa}};
+  });
+};
+function AgregarExtraModal({v,setVentas,upsertVenta,sesion,onClose}){
+  const [tipo,setTipo]=useState("restregado");
+  const [desc,setDesc]=useState("");
+  const [costo,setCosto]=useState("");
+  const [err,setErr]=useState("");
+  const tel=telWa(v.clienteTel);
+  const descripcion=tipo==="restregado"?("Restregado extra"+(desc.trim()?` (${desc.trim()})`:"")):desc.trim();
+  const msg=`🫧 *LAVA & LISTO* 🫧\n\n¡Hola *${v.clienteNombre}*! 👋\nAl revisar tu orden *${v.folio}* encontramos que ${tipo==="restregado"?"necesita un restregado extra por manchas difíciles":"hay un artículo adicional que no venía en tu pedido"}:\n\n🔹 ${descripcion}: $${(parseFloat(costo)||0).toFixed(2)}\n\n¿Nos autorizas? Contéstanos por este medio. ¡Gracias! 💙`;
+  const guardar=()=>{
+    if(tipo==="otro"&&!desc.trim()){setErr("Describe el artículo adicional");return;}
+    const c=parseFloat(costo);
+    if(!(c>0)){setErr("Escribe el costo del extra");return;}
+    let sinTel=null;
+    if(tel){window.open(`https://api.whatsapp.com/send/?phone=${tel}&text=${encodeURIComponent(msg)}`,"_blank");}
+    else{const m=window.prompt("El cliente no tiene WhatsApp válido. ¿Cómo se le avisará? (ej: llamada)");if(m===null)return;if(!m.trim()){setErr("Escribe cómo se avisará al cliente");return;}sinTel=m.trim();}
+    const extra={id:"sa_"+Date.now(),descripcion,costo:c,tipoExtra:tipo,posterior:true,etapa:v.estado||"recibido",agregadoEn:new Date().toISOString(),agregadoPor:sesion?.nombre||"",estado:"pendiente_confirmar",avisadoEn:new Date().toISOString(),avisoSinWhatsApp:sinTel};
+    guardarVentaFn(setVentas,upsertVenta,v.folio,vv=>({...vv,clasificacion:{...(vv.clasificacion||{_soloExtras:true}),serviciosAdicionales:[...(vv.clasificacion?.serviciosAdicionales||[]),extra]}}));
+    onClose();
+  };
+  return(
+    <div style={S.ov}>
+      <div style={S.tbox}>
+        <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e",marginBottom:4}}>➕ Agregar extra a la orden</div>
+        <div style={{fontSize:12,color:"#888",marginBottom:10}}>{v.clienteNombre} · {v.folio} · etapa: {getEst(v).label}</div>
+        <div style={{display:"flex",gap:6,marginBottom:10}}>
+          <button style={{...S.pill,...(tipo==="restregado"?S.pillA:{})}} onClick={()=>setTipo("restregado")}>🧽 Restregado extra</button>
+          <button style={{...S.pill,...(tipo==="otro"?S.pillA:{})}} onClick={()=>setTipo("otro")}>🧾 Otro artículo</button>
+        </div>
+        <label style={S.lbl}>{tipo==="restregado"?"Detalle (opcional, ej: zapato blanco, mancha de grasa)":"Artículo adicional *"}</label>
+        <input style={{...S.inp,marginBottom:8}} placeholder={tipo==="restregado"?"Ej: mancha en la suela":"Ej: 1 par de medias, 1 sábana"} value={desc} onChange={e=>{setDesc(e.target.value);setErr("");}}/>
+        <label style={S.lbl}>Costo adicional ($) *</label>
+        <input type="number" style={{...S.inp,marginBottom:8}} placeholder="Ej: 2.00" value={costo} onChange={e=>{setCosto(e.target.value);setErr("");}}/>
+        <div style={{background:"#f0f4f8",borderRadius:10,padding:"8px 10px",fontSize:12,color:"#555",whiteSpace:"pre-wrap",marginBottom:8}}>{msg}</div>
+        {err&&<div style={{...S.err,marginBottom:8}}>{err}</div>}
+        <div style={{fontSize:11,color:"#e65100",marginBottom:8}}>📲 Es obligatorio avisar al cliente. Luego marca si <strong>autorizó</strong> o <strong>no</strong>; hasta entonces la orden no puede pasar a Listo para retirar.</div>
+        <button style={{width:"100%",padding:"12px",background:"linear-gradient(135deg,#25d366,#128c7e)",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:8}} onClick={guardar}>📲 Guardar y avisar por WhatsApp</button>
+        <button style={{width:"100%",padding:"10px",background:"transparent",color:"#888",border:"1px solid #d0dce8",borderRadius:10,fontSize:13,cursor:"pointer"}} onClick={onClose}>Cancelar</button>
+      </div>
+    </div>
+  );
+}
+// 📝 Nota interna en la orden, después de crearla (queda con fecha y quién la escribió)
+function NotaOrdenModal({v,setVentas,upsertVenta,sesion,onClose}){
+  const [txt,setTxt]=useState("");
+  const [tipoNota,setTipoNota]=useState("informativa");
+  const guardar=()=>{
+    if(!txt.trim())return;
+    const hora=new Date().toLocaleString("es-EC",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"});
+    const linea=`${tipoNota==="urgente"?"🚨 URGENTE: ":"ℹ️ "}${txt.trim()} (${sesion?.nombre||""} ${hora})`;
+    guardarVentaFn(setVentas,upsertVenta,v.folio,vv=>({...vv,notas:[vv.notas,linea].filter(Boolean).join(" · "),notaUrgente:tipoNota==="urgente"?true:!!vv.notaUrgente,notasHist:[...(vv.notasHist||[]),{texto:txt.trim(),tipo:tipoNota,por:sesion?.nombre||"",fecha:new Date().toISOString()}]}));
+    onClose();
+  };
+  return(
+    <div style={S.ov}>
+      <div style={S.tbox}>
+        <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e",marginBottom:4}}>📝 Agregar nota a la orden</div>
+        <div style={{fontSize:12,color:"#888",marginBottom:10}}>{v.clienteNombre} · {v.folio}</div>
+        {v.notas&&<div style={{background:"#fffde7",borderRadius:8,padding:"8px 10px",fontSize:12,color:"#555",marginBottom:8}}><strong>Notas actuales:</strong> {v.notas}</div>}
+        <div style={{display:"flex",gap:6,marginBottom:8}}>
+          <button style={{flex:1,padding:"8px",borderRadius:8,border:"1.5px solid "+(tipoNota==="informativa"?"#1565c0":"#d0dce8"),background:tipoNota==="informativa"?"#e3f2fd":"#fff",color:"#1565c0",fontWeight:700,cursor:"pointer"}} onClick={()=>setTipoNota("informativa")}>ℹ️ Informativa</button>
+          <button style={{flex:1,padding:"8px",borderRadius:8,border:"1.5px solid "+(tipoNota==="urgente"?"#c62828":"#d0dce8"),background:tipoNota==="urgente"?"#ffebee":"#fff",color:"#c62828",fontWeight:700,cursor:"pointer"}} onClick={()=>setTipoNota("urgente")}>🚨 Urgente</button>
+        </div>
+        <textarea rows={3} autoFocus style={{...S.inp,fontSize:13,marginBottom:8}} placeholder="Ej: El cliente pidió que no se planche la camisa azul" value={txt} onChange={e=>setTxt(e.target.value)}/>
+        <button style={{...S.btnP,marginBottom:8}} onClick={guardar}>💾 Guardar nota</button>
+        <button style={{width:"100%",padding:"10px",background:"transparent",color:"#888",border:"1px solid #d0dce8",borderRadius:10,fontSize:13,cursor:"pointer"}} onClick={onClose}>Cancelar</button>
+      </div>
+    </div>
+  );
+}
 function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta,clientes,setClientes,upsertCliente,sesion}){
   const [showAb,setShowAb]=useState(false);
   const [waListo,setWaListo]=useState(false);
   const [showEditCliente,setShowEditCliente]=useState(false);
+  const [showNota,setShowNota]=useState(false);
+  const [showExtra,setShowExtra]=useState(false);
   const est=getEst(v);const sig=sigEst(v.estado||"recibido");
   const esPag=pagada(v);const pend=saldo(v);
   const aplicarEstado=(nuevoEstado,extra={})=>setVentas(prev=>{const next=prev.map(vv=>vv.folio===v.folio?{...vv,estado:nuevoEstado,...extra}:vv);const updated=next.find(vv=>vv.folio===v.folio);if(updated&&upsertVenta)upsertVenta(updated);return next;});
   const cambiar=()=>{
     if(!sig)return;
-    if(sig.id==="listo"){setWaListo(true);return;} // WhatsApp obligatorio antes de "listo"
+    if(sig.id==="listo"){if(extrasPendientes(v)>0){alert("Hay extras sin respuesta del cliente. Marca si autorizó o no antes de pasar a Listo para retirar.");return;}setWaListo(true);return;} // WhatsApp obligatorio antes de "listo"
     if(sig.id==="entregado"){aplicarEstado("entregado",{fechaEntregado:new Date().toISOString()});return;} // el mensaje de calificación se pide al cerrar caja, no aquí
     aplicarEstado(sig.id);
   };
@@ -1659,6 +1783,20 @@ function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta,clientes,setClien
         {v.clienteTel&&<div style={{fontSize:12,color:"#888",marginTop:2}}>📱 {v.clienteTel}</div>}
         {v.clienteDireccion&&<div style={{fontSize:12,color:"#888",marginTop:2}}>📍 {v.clienteDireccion}</div>}
         <div style={{fontSize:13,color:"#555",margin:"6px 0"}}>{(v.items||[]).map((it,i)=><span key={i}>{it.label}{it.piezas>1?` x${it.piezas}`:""}{i<(v.items||[]).length-1?" · ":""}</span>)}</div>
+        {v.notas&&<div style={{background:v.notaUrgente?"#ffebee":"#fffde7",border:v.notaUrgente?"1.5px solid #c62828":"none",borderRadius:8,padding:"6px 8px",fontSize:12,color:v.notaUrgente?"#b71c1c":"#5d4037",fontWeight:v.notaUrgente?700:400,marginBottom:6}}>📝 {v.notas}</div>}
+        {v.msgListo?.numFundas!=null&&!isNaN(v.msgListo.numFundas)&&<div style={{fontSize:12,color:"#1565c0",fontWeight:700,marginBottom:4}}>🛍️ {v.msgListo.numFundas} funda(s){v.msgListo.notaCliente?` · Nota al cliente: ${v.msgListo.notaCliente}`:""}</div>}
+        {(v.clasificacion?.serviciosAdicionales||[]).filter(x=>x.posterior||x.estado==="pendiente_confirmar").map(x=>(
+          <div key={x.id} style={{background:x.estado==="pendiente_confirmar"?"#fff3e0":"#f8fbfd",borderRadius:8,padding:"6px 8px",fontSize:12,marginBottom:4}}>
+            <div style={{fontWeight:700,color:"#1a3c5e"}}>🧾 {x.descripcion}: ${x.costo.toFixed(2)}</div>
+            {x.estado==="pendiente_confirmar"&&<div style={{display:"flex",gap:6,marginTop:4,alignItems:"center",flexWrap:"wrap"}}>
+              <span style={{color:"#e65100",fontWeight:700}}>⏳ Esperando respuesta</span>
+              <button style={{...S.btnS,fontSize:11,background:"#e8f5e9",color:"#2e7d32"}} onClick={()=>resolverExtra(v,x.id,true,setVentas,upsertVenta)}>✅ Autorizó</button>
+              <button style={{...S.btnS,fontSize:11,background:"#ffebee",color:"#c62828"}} onClick={()=>resolverExtra(v,x.id,false,setVentas,upsertVenta)}>❌ No autorizó</button>
+            </div>}
+            {x.estado==="autorizado"&&<div style={{color:"#2e7d32",fontWeight:700}}>✅ Autorizado — sumado a la orden</div>}
+            {x.estado==="rechazado"&&<div style={{color:"#c62828",fontWeight:700}}>❌ No autorizado</div>}
+          </div>
+        ))}
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:4}}>
           <div>
             <div style={{fontWeight:800,fontSize:18,color:"#1a3c5e"}}>${(v.total||0).toFixed(2)}</div>
@@ -1681,7 +1819,13 @@ function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta,clientes,setClien
           {!esPag&&<button style={{flex:1,padding:"10px",background:"#e8f5e9",color:"#2e7d32",border:"1.5px solid #2e7d32",borderRadius:10,fontWeight:700,fontSize:13,cursor:"pointer"}} onClick={()=>setShowAb(true)}>💰 Cobrar</button>}
           <button style={{padding:"10px 14px",background:"#f0f4f8",color:"#1a3c5e",border:"none",borderRadius:10,fontSize:12,cursor:"pointer"}} onClick={()=>setTicket(v)}>🧾</button>
         </div>
+        {!v.anulada&&<div style={{display:"flex",gap:8,marginTop:8}}>
+          <button style={{flex:1,padding:"8px",background:"#fffde7",color:"#5d4037",border:"1px solid #ffe082",borderRadius:10,fontSize:12,fontWeight:700,cursor:"pointer"}} onClick={()=>setShowNota(true)}>📝 Agregar nota</button>
+          {(v.estado||"recibido")!=="entregado"&&<button style={{flex:1,padding:"8px",background:"#fff8e1",color:"#e65100",border:"1px solid #ffcc80",borderRadius:10,fontSize:12,fontWeight:700,cursor:"pointer"}} onClick={()=>setShowExtra(true)}>➕ Agregar extra</button>}
+        </div>}
       </div>
+      {showNota&&<NotaOrdenModal v={v} setVentas={setVentas} upsertVenta={upsertVenta} sesion={sesion} onClose={()=>setShowNota(false)}/>}
+      {showExtra&&<AgregarExtraModal v={v} setVentas={setVentas} upsertVenta={upsertVenta} sesion={sesion} onClose={()=>setShowExtra(false)}/>}
       {showAb&&<AbonoModal venta={v} onSave={ab=>{addAbono(v.folio,ab);setShowAb(false);}} onClose={()=>setShowAb(false)}/>}
       {waListo&&<WhatsAppObligatorio venta={v} tipo="listo" onConfirm={info=>{aplicarEstado("listo",{checkMsgRetiro:info.enviado,msgListo:info});setWaListo(false);}} onCancel={()=>setWaListo(false)}/>}
       {showEditCliente&&<EditarClienteModal v={v} clientes={clientes} onGuardar={guardarEdicionCliente} onCancelar={()=>setShowEditCliente(false)}/>}
@@ -2099,11 +2243,15 @@ function Produccion({ventas:ventasTodas,setVentas,upsertVenta,empleadas,pins,eve
   const ventas=ventasTodas.map(v=>{const its=v.items||[];if(!its.some(sinProceso))return v;const proc=its.filter(it=>!sinProceso(it));return proc.length?{...v,items:proc}:{...v,_sinProceso:true};});
   const [pickerFor,setPickerFor]=useState(null); // {folio, tipoMaquina}
   const [clasifFor,setClasifFor]=useState(null); // {folio} — orden esperando revisión de prendas
+  const [extraFor,setExtraFor]=useState(null); // ➕ orden a la que se le agrega un extra en cualquier etapa
   const [clasifExtraFor,setClasifExtraFor]=useState(null); // {folio,siguientePicker} — revisión de bolsillos para una carga ADICIONAL (2da/3ra lavadora)
   const [selLavadoZap,setSelLavadoZap]=useState({}); // {folio:true} seleccionados para lote de lavado
   const [selCentrifugadoZap,setSelCentrifugadoZap]=useState({}); // {folio:true} seleccionados para lote de centrifugado
   const [selSecadoZap,setSelSecadoZap]=useState({}); // {folio:"pares"} seleccionados para lote de secado (máx 20 pares)
   const [selEmpaquetarZap,setSelEmpaquetarZap]=useState({}); // {folio:true} seleccionados para iniciar empaquetado
+  const [selRetirarZap,setSelRetirarZap]=useState({}); // {cargaId:true} cargas de zapatos a retirar en lote
+  const [selTerminarEmpZap,setSelTerminarEmpZap]=useState({}); // {folio:true} empaquetados a terminar en lote
+  const [waListoProd,setWaListoProd]=useState(null); // folio que pasa a Listo: obliga WhatsApp con fundas y nota
   const [minLoteLav,setMinLoteLav]=useState("45");
   const [minLoteCent,setMinLoteCent]=useState("15");
   const [minLoteSec,setMinLoteSec]=useState("45");
@@ -2117,7 +2265,7 @@ function Produccion({ventas:ventasTodas,setVentas,upsertVenta,empleadas,pins,eve
   const [detalleEstadoZap,setDetalleEstadoZap]=useState(null); // qué categoría del resumen de zapatos está expandida (ej. "enLavado")
 
   // 🛍️ Una venta de SOLO productos (perfumes, detergentes, etc. del catálogo) no pasa por ningún proceso de producción
-  const esSoloProductos=v=>v._sinProceso||((v.items||[]).length>0&&(v.items||[]).every(it=>it.esProducto));
+  const esSoloProductos=v=>v._sinProceso||((v.items||[]).length>0&&(v.items||[]).every(esItemProducto));
   // 🧴 Lavado en seco es tercerizado (Martinizing) — no pasa por lavadoras/secadoras propias.
   // Solo se excluye del flujo de máquinas si TODA la orden es lavado en seco (no mixta con ropa normal).
   const esSoloLavadoSeco=v=>(v.items||[]).length>0&&(v.items||[]).every(it=>esLavadoSeco(it.label));
@@ -2163,7 +2311,7 @@ function Produccion({ventas:ventasTodas,setVentas,upsertVenta,empleadas,pins,eve
   // Las de SOLO zapatos no la necesitan — recepción ya revisó los zapatos, así que entran directo a la cola.
   const colaLavadoZap=flujosZapatos.filter(f=>{
     const necesitaClasificacion=!!f.v.prodGrupos; // si está dividida (mixta), sí requiere; si es pura, no
-    return(necesitaClasificacion?!!f.v.clasificacion:true)&&!cargaDe(f.folio,"lavado",f.grupo);
+    return(necesitaClasificacion?revisadoV(f.v):true)&&!cargaDe(f.folio,"lavado",f.grupo);
   });
   // 🌀 Después del lavado, pasan a esperar centrifugado (en lavadora general L1-L3)
   const colaCentrifugadoZap=flujosZapatos.filter(f=>{const cl=cargaDe(f.folio,"lavado",f.grupo);return cl?.finReal&&!cargaDe(f.folio,"centrifugado",f.grupo);});
@@ -2355,9 +2503,10 @@ function Produccion({ventas:ventasTodas,setVentas,upsertVenta,empleadas,pins,eve
   };
   // 🔍 Guarda la revisión de prendas (checklist de bolsillos/manchas/restregado) antes de permitir lavar
   const guardarClasificacion=(folio,datos,empleadaId)=>{
+    const previos=(ventas.find(v=>v.folio===folio)?.clasificacion?.serviciosAdicionales||[]).filter(s=>s.posterior);
     const clasificacion={
       ...datos,
-      serviciosAdicionales:(datos.serviciosAdicionales||[]).map(s=>({...s,estado:null,avisadoEn:null,confirmadoEn:null})),
+      serviciosAdicionales:[...previos,...(datos.serviciosAdicionales||[]).map(s=>({...s,estado:null,avisadoEn:null,confirmadoEn:null}))],
       empleadaId:empleadaId||null,timestamp:new Date().toISOString()
     };
     // 👟 Auto-división: si la orden mezcla zapatos con ropa/edredones, se separa sola en 2 flujos (sin necesitar el botón manual)
@@ -2540,6 +2689,8 @@ function Produccion({ventas:ventasTodas,setVentas,upsertVenta,empleadas,pins,eve
     else if(accion==="iniciar_lote")iniciarCargaLote(extra.lote.folios,extra.lote.tipo,extra.maquinaId,extra.minutos,emp?.id,extra.lote.pares);
     else if(accion==="agregar_lote_lavado")agregarALoteLavadoActivo(extra.carga,extra.folios,emp?.id);
     else if(accion==="iniciar_empaquetado_lote")extra.folios.forEach(folio=>registrar(folio,"doblado_inicio",emp?.id,null,"zapatos"));
+    else if(accion==="retirar_lote_cargas"){extra.cargas.forEach(c=>retirarCarga(c,emp?.id));setSelRetirarZap({});}
+    else if(accion==="terminar_empaquetado_lote"){extra.folios.forEach(f=>registrar(f,"doblado_fin",emp?.id,null,"zapatos"));notificar("📦 Empaquetado terminado",`${extra.folios.length} orden(es) — falta confirmar Listo para retirar`);setSelTerminarEmpZap({});}
     else if(accion==="iniciar_lavado")iniciarCarga(folio,"lavado",extra.maquinaId,extra.minutos,emp?.id,extra.comentario,extra.repetir,extra.grupo,extra.ciclo);
     else if(accion==="retirar_lavado")retirarCarga(extra.carga,emp?.id);
     else if(accion==="iniciar_secado")iniciarCarga(folio,"secado",extra.maquinaId,extra.minutos,emp?.id,extra.comentario,extra.repetir,extra.grupo,extra.ciclo);
@@ -2552,7 +2703,8 @@ function Produccion({ventas:ventasTodas,setVentas,upsertVenta,empleadas,pins,eve
       // 🧴 Si la orden también tiene lavado en seco y todavía no se retira de Martinizing, no se puede marcar lista
       const vOrig=ventasTodas.find(vv=>vv.folio===folio);
       if(vOrig&&(vOrig.items||[]).some(it=>esLavadoSeco(it.label))&&!vOrig.martinizingRetiradoEn){alert("La ropa ya está lista, pero esta orden también tiene lavado en seco que todavía está en Martinizing.\n\nCuando la retiren, márcala en 🧴 Martinizing → 📥 Marcar retirado y ahí se avisa al cliente.");}
-      else cambiarEstadoVenta(folio,"listo");
+      else if(vOrig&&extrasPendientes(vOrig)>0)alert("Hay extras sin respuesta del cliente. Marca si autorizó o no antes de pasar a Listo para retirar.");
+      else setWaListoProd(folio); // 📲 obligatorio: WhatsApp con número de fundas y nota antes de quedar Listo
     }
     setPinFor(null);
   };
@@ -2616,7 +2768,7 @@ function Produccion({ventas:ventasTodas,setVentas,upsertVenta,empleadas,pins,eve
         {encontradas.map(v=>{
           const tieneZapD=(v.items||[]).some(it=>esZapatoLbl(it.label));
           const tieneOtroD=(v.items||[]).some(it=>!esZapatoLbl(it.label));
-          const soloProductosD=v._sinProceso||((v.items||[]).length>0&&(v.items||[]).every(it=>it.esProducto));
+          const soloProductosD=v._sinProceso||((v.items||[]).length>0&&(v.items||[]).every(esItemProducto));
           const soloLavadoSecoD=(v.items||[]).length>0&&(v.items||[]).every(it=>esLavadoSeco(it.label));
           const enActivos=!v.anulada&&["recibido","proceso"].includes(v.estado||"recibido")&&!soloProductosD&&!soloLavadoSecoD;
           const enFlujosZapatos=enActivos&&((v.prodGrupos&&v.prodGrupos.includes("zapatos"))||(!v.prodGrupos&&tieneZapD&&!tieneOtroD));
@@ -2753,12 +2905,15 @@ function Produccion({ventas:ventasTodas,setVentas,upsertVenta,empleadas,pins,eve
 
         {colaLavadoZap.length>0&&(
           <div style={{background:"#e8eaf6",border:"1.5px solid #5c6bc0",borderRadius:12,padding:12,marginBottom:14}}>
-            <div style={{fontSize:13,fontWeight:800,color:"#3949ab",marginBottom:2}}>⬜ Pendientes por lavar ({totalesZapatos.porLavar} pares)</div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{fontSize:13,fontWeight:800,color:"#3949ab",marginBottom:2}}>⬜ Pendientes por lavar ({totalesZapatos.porLavar} pares)</div>
+              <button style={{...S.btnS,fontSize:11}} onClick={()=>{const todos=colaLavadoZap.every(f=>selLavadoZap[f.folio]);setSelLavadoZap(todos?{}:Object.fromEntries(colaLavadoZap.map(f=>[f.folio,true])));}}>{colaLavadoZap.every(f=>selLavadoZap[f.folio])?"Quitar todo":"Seleccionar todo"}</button>
+            </div>
             {cargaLavadoActiva1LZ&&<div style={{fontSize:11,color:"#1565c0",background:"#e3f2fd",borderRadius:8,padding:"6px 8px",margin:"6px 0"}}>💡 La 1LZ ya está lavando — puedes seguir marcando más y sumarlos al mismo lote.</div>}
             {colaLavadoZap.filter(coincideBusquedaProd).map(f=>(
               <label key={f.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px",cursor:"pointer"}}>
                 <input type="checkbox" checked={!!selLavadoZap[f.folio]} onChange={e=>setSelLavadoZap({...selLavadoZap,[f.folio]:e.target.checked})}/>
-                <span style={{fontSize:13,color:"#1a237e",flex:1}}>{f.cliente} · {f.folio}</span>
+                <span style={{fontSize:13,color:"#1a237e",flex:1}}>{f.cliente} · {f.folio}{f.v?.notaUrgente&&<strong style={{color:"#c62828"}}> 🚨 nota urgente</strong>}</span>
                 <span style={{fontSize:11,color:"#3949ab",fontWeight:700}}>{paresDe(f.folio)} pares</span>
               </label>
             ))}
@@ -2775,11 +2930,14 @@ function Produccion({ventas:ventasTodas,setVentas,upsertVenta,empleadas,pins,eve
 
         {colaCentrifugadoZap.length>0&&(
           <div style={{background:"#ede7f6",border:"1.5px solid #7986cb",borderRadius:12,padding:12,marginBottom:14}}>
-            <div style={{fontSize:13,fontWeight:800,color:"#5c6bc0",marginBottom:6}}>✅ Lavados — esperando centrifugado ({totalesZapatos.esperandoCentrifugado} pares)</div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+              <div style={{fontSize:13,fontWeight:800,color:"#5c6bc0"}}>✅ Lavados — esperando centrifugado ({totalesZapatos.esperandoCentrifugado} pares)</div>
+              <button style={{...S.btnS,fontSize:11}} onClick={()=>{const todos=colaCentrifugadoZap.every(f=>selCentrifugadoZap[f.folio]!==undefined);setSelCentrifugadoZap(todos?{}:Object.fromEntries(colaCentrifugadoZap.map(f=>[f.folio,String(paresDe(f.folio)||1)])));}}>{colaCentrifugadoZap.every(f=>selCentrifugadoZap[f.folio]!==undefined)?"Quitar todo":"Seleccionar todo"}</button>
+            </div>
             {colaCentrifugadoZap.filter(coincideBusquedaProd).map(f=>(
               <div key={f.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px"}}>
                 <input type="checkbox" checked={selCentrifugadoZap[f.folio]!==undefined} onChange={e=>{const c={...selCentrifugadoZap};if(e.target.checked)c[f.folio]=String(paresDe(f.folio)||1);else delete c[f.folio];setSelCentrifugadoZap(c);}}/>
-                <span style={{fontSize:13,color:"#3730a3",flex:1}}>{f.cliente} · {f.folio}</span>
+                <span style={{fontSize:13,color:"#3730a3",flex:1}}>{f.cliente} · {f.folio}{f.v?.notaUrgente&&<strong style={{color:"#c62828"}}> 🚨 nota urgente</strong>}</span>
                 {selCentrifugadoZap[f.folio]!==undefined&&<input type="number" min="1" style={{...S.inp,width:60,padding:"4px 8px"}} value={selCentrifugadoZap[f.folio]} onChange={e=>setSelCentrifugadoZap({...selCentrifugadoZap,[f.folio]:e.target.value})}/>}
               </div>
             ))}
@@ -2793,11 +2951,14 @@ function Produccion({ventas:ventasTodas,setVentas,upsertVenta,empleadas,pins,eve
 
         {colaSecadoZap.length>0&&(
           <div style={{background:"#e0f7fa",border:"1.5px solid #00acc1",borderRadius:12,padding:12,marginBottom:14}}>
-            <div style={{fontSize:13,fontWeight:800,color:"#00838f",marginBottom:6}}>✅ Centrifugados — esperando secar, máx 20 pares ({totalesZapatos.esperandoSecado} pares)</div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+              <div style={{fontSize:13,fontWeight:800,color:"#00838f"}}>✅ Centrifugados — esperando secar, máx 20 pares ({totalesZapatos.esperandoSecado} pares)</div>
+              <button style={{...S.btnS,fontSize:11}} onClick={()=>{const todos=colaSecadoZap.every(f=>selSecadoZap[f.folio]!==undefined);setSelSecadoZap(todos?{}:Object.fromEntries(colaSecadoZap.map(f=>[f.folio,String(paresDe(f.folio)||1)])));}}>{colaSecadoZap.every(f=>selSecadoZap[f.folio]!==undefined)?"Quitar todo":"Seleccionar todo"}</button>
+            </div>
             {colaSecadoZap.filter(coincideBusquedaProd).map(f=>(
               <div key={f.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px"}}>
                 <input type="checkbox" checked={selSecadoZap[f.folio]!==undefined} onChange={e=>{const c={...selSecadoZap};if(e.target.checked)c[f.folio]=String(paresDe(f.folio)||1);else delete c[f.folio];setSelSecadoZap(c);}}/>
-                <span style={{fontSize:13,color:"#006064",flex:1}}>{f.cliente} · {f.folio}</span>
+                <span style={{fontSize:13,color:"#006064",flex:1}}>{f.cliente} · {f.folio}{f.v?.notaUrgente&&<strong style={{color:"#c62828"}}> 🚨 nota urgente</strong>}</span>
                 {selSecadoZap[f.folio]!==undefined&&<input type="number" min="1" style={{...S.inp,width:60,padding:"4px 8px"}} value={selSecadoZap[f.folio]} onChange={e=>setSelSecadoZap({...selSecadoZap,[f.folio]:e.target.value})}/>}
               </div>
             ))}
@@ -2811,15 +2972,80 @@ function Produccion({ventas:ventasTodas,setVentas,upsertVenta,empleadas,pins,eve
 
         {colaEmpaquetarZap.length>0&&(
           <div style={{background:"#f3e5f5",border:"1.5px solid #ab47bc",borderRadius:12,padding:12,marginBottom:14}}>
-            <div style={{fontSize:13,fontWeight:800,color:"#7b1fa2",marginBottom:6}}>📦 Ya se secaron — esperando empaquetar ({colaEmpaquetarZap.reduce((a,f)=>a+paresDe(f.folio),0)} pares)</div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+              <div style={{fontSize:13,fontWeight:800,color:"#7b1fa2"}}>📦 Ya se secaron — esperando empaquetar ({colaEmpaquetarZap.reduce((a,f)=>a+paresDe(f.folio),0)} pares)</div>
+              <button style={{...S.btnS,fontSize:11}} onClick={()=>{const todos=colaEmpaquetarZap.every(f=>selEmpaquetarZap[f.folio]);setSelEmpaquetarZap(todos?{}:Object.fromEntries(colaEmpaquetarZap.map(f=>[f.folio,true])));}}>{colaEmpaquetarZap.every(f=>selEmpaquetarZap[f.folio])?"Quitar todo":"Seleccionar todo"}</button>
+            </div>
             {colaEmpaquetarZap.filter(coincideBusquedaProd).map(f=>(
               <label key={f.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px",cursor:"pointer"}}>
                 <input type="checkbox" checked={!!selEmpaquetarZap[f.folio]} onChange={e=>setSelEmpaquetarZap({...selEmpaquetarZap,[f.folio]:e.target.checked})}/>
-                <span style={{fontSize:13,color:"#4a148c",flex:1}}>{f.cliente} · {f.folio}</span>
+                <span style={{fontSize:13,color:"#4a148c",flex:1}}>{f.cliente} · {f.folio}{f.v?.notaUrgente&&<strong style={{color:"#c62828"}}> 🚨 nota urgente</strong>}</span>
                 <span style={{fontSize:11,color:"#7b1fa2",fontWeight:700}}>{paresDe(f.folio)} pares</span>
               </label>
             ))}
             <button style={{...S.btnP,width:"100%",marginTop:8,background:"linear-gradient(135deg,#7b1fa2,#ab47bc)",opacity:Object.values(selEmpaquetarZap).some(Boolean)?1:0.5}} disabled={!Object.values(selEmpaquetarZap).some(Boolean)} onClick={iniciarEmpaquetarSeleccionados}>📦 Iniciar empaquetado con lo seleccionado</button>
+          </div>
+        )}
+
+        {(()=>{
+          // 📤 RETIRAR EN LOTE: todas las cargas de zapatos que están en máquina (lavado, centrifugado, secado)
+          const activas=[...cargasZapActivas("lavado"),...cargasZapActivas("centrifugado"),...cargasZapActivas("secado")];
+          if(activas.length===0)return null;
+          const lbl={lavado:"🧺 Lavando",centrifugado:"🌀 Centrifugando",secado:"🔥 Secando"};
+          const sel=activas.filter(c=>selRetirarZap[c.id]);
+          return(
+            <div style={{background:"#e3f2fd",border:"1.5px solid #1565c0",borderRadius:12,padding:12,marginBottom:14}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                <div style={{fontSize:13,fontWeight:800,color:"#0d47a1"}}>📤 En máquina ahora — retirar en lote o una por una</div>
+                <button style={{...S.btnS,fontSize:11}} onClick={()=>setSelRetirarZap(sel.length===activas.length?{}:Object.fromEntries(activas.map(c=>[c.id,true])))}>{sel.length===activas.length?"Quitar todo":"Seleccionar todo"}</button>
+              </div>
+              {activas.map(c=>{
+                const fs=c.ventaFolios&&c.ventaFolios.length?c.ventaFolios:[c.ventaFolio];
+                return(
+                  <label key={c.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px",cursor:"pointer",borderBottom:"1px dashed #bbdefb"}}>
+                    <input type="checkbox" checked={!!selRetirarZap[c.id]} onChange={e=>setSelRetirarZap({...selRetirarZap,[c.id]:e.target.checked})}/>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:13,fontWeight:700,color:"#0d47a1"}}>{lbl[c.tipo]} · {c.maquinaId} · {paresEnCarga(c)} pares</div>
+                      <div style={{fontSize:11,color:"#555"}}>{fs.map(f=>ventas.find(v=>v.folio===f)?.clienteNombre||f).join(", ")}</div>
+                    </div>
+                    <div style={{fontSize:13,fontFamily:"monospace",fontWeight:800,color:"#1565c0"}}><CuentaRegresiva finProgramado={c.finProgramado}/></div>
+                  </label>
+                );
+              })}
+              <button style={{...S.btnP,width:"100%",marginTop:8,background:"linear-gradient(135deg,#1565c0,#42a5f5)",opacity:sel.length?1:0.5}} disabled={!sel.length} onClick={()=>setPinFor({folio:null,accion:"retirar_lote_cargas",label:`¿Quién retira ${sel.length} carga(s) de zapatos?`,extra:{cargas:sel}})}>📤 Retirar {sel.length||""} seleccionada(s)</button>
+            </div>
+          );
+        })()}
+
+        {empaquetandoZap.length>0&&(()=>{
+          const sel=empaquetandoZap.filter(f=>selTerminarEmpZap[f.folio]);
+          return(
+            <div style={{background:"#f3e5f5",border:"1.5px solid #7b1fa2",borderRadius:12,padding:12,marginBottom:14}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                <div style={{fontSize:13,fontWeight:800,color:"#4a148c"}}>📦 Empaquetando — terminar en lote o una por una ({empaquetandoZap.length})</div>
+                <button style={{...S.btnS,fontSize:11}} onClick={()=>setSelTerminarEmpZap(sel.length===empaquetandoZap.length?{}:Object.fromEntries(empaquetandoZap.map(f=>[f.folio,true])))}>{sel.length===empaquetandoZap.length?"Quitar todo":"Seleccionar todo"}</button>
+              </div>
+              {empaquetandoZap.filter(coincideBusquedaProd).map(f=>(
+                <label key={f.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px",cursor:"pointer"}}>
+                  <input type="checkbox" checked={!!selTerminarEmpZap[f.folio]} onChange={e=>setSelTerminarEmpZap({...selTerminarEmpZap,[f.folio]:e.target.checked})}/>
+                  <span style={{fontSize:13,color:"#4a148c",flex:1}}>{f.cliente} · {f.folio}{f.v?.notaUrgente&&<strong style={{color:"#c62828"}}> 🚨 nota urgente</strong>}</span>
+                  <span style={{fontSize:11,color:"#7b1fa2",fontWeight:700}}>{paresDe(f.folio)} pares</span>
+                </label>
+              ))}
+              <button style={{...S.btnP,width:"100%",marginTop:8,background:"linear-gradient(135deg,#7b1fa2,#ab47bc)",opacity:sel.length?1:0.5}} disabled={!sel.length} onClick={()=>setPinFor({folio:null,accion:"terminar_empaquetado_lote",label:`¿Quién termina el empaquetado de ${sel.length} orden(es)?`,extra:{folios:sel.map(f=>f.folio)}})}>✅ Terminar empaquetado de {sel.length||""} seleccionada(s)</button>
+            </div>
+          );
+        })()}
+
+        {listoParaConfirmarZap.length>0&&(
+          <div style={{background:"#e8f5e9",border:"1.5px solid #2e7d32",borderRadius:12,padding:12,marginBottom:14}}>
+            <div style={{fontSize:13,fontWeight:800,color:"#1b5e20",marginBottom:6}}>🔔 Empaquetadas — enviar Listo para retirar (una por una, con fundas y nota) ({listoParaConfirmarZap.length})</div>
+            {listoParaConfirmarZap.filter(coincideBusquedaProd).map(f=>(
+              <div key={f.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px",borderBottom:"1px dashed #c8e6c9"}}>
+                <span style={{fontSize:13,color:"#1b5e20",flex:1}}>{f.cliente} · {f.folio} · {paresDe(f.folio)} pares{extrasPendientes(f.v)>0?" · ⏳ extras sin respuesta":""}</span>
+                <button style={{...S.btnS,background:"#2e7d32",color:"#fff",fontSize:12}} onClick={()=>setPinFor({folio:f.folio,accion:"confirmar_listo",label:"¿Quién confirma que ya está Listo para retirar?"})}>🔔 Listo</button>
+              </div>
+            ))}
           </div>
         )}
 
@@ -3011,14 +3237,14 @@ function Produccion({ventas:ventasTodas,setVentas,upsertVenta,empleadas,pins,eve
           <div style={{fontSize:12,color:todosListos?"#2e7d32":etapaResumen.startsWith("⏳")?"#e65100":"#4db6e4",fontWeight:700,marginTop:2}}>{etapaResumen}</div>
           <div style={{fontSize:12,color:"#666",marginTop:6}}>{(v.items||[]).map(it=>it.label).join(" · ")}</div>
 
-          {!v.clasificacion&&!soloZapatos?(
+          {!revisadoV(v)&&!soloZapatos?(
             <button style={{...S.btnP,marginTop:10,background:"linear-gradient(135deg,#e65100,#ff9800)"}} onClick={()=>setClasifFor({folio:v.folio})}>🔍 Revisar prendas antes de lavar</button>
-          ):!v.clasificacion&&soloZapatos?(
+          ):!revisadoV(v)&&soloZapatos&&!v.clasificacion?(
             <div style={{fontSize:11,color:"#888",background:"#f0f4f8",borderRadius:8,padding:"6px 8px",marginTop:8}}>👟 Es una orden solo de zapatos — no necesita revisión de bolsillos, ya se revisó en recepción.</div>
           ):(
             <>
               <div style={{fontSize:11,color:"#2e7d32",background:"#e8f5e9",borderRadius:8,padding:"6px 8px",marginTop:8,fontWeight:600}}>
-                ✅ Revisado por {nombreDe(v.clasificacion.empleadaId)}
+                {revisadoV(v)?<>✅ Revisado por {nombreDe(v.clasificacion.empleadaId)}</>:<>👟 Orden de zapatos — extras agregados después</>}
                 {(v.revisionesExtra||[]).length>0&&<div style={{color:"#1565c0",fontWeight:600}}>🔍 +{v.revisionesExtra.length} revisión(es) de carga adicional{v.revisionesExtra.some(r=>r.manchasDetectadas||r.objetosEncontrados)?" (con hallazgos)":""}</div>}
                 {v.clasificacion.objetosEncontrados&&<div>🔑 Se encontró: {v.clasificacion.objetosEncontrados}</div>}
                 {v.clasificacion.manchasDetectadas&&<div>🟤 Tiene manchas</div>}
@@ -3071,7 +3297,11 @@ function Produccion({ventas:ventasTodas,setVentas,upsertVenta,empleadas,pins,eve
 
               {grupos.filter(g=>tabProd==="todos"||(tabProd==="zapatos"?g==="zapatos":g!=="zapatos")).map(g=>renderFlujo(g,v.prodGrupos?(g==="ropa"?"👕 ROPA":"👟 ZAPATOS"):null))}
 
-              {todosListos&&(
+              {!v.anulada&&<button style={{...S.btnS,marginTop:8,width:"100%",background:"#fff8e1",color:"#e65100"}} onClick={()=>setExtraFor(v)}>➕ Agregar restregado extra u otro artículo</button>}
+              {todosListos&&extrasPendientes(v)>0&&(
+                <div style={{background:"#fff3e0",color:"#e65100",borderRadius:8,padding:"8px 10px",marginTop:10,fontSize:12,fontWeight:700}}>⏳ Hay {extrasPendientes(v)} extra(s) sin respuesta del cliente — marca Autorizó / Rechazó antes de confirmar Listo para retirar.</div>
+              )}
+              {todosListos&&extrasPendientes(v)===0&&(
                 <button style={{...S.btnP,marginTop:10,background:"linear-gradient(135deg,#2e7d32,#66bb6a)"}} onClick={()=>setPinFor({folio:v.folio,accion:"confirmar_listo",label:"¿Quién confirma que ya está Listo para retirar?"})}>🔔 Confirmar Listo para retirar</button>
               )}
             </>
@@ -3082,6 +3312,12 @@ function Produccion({ventas:ventasTodas,setVentas,upsertVenta,empleadas,pins,eve
     </>)}
 
     {clasifFor&&<ClasificacionModal onConfirmar={onClasifConfirm} onCancelar={()=>setClasifFor(null)}/>}
+    {waListoProd&&(()=>{const vL=ventasTodas.find(x=>x.folio===waListoProd);if(!vL)return null;return(
+      <WhatsAppObligatorio venta={vL} tipo="listo" onCancel={()=>setWaListoProd(null)} onConfirm={info=>{
+        guardarVentaFn(setVentas,upsertVenta,vL.folio,vv=>({...vv,estado:"listo",checkMsgRetiro:info.enviado,msgListo:info}));
+        setWaListoProd(null);
+      }}/>);})()}
+    {extraFor&&<AgregarExtraModal v={ventas.find(x=>x.folio===extraFor.folio)||extraFor} setVentas={setVentas} upsertVenta={upsertVenta} sesion={null} onClose={()=>setExtraFor(null)}/>}
     {clasifExtraFor&&<ClasificacionModal onConfirmar={onClasifConfirm} onCancelar={()=>setClasifExtraFor(null)}/>}
     {pickerFor&&<MachinePicker maquinas={maquinas} tipoMaquina={pickerFor.tipoMaquina} tiempoSugerido={pickerFor.lote?(pickerFor.lote.tipo==="lavado"?parseInt(minLoteLav)||45:pickerFor.lote.tipo==="centrifugado"?parseInt(minLoteCent)||15:parseInt(minLoteSec)||45):45} repetir={!!pickerFor.repetir} grupo={pickerFor.grupo} centrifugado={!!pickerFor.centrifugado} onConfirmar={onPickerConfirm} onCancelar={()=>setPickerFor(null)}/>}
     {pinFor&&<PinModal pins={pins} empleadas={empleadas} titulo={pinFor.label} onConfirm={onPinOk} onCancelar={()=>setPinFor(null)}/>}
@@ -3115,7 +3351,7 @@ function Produccion({ventas:ventasTodas,setVentas,upsertVenta,empleadas,pins,eve
             {colaLavadoZap.map(f=>(
               <label key={f.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px",cursor:"pointer"}}>
                 <input type="checkbox" checked={!!selLavadoZap[f.folio]} onChange={e=>setSelLavadoZap({...selLavadoZap,[f.folio]:e.target.checked})}/>
-                <span style={{fontSize:13,color:"#3e2723",flex:1}}>{f.cliente} · {f.folio}</span>
+                <span style={{fontSize:13,color:"#3e2723",flex:1}}>{f.cliente} · {f.folio}{f.v?.notaUrgente&&<strong style={{color:"#c62828"}}> 🚨 nota urgente</strong>}</span>
                 <span style={{fontSize:11,color:"#8d6e63",fontWeight:700}}>{paresDe(f.folio)} pares</span>
               </label>
             ))}
@@ -3146,7 +3382,7 @@ function Produccion({ventas:ventasTodas,setVentas,upsertVenta,empleadas,pins,eve
             {colaCentrifugadoZap.map(f=>(
               <div key={f.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px"}}>
                 <input type="checkbox" checked={selCentrifugadoZap[f.folio]!==undefined} onChange={e=>{const c={...selCentrifugadoZap};if(e.target.checked)c[f.folio]=String(paresDe(f.folio)||1);else delete c[f.folio];setSelCentrifugadoZap(c);}}/>
-                <span style={{fontSize:13,color:"#3e2723",flex:1}}>{f.cliente} · {f.folio}</span>
+                <span style={{fontSize:13,color:"#3e2723",flex:1}}>{f.cliente} · {f.folio}{f.v?.notaUrgente&&<strong style={{color:"#c62828"}}> 🚨 nota urgente</strong>}</span>
                 {selCentrifugadoZap[f.folio]!==undefined&&<input type="number" min="1" style={{...S.inp,width:60,padding:"4px 8px"}} value={selCentrifugadoZap[f.folio]} onChange={e=>setSelCentrifugadoZap({...selCentrifugadoZap,[f.folio]:e.target.value})}/>}
               </div>
             ))}
@@ -3189,7 +3425,7 @@ function Produccion({ventas:ventasTodas,setVentas,upsertVenta,empleadas,pins,eve
             {colaSecadoZap.map(f=>(
               <div key={f.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px"}}>
                 <input type="checkbox" checked={!!selSecadoZap[f.folio]} onChange={e=>{const c={...selSecadoZap};if(e.target.checked)c[f.folio]=String(paresDe(f.folio)||1);else delete c[f.folio];setSelSecadoZap(c);}}/>
-                <span style={{fontSize:13,color:"#3e2723",flex:1}}>{f.cliente} · {f.folio}</span>
+                <span style={{fontSize:13,color:"#3e2723",flex:1}}>{f.cliente} · {f.folio}{f.v?.notaUrgente&&<strong style={{color:"#c62828"}}> 🚨 nota urgente</strong>}</span>
                 {selSecadoZap[f.folio]!==undefined&&<input type="number" min="1" style={{...S.inp,width:60,padding:"4px 8px"}} value={selSecadoZap[f.folio]} onChange={e=>setSelSecadoZap({...selSecadoZap,[f.folio]:e.target.value})}/>}
               </div>
             ))}
@@ -3241,7 +3477,7 @@ function Produccion({ventas:ventasTodas,setVentas,upsertVenta,empleadas,pins,eve
           {colaEmpaquetarZap.map(f=>(
             <label key={f.folio} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px",cursor:"pointer"}}>
               <input type="checkbox" checked={!!selEmpaquetarZap[f.folio]} onChange={e=>setSelEmpaquetarZap({...selEmpaquetarZap,[f.folio]:e.target.checked})}/>
-              <span style={{fontSize:13,color:"#3e2723",flex:1}}>{f.cliente} · {f.folio}</span>
+              <span style={{fontSize:13,color:"#3e2723",flex:1}}>{f.cliente} · {f.folio}{f.v?.notaUrgente&&<strong style={{color:"#c62828"}}> 🚨 nota urgente</strong>}</span>
               <span style={{fontSize:11,color:"#7b1fa2",fontWeight:700}}>{paresDe(f.folio)} pares</span>
             </label>
           ))}
@@ -4657,7 +4893,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
     if(tPago==="completo")abs=[{monto:total,metodo,fecha:new Date().toISOString(),cobradoPorId:sesion?.id,cobradoPorNombre:sesion?.nombre}];
     else if(tPago==="abono")abs=[{monto:parseFloat(abono),metodo,fecha:new Date().toISOString(),cobradoPorId:sesion?.id,cobradoPorNombre:sesion?.nombre}];
     // 🛍️ Si TODOS los renglones de la venta son productos, no pasa por Producción: se factura y sale directo (queda "entregado" de una vez)
-    const todosProductos=items.length>0&&items.every(it=>it.esProducto);
+    const todosProductos=items.length>0&&items.every(it=>it.esProducto||(it.custom&&esItemProducto({label:it.lC})));
     const v={folio:folio(),fecha:new Date().toISOString(),entrega,clienteId:cid,clienteNombre:cNom,clienteTel:cTel,clienteDireccion:cDir,empleadaId:empId,
       impulsos, // 🎯 quién impulsó qué promos (empleadaId ya viaja en la venta)
       items:[...items.map(it=>{
@@ -7723,7 +7959,7 @@ function calcularAnalisisTiempos(ventas,eventosProduccion,cargas,maquinas,{desde
     const itemsNoZapato=(v.items||[]).filter(it=>!esZapatoLbl(it.label));
     const tieneRopa=v.prodGrupos?v.prodGrupos.includes("ropa"):itemsNoZapato.length>0;
     const soloLavadoSeco=itemsNoZapato.length>0&&itemsNoZapato.every(it=>esLavadoSecoLbl(it.label));
-    return tieneRopa&&!soloLavadoSeco&&v.clasificacion;
+    return tieneRopa&&!soloLavadoSeco&&revisadoV(v);
   });
 
   return ordenesRopa.map(v=>{
