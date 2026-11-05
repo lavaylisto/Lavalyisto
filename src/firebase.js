@@ -1,135 +1,81 @@
-import { useState, useEffect } from "react";
-import { db, firebaseListo, authReady } from "../firebase";
-import {
-  collection, onSnapshot, setDoc, doc, query, where,
-} from "firebase/firestore";
+import { initializeApp } from "firebase/app";
+import { initializeFirestore, memoryLocalCache } from "firebase/firestore";
+import { getStorage } from "firebase/storage";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 
-// Hook local-first con SINCRONIZACIÓN INCREMENTAL.
-// - Al abrir la app usa la copia guardada en este equipo (localStorage) al instante.
-// - A Firebase solo le pide los documentos que CAMBIARON desde la última sincronización
-//   (campo _updatedAt), en tiempo real. Antes descargaba TODA la colección en cada apertura
-//   o recarga (≈200k lecturas/día → se pasaba del límite gratis de 50k).
-// - Si un equipo no tiene copia local (primera vez), descarga todo UNA sola vez.
-// - Los borrados se marcan con _deleted:true (en vez de borrar el documento) para que
-//   los otros equipos se enteren; la app nunca ve los marcados.
-
-const MARGEN_MS = 10 * 60 * 1000; // 10 min de margen por relojes desfasados entre equipos
-
-const claveDe = (it) =>
-  it == null ? null : String(it._docId ?? it.folio ?? it.id ?? "");
-
-const leerLocal = (key, def) => {
-  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : def; }
-  catch { return def; }
+// ============================================================
+// OPCIÓN A (recomendada): variables de entorno
+//   - Local: archivo .env en la raíz del proyecto (ver .env.example)
+//   - Vercel: Settings → Environment Variables (mismos nombres VITE_...)
+// OPCIÓN B: pegar la configuración directamente aquí abajo
+//   (reemplaza los null por los valores de tu consola Firebase)
+// ============================================================
+const CONFIG_MANUAL = {
+  apiKey: null,            // "AIza..."
+  authDomain: null,        // "tu-proyecto.firebaseapp.com"
+  projectId: null,         // "tu-proyecto"
+  storageBucket: null,     // "tu-proyecto.appspot.com"
+  messagingSenderId: null, // "123456789"
+  appId: null,             // "1:123:web:abc"
 };
 
-const visibles = (arr) => (arr || []).filter((x) => !x || !x._deleted);
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || CONFIG_MANUAL.apiKey,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || CONFIG_MANUAL.authDomain,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || CONFIG_MANUAL.projectId,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || CONFIG_MANUAL.storageBucket,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || CONFIG_MANUAL.messagingSenderId,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || CONFIG_MANUAL.appId,
+};
 
-export function useCollection(colName, localKey, defaultVal = []) {
-  const syncKey = localKey + "__sync";
-  const [data, setData] = useState(() => visibles(leerLocal(localKey, defaultVal)));
-  const [nube, setNube] = useState(false);
+export const firebaseListo = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId);
 
-  useEffect(() => {
-    if (!firebaseListo || !db) return;
-    let unsub = () => {};
-    let cancelado = false;
+// 🧹 Borra (una sola vez por equipo) la caché vieja de Firestore en IndexedDB, que se dañaba y provocaba
+// "FIRESTORE INTERNAL ASSERTION FAILED: Unexpected state". Ya no se usa: la app guarda su propia copia en localStorage.
+try {
+  if (typeof window !== "undefined" && window.indexedDB && !localStorage.getItem("ll_cache_fs_limpia_v1")) {
+    const marcar = () => { try { localStorage.setItem("ll_cache_fs_limpia_v1", "1"); } catch {} };
+    if (indexedDB.databases) {
+      indexedDB.databases().then((dbs) => {
+        (dbs || []).filter((d) => d && d.name && /firestore/i.test(d.name)).forEach((d) => { try { indexedDB.deleteDatabase(d.name); } catch {} });
+        marcar();
+      }).catch(marcar);
+    } else {
+      marcar();
+    }
+  }
+} catch {}
 
-    authReady.then(() => {
-      if (cancelado) return;
-      let ultimo = null;
-      try { ultimo = localStorage.getItem(syncKey); } catch {}
-      const copia = (() => { try { return JSON.parse(localStorage.getItem(localKey)); } catch { return null; } })();
-      const tieneCopia = Array.isArray(copia) && copia.length > 0;
-      // Primera vez con esta versión: si el equipo ya tiene copia local, arranca desde el cambio
-      // más reciente de esa copia (así NO vuelve a descargar todo).
-      if (!ultimo && tieneCopia) {
-        const max = copia.reduce((m, x) => (x && x._updatedAt && x._updatedAt > m ? x._updatedAt : m), "");
-        if (max) ultimo = max;
-      }
-
-      let q;
-      let completa = false;
-      if (ultimo && tieneCopia) {
-        const desde = new Date(new Date(ultimo).getTime() - MARGEN_MS).toISOString();
-        q = query(collection(db, colName), where("_updatedAt", ">", desde));
-      } else {
-        q = query(collection(db, colName)); // primera vez en este equipo: descarga completa
-        completa = true;
-      }
-
-      unsub = onSnapshot(q, (snap) => {
-        setNube(true);
-        let maxTs = ultimo || "";
-        const cambios = [];
-        snap.docChanges().forEach((ch) => {
-          if (ch.type === "removed" && !completa) return; // salió del filtro, no es un borrado
-          const d = { ...ch.doc.data(), _docId: ch.doc.id };
-          if (ch.type === "removed") d._deleted = true;
-          if (d._updatedAt && d._updatedAt > maxTs) maxTs = d._updatedAt;
-          cambios.push(d);
-        });
-
-        if (completa) {
-          // Descarga completa: el resultado ES la colección
-          const docs = snap.docs.map((d) => ({ ...d.data(), _docId: d.id }));
-          docs.forEach((d) => { if (d._updatedAt && d._updatedAt > maxTs) maxTs = d._updatedAt; });
-          const lista = visibles(docs);
-          setData(lista);
-          try { localStorage.setItem(localKey, JSON.stringify(lista)); } catch {}
-        } else if (cambios.length) {
-          setData((prev) => {
-            const mapa = new Map();
-            const sinClave = [];
-            (prev || []).forEach((it) => { const k = claveDe(it); k ? mapa.set(k, it) : sinClave.push(it); });
-            cambios.forEach((c) => {
-              const k = claveDe(c);
-              if (c._deleted) mapa.delete(k);
-              else mapa.set(k, { ...(mapa.get(k) || {}), ...c });
-            });
-            const lista = [...mapa.values(), ...sinClave];
-            try { localStorage.setItem(localKey, JSON.stringify(lista)); } catch {}
-            return lista;
-          });
-        }
-
-        if (!maxTs) maxTs = new Date().toISOString();
-        ultimo = maxTs;
-        try { localStorage.setItem(syncKey, maxTs); } catch {}
-        completa = false; // los siguientes snapshots ya son incrementales
-      }, (err) => {
-        console.error(`Firestore [${colName}]:`, err.message);
+let _db = null;
+let _storage = null; // 📷 Fotos de tareas (inventarios, evidencias) — mismo proyecto de Firebase, servicio Storage
+let _authReady = Promise.resolve(); // 🔒 se resuelve cuando ya se autenticó (anónimamente) contra Firebase
+if (firebaseListo) {
+  try {
+    const app = initializeApp(firebaseConfig);
+    // 🔧 Caché en MEMORIA (antes: persistentLocalCache en IndexedDB). La caché en IndexedDB se dañaba con varias
+    // pestañas abiertas o con poco espacio en el equipo, y Firestore dejaba de guardar. Sin internet, los cambios
+    // quedan en cola mientras la pestaña siga abierta, y la app conserva su copia local en localStorage.
+    _db = initializeFirestore(app, {
+      localCache: memoryLocalCache(),
+    });
+    _storage = getStorage(app);
+    // 🔒 SEGURIDAD: nos autenticamos de forma anónima automáticamente (sin pedirle nada a nadie).
+    // Esto permite exigir en las reglas de Firestore "solo si el usuario está autenticado",
+    // bloqueando así cualquier acceso directo a la base de datos desde fuera de esta app.
+    const auth = getAuth(app);
+    _authReady = new Promise((resolve) => {
+      onAuthStateChanged(auth, (user) => {
+        if (user) { resolve(user); return; }
+        signInAnonymously(auth).catch((e) => console.error("No se pudo autenticar:", e.message));
       });
     });
-
-    return () => { cancelado = true; unsub(); };
-  }, [colName, localKey]);
-
-  // Respaldar en localStorage cada cambio local (aunque no haya nube)
-  useEffect(() => {
-    try { localStorage.setItem(localKey, JSON.stringify(data)); } catch {}
-  }, [data, localKey]);
-
-  const upsert = async (item) => {
-    if (!firebaseListo || !db) return;
-    try {
-      await authReady;
-      const payload = { ...item, _updatedAt: new Date().toISOString() };
-      const id = item._docId || item.folio || item.id?.toString();
-      if (id) await setDoc(doc(db, colName, String(id)), payload, { merge: true });
-    } catch (e) { console.error(`Error guardando en ${colName}:`, e.message); }
-  };
-
-  // Borrado "suave": marca el documento para que todos los equipos lo quiten
-  const remove = async (docId) => {
-    setData((prev) => (prev || []).filter((it) => claveDe(it) !== String(docId)));
-    if (!firebaseListo || !db) return;
-    try {
-      await authReady;
-      await setDoc(doc(db, colName, String(docId)),
-        { _deleted: true, _updatedAt: new Date().toISOString() }, { merge: true });
-    } catch (e) { console.error(`Error eliminando en ${colName}:`, e.message); }
-  };
-
-  return { data, setData, loading: false, nube, upsert, remove };
+  } catch (e) {
+    console.error("Firebase no pudo inicializarse:", e);
+  }
+} else {
+  console.warn("⚠️ Firebase sin credenciales — la app funciona solo con datos locales (localStorage).");
 }
+
+export const db = _db;
+export const storage = _storage;
+export const authReady = _authReady;
