@@ -25,13 +25,17 @@ export const faltanteDe = (c) => Math.max(0, -(difFinalCierre(c) || 0));
 export const sobranteDe = (c) => Math.max(0, difFinalCierre(c) || 0);
 export const faltanteJustificado = (c) => !!c?.revision?.faltanteJustificado;
 export const faltanteADescontar = (c) => (faltanteJustificado(c) ? 0 : faltanteDe(c));
+// 📈 Sobrante que justificó la administradora: queda en CERO y el cierre vale lo correcto (contado − sobrante)
+export const sobranteJustificado = (c) => !!c?.sobranteRegularizado;
+export const sobranteEfectivo = (c) => (sobranteJustificado(c) ? 0 : sobranteDe(c));
+export const contadoEfectivo = (c) => (Number(c?.efN) || 0) - (sobranteJustificado(c) ? sobranteDe(c) : 0);
 
 // 📊 Estado de los cierres de un día: el resumen de ventas solo se abre cuando TODOS están revisados por Dayana
 export const estadoCierresDia = (cajas = [], dia) => {
   const delDia = cierresVigentes(cajas).filter((c) => c.dia === dia);
   const pendientes = delDia.filter((c) => !c.revision);
   const faltantes = delDia.reduce((a, c) => a + faltanteDe(c), 0);
-  const sobrantes = delDia.reduce((a, c) => a + sobranteDe(c), 0);
+  const sobrantes = delDia.reduce((a, c) => a + sobranteEfectivo(c), 0);
   return { cierres: delDia, pendientes, todosRevisados: delDia.length > 0 && pendientes.length === 0, faltantes, sobrantes };
 };
 
