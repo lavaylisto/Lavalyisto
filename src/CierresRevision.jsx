@@ -14,11 +14,32 @@ const norm = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toL
 export const difFinalCierre = (c) => (c?.dEf ?? 0);
 export const esCierreNuevo = (c) => c && c.tipo === "cierre" && c.soloEfectivo && !c.anulado;
 
-// ¿Esta sesión puede aceptar cierres? Dayana Pacheco, Micaela (Mica) y Natalia (por nombre) o una empleada con aceptaCierres:true
+// 🔁 Cada apertura→cierre es un turno distinto: si una colaboradora abre y cierra caja dos veces en el día,
+// son DOS cierres y Dayana debe revisar los dos (cada uno solo tiene los cobros de su turno).
+export const cierresVigentes = (cajas = []) => (cajas || []).filter(esCierreNuevo);
+const horaDe = (iso) => { try { return new Date(iso).toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
+export const turnoTxt = (c) => (c.desdeApertura ? `Turno ${horaDe(c.desdeApertura)} – ${horaDe(c.fecha)}` : `Cierre ${horaDe(c.fecha)}`);
+
+// ⚠️ Faltante de un cierre (positivo) y si se descuenta: NO se descuenta si Dayana lo marcó como justificado
+export const faltanteDe = (c) => Math.max(0, -(difFinalCierre(c) || 0));
+export const sobranteDe = (c) => Math.max(0, difFinalCierre(c) || 0);
+export const faltanteJustificado = (c) => !!c?.revision?.faltanteJustificado;
+export const faltanteADescontar = (c) => (faltanteJustificado(c) ? 0 : faltanteDe(c));
+
+// 📊 Estado de los cierres de un día: el resumen de ventas solo se abre cuando TODOS están revisados por Dayana
+export const estadoCierresDia = (cajas = [], dia) => {
+  const delDia = cierresVigentes(cajas).filter((c) => c.dia === dia);
+  const pendientes = delDia.filter((c) => !c.revision);
+  const faltantes = delDia.reduce((a, c) => a + faltanteDe(c), 0);
+  const sobrantes = delDia.reduce((a, c) => a + sobranteDe(c), 0);
+  return { cierres: delDia, pendientes, todosRevisados: delDia.length > 0 && pendientes.length === 0, faltantes, sobrantes };
+};
+
+// ¿Esta sesión puede aceptar cierres? ÚNICAMENTE Dayana Pacheco (o una empleada marcada con aceptaCierres:true)
 export const puedeAceptarCierres = (sesion, empleadas = []) => {
   const emp = (empleadas || []).find((e) => String(e.id) === String(sesion?.id));
   const n = norm(sesion?.nombre) + " " + norm(emp?.nombre);
-  return !!(emp?.aceptaCierres || (n.includes("dayana") && n.includes("pacheco")) || n.includes("micaela") || /\bmica\b/.test(n) || n.includes("natalia"));
+  return !!(emp?.aceptaCierres || (n.includes("dayana") && n.includes("pacheco")));
 };
 
 const card = { background: "#fff", borderRadius: 12, padding: "12px 14px", marginBottom: 12, boxShadow: "0 1px 6px rgba(26,60,94,.08)", border: "1px solid #e8f0f7" };
@@ -64,26 +85,34 @@ export function ResumenCierre({ c }) {
 }
 
 // ✅ Pantalla de Dayana: cierres de días anteriores pendientes de revisar el dinero físicamente
-export function RevisionCierres({ cajas = [], upsertCaja, sesion }) {
+export function RevisionCierres({ cajas = [], upsertCaja, sesion, puedeAceptar = true }) {
   const hoy = hoyLocal();
   const [abierto, setAbierto] = useState(null);
   const [obs, setObs] = useState({});
+  const [justif, setJustif] = useState({}); // { [cierreId]: "justificado" | "descuento" } — decisión de Dayana sobre el faltante
   const [verAceptados, setVerAceptados] = useState(false);
 
-  const cierres = (cajas || []).filter(esCierreNuevo);
+  const cierres = cierresVigentes(cajas);
   // Recién al día siguiente: solo cierres de días ANTERIORES a hoy
   const pendientes = cierres.filter((c) => !c.revision && c.dia < hoy).sort((a, b) => a.dia.localeCompare(b.dia) || (a.fecha || "").localeCompare(b.fecha || ""));
   const deHoy = cierres.filter((c) => !c.revision && c.dia === hoy).length;
   const aceptados = cierres.filter((c) => c.revision).sort((a, b) => (b.revision.fecha || "").localeCompare(a.revision.fecha || "")).slice(0, 15);
 
   const resolver = (c, estado) => {
+    if (!puedeAceptar) return;
     const motivo = (obs[c.id] || "").trim();
+    const hayFaltante = faltanteDe(c) > 0.004;
+    const justificado = estado === "aceptado" && hayFaltante && justif[c.id] === "justificado";
     if (estado === "rechazado" && !motivo) { alert("Escribe el motivo del rechazo"); return; }
-    const msg = `¿${estado === "aceptado" ? "Aceptar" : "Rechazar"} el cierre de ${c.emp} del ${fmtDia(c.dia)}?${motivo ? "\n\nMotivo: " + motivo : ""}`;
+    if (estado === "aceptado" && hayFaltante && !justif[c.id]) { alert("Este cierre tiene un faltante: elige si está JUSTIFICADO o si va a DESCUENTO."); return; }
+    if (justificado && !motivo) { alert("Escribe la justificación del faltante"); return; }
+    const msg = `¿${estado === "aceptado" ? "Aceptar" : "Rechazar"} el cierre de ${c.emp} del ${fmtDia(c.dia)}?`
+      + (faltanteDe(c) > 0.004 && estado === "aceptado" ? (justificado ? `\n\n✅ Faltante de ${$(faltanteDe(c))} JUSTIFICADO: no se descuenta.` : `\n\n⚠️ Faltante de ${$(faltanteDe(c))}: se descuenta a fin de mes.`) : "")
+      + (motivo ? "\n\nMotivo: " + motivo : "");
     if (!window.confirm(msg)) return;
     const act = {
       ...c,
-      revision: { estado, por: sesion?.nombre || "", porId: sesion?.id ?? null, fecha: new Date().toISOString(), motivo, difFinal: c.dEf ?? 0 },
+      revision: { estado, por: sesion?.nombre || "", porId: sesion?.id ?? null, fecha: new Date().toISOString(), motivo, difFinal: c.dEf ?? 0, faltanteJustificado: justificado, justificacion: justificado ? motivo : "" },
       estadoRevision: estado,
     };
     if (upsertCaja) upsertCaja(act);
@@ -94,10 +123,11 @@ export function RevisionCierres({ cajas = [], upsertCaja, sesion }) {
     <div style={{ padding: 14 }}>
       <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 20, color: C.azul, fontWeight: 700, marginBottom: 4 }}>✅ Aceptar cierres de caja</div>
       <div style={{ fontSize: 12, color: C.gris, marginBottom: 12 }}>
-        Revisa físicamente el dinero de cada cierre y acéptalo o recházalo. Los cierres aparecen aquí recién al día siguiente.
+        Revisa físicamente el dinero de cada cierre y acéptalo o recházalo. Los cierres aparecen aquí recién al día siguiente. El resumen de ventas de un día se abre cuando todos sus cierres están revisados.
         {deHoy > 0 && <> Hoy hay {deHoy} cierre{deHoy > 1 ? "s que aparecerán" : " que aparecerá"} mañana.</>}
       </div>
 
+      {!puedeAceptar && <div style={{ ...card, background: "#fff8e1", color: "#8a5a00", fontSize: 13 }}>🔒 Solo <strong>Dayana Pacheco</strong> puede aceptar o rechazar cierres. Aquí puedes ver cuáles están pendientes.</div>}
       {pendientes.length === 0 && <div style={{ ...card, textAlign: "center", color: C.verde, fontWeight: 700 }}>🎉 No hay cierres pendientes de aceptar</div>}
 
       {pendientes.map((c) => {
@@ -107,7 +137,7 @@ export function RevisionCierres({ cajas = [], upsertCaja, sesion }) {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }} onClick={() => setAbierto(abiertoEste ? null : c.id)}>
               <div>
                 <div style={{ fontWeight: 800, color: C.azul, fontSize: 14 }}>{c.emp}</div>
-                <div style={{ fontSize: 12, color: C.gris, textTransform: "capitalize" }}>{fmtDia(c.dia)} · {new Date(c.fecha).toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit" })}</div>
+                <div style={{ fontSize: 12, color: C.gris }}><span style={{ textTransform: "capitalize" }}>{fmtDia(c.dia)}</span> · {turnoTxt(c)}</div>
               </div>
               <div style={{ textAlign: "right" }}>
                 <Diferencia d={c.dEf || 0} />
@@ -117,14 +147,28 @@ export function RevisionCierres({ cajas = [], upsertCaja, sesion }) {
             {abiertoEste && (
               <div style={{ marginTop: 10 }}>
                 <ResumenCierre c={c} />
-                <div style={{ background: "#f8fbfd", borderRadius: 8, padding: 10, marginTop: 10 }}>
-                  <label style={{ fontSize: 12, fontWeight: 700, color: C.azul }}>📝 Motivo (obligatorio si rechazas)</label>
+                {puedeAceptar && <div style={{ background: "#f8fbfd", borderRadius: 8, padding: 10, marginTop: 10 }}>
+                  {faltanteDe(c) > 0.004 && (
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: C.rojo, marginBottom: 6 }}>⚠️ Faltante de {$(faltanteDe(c))} — ¿qué se hace?</div>
+                      {[
+                        { v: "justificado", t: "✅ Justificado", d: "No se descuenta a la colaboradora. Escribe la justificación.", bg: "#e8f5e9", bc: C.verde },
+                        { v: "descuento", t: "💸 Enviar a descuento", d: `Se descuenta a ${c.emp?.split(" ")[0] || "la colaboradora"} en su rol de fin de mes.`, bg: "#ffebee", bc: C.rojo },
+                      ].map((o) => (
+                        <label key={o.v} style={{ display: "flex", alignItems: "flex-start", gap: 8, background: justif[c.id] === o.v ? o.bg : "#fff", border: "1.5px solid " + (justif[c.id] === o.v ? o.bc : "#e0e8f0"), borderRadius: 8, padding: "8px 10px", marginBottom: 6, cursor: "pointer", fontSize: 13 }}>
+                          <input type="radio" name={"falt_" + c.id} checked={justif[c.id] === o.v} onChange={() => setJustif({ ...justif, [c.id]: o.v })} style={{ width: 18, height: 18, marginTop: 1 }} />
+                          <span><strong>{o.t}</strong><span style={{ display: "block", fontSize: 11, color: "#666" }}>{o.d}</span></span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  <label style={{ fontSize: 12, fontWeight: 700, color: C.azul }}>📝 {faltanteDe(c) > 0.004 && justif[c.id] === "justificado" ? "Justificación del faltante (obligatoria)" : "Observación (obligatoria si rechazas)"}</label>
                   <textarea rows={2} style={{ ...inp, fontSize: 13, marginTop: 4 }} value={obs[c.id] || ""} onChange={(e) => setObs({ ...obs, [c.id]: e.target.value })} />
                   <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                     <button style={{ ...btn("linear-gradient(135deg,#c62828,#e53935)"), flex: 1 }} onClick={() => resolver(c, "rechazado")}>✕ Rechazar</button>
                     <button style={{ ...btn("linear-gradient(135deg,#2e7d32,#388e3c)"), flex: 2 }} onClick={() => resolver(c, "aceptado")}>✅ Aceptar cierre</button>
                   </div>
-                </div>
+                </div>}
               </div>
             )}
           </div>
@@ -138,9 +182,10 @@ export function RevisionCierres({ cajas = [], upsertCaja, sesion }) {
         <div key={c.id} style={{ ...card, padding: "8px 12px" }}>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <div>
-              <div style={{ fontWeight: 700, color: C.azul, fontSize: 13 }}>{c.emp} · <span style={{ textTransform: "capitalize" }}>{fmtDia(c.dia)}</span></div>
+              <div style={{ fontWeight: 700, color: C.azul, fontSize: 13 }}>{c.emp} · <span style={{ textTransform: "capitalize" }}>{fmtDia(c.dia)}</span> · {turnoTxt(c)}</div>
               <div style={{ fontSize: 11, color: c.revision.estado === "rechazado" ? C.rojo : C.verde, fontWeight: 600 }}>{c.revision.estado === "rechazado" ? "✕ Rechazado" : "✅ Aceptado"} por {c.revision.por} · {new Date(c.revision.fecha).toLocaleString("es-EC")}</div>
               {c.revision.motivo && <div style={{ fontSize: 11, color: "#555" }}>📝 {c.revision.motivo}</div>}
+              {faltanteDe(c) > 0.004 && <div style={{ fontSize: 11, fontWeight: 700, color: faltanteJustificado(c) ? C.verde : C.rojo }}>{faltanteJustificado(c) ? "✅ Faltante justificado — no se descuenta" : "💸 Faltante enviado a descuento"}</div>}
             </div>
             <div style={{ textAlign: "right" }}><Diferencia d={c.dEf || 0} /><div style={{ fontSize: 11, color: C.gris }}>Depositar {$(c.efN)}</div></div>
           </div>
@@ -151,15 +196,16 @@ export function RevisionCierres({ cajas = [], upsertCaja, sesion }) {
 }
 
 // ⚠️ Pantalla de la colaboradora: sus faltantes de caja (se descuentan a fin de mes)
-export function FaltantesCaja({ cajas = [], sesion }) {
+export function FaltantesCaja({ cajas = [], sesion, upsertCaja }) {
   const mesHoy = hoyLocal().slice(0, 7);
   const [mes, setMes] = useState(mesHoy);
-  const mios = (cajas || []).filter((c) => esCierreNuevo(c) && String(c.empleadaId) === String(sesion?.id) && (c.dia || "").startsWith(mes))
+  const mios = cierresVigentes(cajas).filter((c) => String(c.empleadaId) === String(sesion?.id) && (c.dia || "").startsWith(mes))
     .sort((a, b) => b.dia.localeCompare(a.dia));
-  const conFaltante = mios.filter((c) => difFinalCierre(c) < -0.004);
+  const conFaltante = mios.filter((c) => faltanteDe(c) > 0.004);
   const conSobrante = mios.filter((c) => difFinalCierre(c) > 0.004);
-  const totFalt = conFaltante.reduce((a, c) => a + Math.abs(difFinalCierre(c)), 0);
-  const totFaltConf = conFaltante.filter((c) => c.revision?.estado === "aceptado").reduce((a, c) => a + Math.abs(difFinalCierre(c)), 0);
+  const totFalt = conFaltante.reduce((a, c) => a + faltanteADescontar(c), 0); // los justificados no se descuentan
+  const totJustif = conFaltante.filter(faltanteJustificado).reduce((a, c) => a + faltanteDe(c), 0);
+  const totFaltConf = conFaltante.filter((c) => c.revision?.estado === "aceptado").reduce((a, c) => a + faltanteADescontar(c), 0);
 
   return (
     <div style={{ padding: 14 }}>
@@ -167,9 +213,11 @@ export function FaltantesCaja({ cajas = [], sesion }) {
       <input type="month" style={{ ...inp, marginBottom: 12, maxWidth: 200 }} value={mes} onChange={(e) => e.target.value && setMes(e.target.value)} />
 
       <div style={{ ...card, background: totFalt > 0 ? "#ffebee" : "#e8f5e9", textAlign: "center" }}>
-        <div style={{ fontSize: 12, color: C.gris }}>Total faltantes del mes</div>
+        <div style={{ fontSize: 12, color: C.gris }}>Faltantes a descontar este mes</div>
         <div style={{ fontSize: 26, fontWeight: 800, color: totFalt > 0 ? C.rojo : C.verde }}>{$(totFalt)}</div>
-        {totFalt > 0 && <div style={{ fontSize: 12, color: C.rojo }}>Se descontará en tu rol de pagos de fin de mes. Aceptados: {$(totFaltConf)}</div>}
+        {totFalt > 0 && <div style={{ fontSize: 12, color: C.rojo }}>Se descontará en tu rol de pagos de fin de mes. Ya aceptados por Dayana: {$(totFaltConf)}</div>}
+        {totJustif > 0 && <div style={{ fontSize: 12, color: C.verde }}>✅ Justificados (no se descuentan): {$(totJustif)}</div>}
+        {conFaltante.some((c) => !c.revision) && <div style={{ fontSize: 11, color: "#8a5a00", marginTop: 4 }}>Dayana revisa cada faltante al día siguiente y decide si está justificado o va a descuento.</div>}
       </div>
 
       {mios.length === 0 && <div style={{ textAlign: "center", color: "#aaa", padding: 20, fontSize: 13 }}>No tienes cierres en este mes.</div>}
@@ -179,7 +227,7 @@ export function FaltantesCaja({ cajas = [], sesion }) {
           <div key={c.id} style={{ ...card, padding: "10px 12px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
-                <div style={{ fontWeight: 700, color: C.azul, fontSize: 13, textTransform: "capitalize" }}>{fmtDia(c.dia)}</div>
+                <div style={{ fontWeight: 700, color: C.azul, fontSize: 13 }}><span style={{ textTransform: "capitalize" }}>{fmtDia(c.dia)}</span> · {turnoTxt(c)}</div>
                 <div style={{ fontSize: 11, color: C.gris }}>
                   Esperado {$(c.espEf)} · Contado {$(c.efN)}
                 </div>
@@ -187,6 +235,7 @@ export function FaltantesCaja({ cajas = [], sesion }) {
                   {!c.revision ? "⏳ Pendiente de revisión" : c.revision.estado === "rechazado" ? `✕ Rechazado por ${c.revision.por}` : `✔️ Aceptado por ${c.revision.por}`}
                 </div>
                 {c.revision?.motivo && <div style={{ fontSize: 11, color: "#555" }}>📝 {c.revision.motivo}</div>}
+                {faltanteDe(c) > 0.004 && c.revision && <div style={{ fontSize: 11, color: faltanteJustificado(c) ? C.verde : C.rojo, fontWeight: 700 }}>{faltanteJustificado(c) ? "✅ Justificado por Dayana — no se descuenta" : "💸 Enviado a descuento"}</div>}
               </div>
               <Diferencia d={d} />
             </div>
@@ -200,7 +249,7 @@ export function FaltantesCaja({ cajas = [], sesion }) {
 
 // 🏦 Para Depósitos (admin): diferencias de cierre de un día y regularización de sobrantes
 export function DiferenciasCierreDia({ dia, cajas = [], upsertCaja, esAdmin, sesion }) {
-  const delDia = (cajas || []).filter((c) => esCierreNuevo(c) && c.dia === dia);
+  const delDia = cierresVigentes(cajas).filter((c) => c.dia === dia);
   if (delDia.length === 0) return null;
   const regularizar = (c) => {
     const nota = window.prompt(`Regularizar sobrante de ${$(difFinalCierre(c))} de ${c.emp}.\nEscribe el motivo o cómo se regularizó:`);
@@ -220,7 +269,9 @@ export function DiferenciasCierreDia({ dia, cajas = [], upsertCaja, esAdmin, ses
               <span style={{ color: !c.revision ? "#e65100" : c.revision.estado === "rechazado" ? C.rojo : C.verde, marginLeft: 6 }}>{!c.revision ? "⏳ sin revisar" : c.revision.estado === "rechazado" ? "✕ rechazado" : "✔️ aceptado"}</span>
               {c.revision?.estado === "rechazado" && c.revision.motivo && <div style={{ fontSize: 11, color: C.rojo }}>Motivo: {c.revision.motivo}</div>}
               {c.sobranteRegularizado && <div style={{ fontSize: 11, color: C.verde }}>✅ Sobrante regularizado por {c.sobranteRegularizado.por}: {c.sobranteRegularizado.nota}</div>}
-              {d < -0.004 && <div style={{ fontSize: 11, color: C.rojo }}>Faltante: se descuenta a fin de mes</div>}
+              {d < -0.004 && (faltanteJustificado(c)
+                ? <div style={{ fontSize: 11, color: C.verde }}>✅ Faltante justificado — no se descuenta{c.revision?.justificacion ? `: ${c.revision.justificacion}` : ""}</div>
+                : <div style={{ fontSize: 11, color: C.rojo }}>Faltante: se descuenta a fin de mes</div>)}
             </div>
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
               <Diferencia d={d} />
