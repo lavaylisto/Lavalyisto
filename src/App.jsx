@@ -28,7 +28,7 @@ if(typeof window!=="undefined"){
 }
 import { useCollection } from "./hooks/useFirestore";
 import Campanas from "./Campanas";
-import { RevisionCierres, FaltantesCaja, DiferenciasCierreDia, puedeAceptarCierres } from "./CierresRevision";
+import { RevisionCierres, FaltantesCaja, DiferenciasCierreDia, puedeAceptarCierres, estadoCierresDia } from "./CierresRevision";
 import { storage } from "./firebase";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 
@@ -4408,7 +4408,7 @@ function PantallaEmpleada({cajas=[],ventas,setVentas,clientes,setClientes,emplea
         {tab==="bonos"
           ?<MisIncentivos ventas={ventas} empleadas={empleadas} sesion={sesion} cfgInc={cfgInc||INCENTIVOS_DEFAULT[0]} ventasPerfumeReg={ventasPerfumeReg} setVentasPerfumeReg={setVentasPerfumeReg} upsertVentaPerfume={upsertVentaPerfume}/>
           :tab==="resumen"
-            ?<ResumenDia ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja}/>
+            ?<ResumenDia ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja} cajas={cajas} bloquear={true}/>
           :tab==="depositosEmp"
             ?<Depositos depositos={depositos} setDepositos={setDepositos} ventas={ventas} salidasCaja={salidasCaja} upsertDeposito={upsertDeposito} cajas={cajas} upsertCaja={upsertCaja} esAdmin={false} sesion={sesion}/>
           :tab==="conteoEmp"
@@ -4424,7 +4424,7 @@ function PantallaEmpleada({cajas=[],ventas,setVentas,clientes,setClientes,emplea
           :tab==="faltantesEmp"
             ?<FaltantesCaja cajas={cajas} sesion={sesion}/>
           :tab==="revisionCierres"
-            ?<RevisionCierres cajas={cajas} upsertCaja={upsertCaja} sesion={sesion}/>
+            ?<RevisionCierres cajas={cajas} upsertCaja={upsertCaja} sesion={sesion} puedeAceptar={puedeAceptarCierres(sesion,empleadas)}/>
           :tab==="clientes"
             ?<Clientes clientes={clientes} setClientes={setClientes} upsertCliente={upsertCliente} ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} esAdmin={false}/>
           :filtrados.length===0
@@ -4716,6 +4716,56 @@ function PromosDelDia({promos,servicios,onAgregar,onCerrar}){
   );
 }
 
+// 📣 RECORDATORIO AL ELEGIR CLIENTE — sorteo activo, cómo ganar boletos y promos del día, para ofrecerlo en voz alta
+function RecordatorioCliente({nombre,sorteos,promos,servicios,productos,onCerrar}){
+  const sorteo=sorteoActivoHoy(sorteos);
+  const promosHoy=promosDeHoy(promos,servicios);
+  const aromas=(productos||[]).filter(p=>!p.eliminada&&p.categoria==="aromatizador");
+  const nombreDia=new Date().toLocaleDateString("es-EC",{weekday:"long"});
+  const primer=(nombre||"").trim().split(" ")[0];
+  const fmtF=d=>{try{return new Date(d+"T12:00:00").toLocaleDateString("es-EC",{day:"numeric",month:"long"});}catch{return d;}};
+  if(!sorteo&&promosHoy.length===0)return null;
+  return(
+    <div style={{...S.ov,zIndex:96}}>
+      <div style={{background:"#fff",borderRadius:18,width:"100%",maxWidth:420,maxHeight:"88vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,.35)"}}>
+        <div style={{background:"linear-gradient(135deg,#001847,#00396b)",borderRadius:"18px 18px 0 0",padding:"16px 20px",textAlign:"center"}}>
+          <div style={{fontSize:32}}>📣</div>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:19,fontWeight:700,color:"#fff"}}>Antes de seguir, cuéntale a {primer||"tu cliente"}</div>
+          <div style={{fontSize:12,color:"#00E5B8",textTransform:"capitalize"}}>{nombreDia}</div>
+        </div>
+        <div style={{padding:"14px 16px"}}>
+          {sorteo&&(
+            <div style={{background:"#fff8e1",border:"1.5px solid #f59e0b",borderRadius:12,padding:"12px 14px",marginBottom:12}}>
+              <div style={{fontWeight:800,fontSize:15,color:"#1a3c5e"}}>🎟️ {sorteo.nombre||"Sorteo"}{sorteo.premio?` · ${sorteo.premio}`:""}</div>
+              {sorteo.fechaFin&&<div style={{fontSize:12,color:"#8a5a00",marginBottom:6}}>Participa hasta el {fmtF(sorteo.fechaFin)}</div>}
+              <div style={{fontSize:12,fontWeight:700,color:"#1a3c5e",margin:"6px 0 4px"}}>Cómo ganar un boleto:</div>
+              {sorteo.umbralMonto>0&&<div style={{fontSize:13,padding:"2px 0"}}>💵 <strong>1 boleto por cada ${(sorteo.umbralMonto||0).toFixed(2)}</strong> de compra</div>}
+              {aromas.length>0&&<div style={{fontSize:13,padding:"2px 0"}}>🧴 <strong>1 boleto</strong> por comprar un aromatizante textil{aromas.length<=3?` (${aromas.map(a=>a.nombre).join(", ")})`:""}</div>}
+              <div style={{fontSize:13,padding:"2px 0"}}>🌟 <strong>1 boleto extra</strong> por seguirnos en redes y dejarnos una reseña en Google</div>
+            </div>
+          )}
+          {promosHoy.length>0&&(
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:12,fontWeight:700,color:"#1a3c5e",marginBottom:6}}>🎁 Promos de hoy</div>
+              {promosHoy.map(p=>(
+                <div key={p.id} style={{display:"flex",alignItems:"center",gap:10,background:p.dias?"#e8fff9":"#f8fbfd",border:`1.5px solid ${p.dias?"#00E5B8":"#e8f0f7"}`,borderRadius:10,padding:"9px 12px",marginBottom:6}}>
+                  <div style={{fontSize:22}}>{p.emoji||"🎁"}</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontWeight:700,fontSize:13,color:"#1a3c5e"}}>{p.titulo}</div>
+                    {p.detalle&&<div style={{fontSize:11,color:"#888"}}>{p.detalle}</div>}
+                  </div>
+                  <div style={{fontWeight:800,fontSize:14,color:"#1a3c5e",flexShrink:0}}>{p.precioTxt}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          <button style={{...S.btnP,width:"100%"}} onClick={onCerrar}>✓ Ya le conté — continuar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,servicios,sesion,upsertVenta,upsertCliente,cupones=[],setCupones,upsertCupon,cuponNuevoConfig,setCuponNuevoConfig,upsertCuponNuevoConfig,promos,productos=[],setProductos,upsertProducto,setKardexProductos,upsertKardexProducto,sorteos=[],setSorteos,upsertSorteo,setBoletosSorteo,upsertBoletoSorteo,onBoletosGenerados}){
   const man=new Date();man.setDate(man.getDate()+1);
   const [cQ,setCQ]=useState("");const [cId,setCId]=useState(null);
@@ -4748,6 +4798,15 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
   const [obsPrendaMancha,setObsPrendaMancha]=useState("");
   const cFilt=clientes.filter(c=>(c.nombre||"").toLowerCase().includes(cQ.toLowerCase())||(c.tel&&c.tel.includes(cQ))).slice(0,5);
   const selC=clientes.find(c=>c.id===cId);
+  // 📣 Recordatorio de sorteo y promos: sale una vez por venta, al elegir el cliente o al completar los datos del cliente nuevo
+  const [recordatorio,setRecordatorio]=useState(null); // nombre del cliente cuando hay que mostrarlo
+  const [recordatorioVisto,setRecordatorioVisto]=useState(false);
+  const telNuevoOk=String(nC.tel||"").replace(/\D/g,"").length>=10;
+  useEffect(()=>{
+    if(recordatorioVisto)return;
+    if(mC==="buscar"&&cId&&selC){setRecordatorio(selC.nombre);setRecordatorioVisto(true);}
+    else if(mC==="nuevo"&&nC.nombre.trim().length>=3&&telNuevoOk){setRecordatorio(nC.nombre);setRecordatorioVisto(true);}
+  },[cId,mC,nC.nombre,telNuevoOk,recordatorioVisto]);
   // 🛍️ Productos activos disponibles para vender (catálogo, sin los eliminados)
   const productosActivos=(productos||[]).filter(p=>!p.eliminada);
   const calcT=()=>items.reduce((a,it)=>{
@@ -4965,7 +5024,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
       }
     }
     setWaVenta(v); // WhatsApp obligatorio antes de mostrar el ticket
-    setCQ("");setCId(null);setNC({nombre:"",tel:"",cedula:"",email:"",rfc:"",direccion:"",nacimiento:""});setDescCumple(false);setImpulsos([]);setCupApl(null);setCupInput("");setCupErr("");
+    setCQ("");setCId(null);setNC({nombre:"",tel:"",cedula:"",email:"",rfc:"",direccion:"",nacimiento:""});setRecordatorioVisto(false);setRecordatorio(null);setDescCumple(false);setImpulsos([]);setCupApl(null);setCupInput("");setCupErr("");
     setTienePrendaMancha(null);setObsPrendaMancha("");setBoletoResena(false);setProtocoloCumplido(true);
     setItems([{servId:servicios[0]?.id,piezas:1,custom:false,esProducto:false,productoId:null,lC:"",pC:""}]);
     setNotas("");setErr("");setAbono("");setTPago("completo");
@@ -5204,6 +5263,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
       </div>
       </div>
       </div>
+      {recordatorio&&<RecordatorioCliente nombre={recordatorio} sorteos={sorteos} promos={promos} servicios={servicios} productos={productos} onCerrar={()=>setRecordatorio(null)}/>}
       {showPromos&&!waVenta&&<PromosDelDia promos={promos} servicios={servicios} onAgregar={agregarPromo} onCerrar={()=>{setShowPromos(false);reg(true);}}/>}
       {segundaPromoActiva&&<SegundaUnidadPicker promo={segundaPromoActiva} servicios={servicios} onElegir={elegirSegundaUnidad} onCancelar={()=>{if(segundaPromoActiva?.deCupon)setCupApl(null);setSegundaPromoActiva(null);}}/>}
       {waVenta&&<WhatsAppObligatorio venta={waVenta} tipo="recibido" onConfirm={confirmarWaRecibido}/>}
@@ -9715,6 +9775,9 @@ function CierreCaja({cajas=[],ventas,empleadas,onLogout,onCierreListo,onResetCie
     if(setVentas)setVentas(prev=>{const next=prev.map(vv=>vv.folio===venta.folio?{...vv,msgSatisfaccion:info}:vv);const updated=next.find(vv=>vv.folio===venta.folio);if(updated&&upsertVenta)upsertVenta(updated);return next;});
     setWaRevisionEntrega(null);
   };
+  // ⏱️ Inicio del turno = hora de la apertura de caja actual
+  const desdeAp=ap?.fecha?Date.parse(ap.fecha):null;
+  const tsSalida=s=>{if(typeof s.id==="number")return s.id;const m=String(s.id||"").match(/\d{13}/);return m?parseInt(m[0]):null;};
   const todosAbonos=ventas.filter(v=>!v.anulada).flatMap(v=>(v.abonos||[]).filter(ab=>{
     const tieneId=ab.cobradoPorId!=null;
     const mismoUsuario=tieneId
@@ -9723,14 +9786,16 @@ function CierreCaja({cajas=[],ventas,empleadas,onLogout,onCierreListo,onResetCie
     // Comparar fecha LOCAL del abono (no UTC) con hoy local
     const fechaLocalAbono=ab.fecha?(()=>{const dt=new Date(ab.fecha);const off=dt.getTimezoneOffset();const l=new Date(dt.getTime()-off*60000);return l.toISOString().split("T")[0];})():"";
     const esHoy=fechaLocalAbono===hoy;
-    return mismoUsuario&&esHoy;
+    // 🔁 Solo los cobros de ESTE turno: desde la hora de esta apertura (si abre caja otra vez, empieza de cero)
+    const enTurno=desdeAp==null||(ab.fecha&&Date.parse(ab.fecha)>=desdeAp);
+    return mismoUsuario&&esHoy&&enTurno;
   }));
   // Cobros del usuario
   const espEfBruto=todosAbonos.filter(a=>a.metodo==="Efectivo").reduce((a,ab)=>a+ab.monto,0);
   const espTr=todosAbonos.filter(a=>esTr(a.metodo)).reduce((a,ab)=>a+ab.monto,0);
   const espTa=todosAbonos.filter(a=>a.metodo==="Tarjeta").reduce((a,ab)=>a+ab.monto,0);
   // Salidas de caja de este usuario hoy — se descuentan del efectivo esperado (sin las eliminadas)
-  const misSalidas=(salidasCaja||[]).filter(s=>String(s.quienId)===String(uid)&&s.fecha===hoy&&!s.eliminada);
+  const misSalidas=(salidasCaja||[]).filter(s=>String(s.quienId)===String(uid)&&s.fecha===hoy&&!s.eliminada&&(desdeAp==null||tsSalida(s)==null||tsSalida(s)>=desdeAp));
   const totMisSalidas=parseFloat(misSalidas.reduce((a,s)=>a+s.monto,0).toFixed(2));
   const espEf=parseFloat((espEfBruto-totMisSalidas).toFixed(2)); // efectivo esperado neto
   const espTot=parseFloat((espEf+espTr+espTa).toFixed(2));
@@ -9819,7 +9884,7 @@ function CierreCaja({cajas=[],ventas,empleadas,onLogout,onCierreListo,onResetCie
   const confirmar=()=>{
     const hoyC=fechaHoyLocal();
     if(cierreHoyNube||cg){alert("Este cierre ya fue confirmado y no se puede repetir. Para otro turno, abre caja nuevamente.");return;}
-    const d={id:"ci_"+hoyC+"_"+(sesion?.id||"x")+"_"+Date.now(),tipo:"cierre",dia:hoyC,empleadaId:sesion?.id,fecha:new Date().toISOString(),emp:sesion?.nombre||"",bills,coins,totEf,fd,efN,tPic:0,tJep:0,totTr:espTr,totTa:espTa,dEf,dTr:0,dTa:0,dTot:dEf,soloEfectivo:true,aperturaId:ap?.id||null,sesId,difTipo:dEf>0?"sobrante":dEf<0?"faltante":"cuadra",estadoRevision:"pendiente",espEf,espEfBruto,espTr,espTa,espTot,totMisSalidas,misSalidas,nv:todosAbonos.length,tv:todosAbonos.reduce((a,ab)=>a+ab.monto,0)};
+    const d={id:"ci_"+hoyC+"_"+(sesion?.id||"x")+"_"+Date.now(),tipo:"cierre",dia:hoyC,empleadaId:sesion?.id,fecha:new Date().toISOString(),emp:sesion?.nombre||"",bills,coins,totEf,fd,efN,tPic:0,tJep:0,totTr:espTr,totTa:espTa,dEf,dTr:0,dTa:0,dTot:dEf,soloEfectivo:true,aperturaId:ap?.id||null,desdeApertura:ap?.fecha||null,sesId,difTipo:dEf>0?"sobrante":dEf<0?"faltante":"cuadra",estadoRevision:"pendiente",espEf,espEfBruto,espTr,espTa,espTot,totMisSalidas,misSalidas,nv:todosAbonos.length,tv:todosAbonos.reduce((a,ab)=>a+ab.monto,0)};
     try{localStorage.setItem(CK,JSON.stringify(d));}catch{}
     if(upsertCaja)upsertCaja(d); // ☁️ cierre guardado en la nube
     setCg(d);
@@ -11536,11 +11601,11 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
       {tab==="campanas"&&<Campanas ventas={ventas} clientes={clientes} envios={campanasEnvios} setEnvios={setCampanasEnvios} upsertEnvio={upsertCampanaEnvio} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} sesion={sesion}/>}
       {tab==="promosAdmin"&&<PromosAdmin promos={promos} setPromos={setPromos} upsertPromo={upsertPromo} servicios={servicios}/>}
       {tab==="cupones"&&<Cupones cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} cuponNuevoConfig={cuponNuevoConfig} setCuponNuevoConfig={setCuponNuevoConfig} upsertCuponNuevoConfig={upsertCuponNuevoConfig} clientes={clientes} ventas={ventas} empleadas={empleadas} sesion={sesion}/>}
-      {tab==="resumen"&&<ResumenDia ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja}/>}
+      {tab==="resumen"&&<ResumenDia ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja} cajas={cajas}/>}
       {tab==="satisfaccionAdmin"&&<SatisfaccionClientes ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta}/>}
       {tab==="reportes"&&<Reportes ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja}/>}
       {tab==="depositos"&&<Depositos depositos={depositos} setDepositos={setDepositos} ventas={ventas} salidasCaja={salidasCaja} upsertDeposito={upsertDeposito} cajas={cajas} upsertCaja={upsertCaja} esAdmin={true} sesion={sesion}/>}
-      {tab==="revisionCierres"&&<RevisionCierres cajas={cajas} upsertCaja={upsertCaja} sesion={sesion}/>}
+      {tab==="revisionCierres"&&<RevisionCierres cajas={cajas} upsertCaja={upsertCaja} sesion={sesion} puedeAceptar={puedeAceptarCierres(sesion,empleadas)}/>}
       {tab==="conciliacion"&&<Conciliacion ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} depositos={depositos} setDepositos={setDepositos} upsertDeposito={upsertDeposito}/>}
       {tab==="conciliacionBanco"&&<ConciliacionBancaria ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} depositos={depositos} setDepositos={setDepositos} upsertDeposito={upsertDeposito} gastos={gastos} setGastos={setGastos} upsertGasto={upsertGasto} empleadas={empleadas} rolesPago={rolesPago} estadosCuenta={estadosCuenta} setEstadosCuenta={setEstadosCuenta} upsertEstadoCuenta={upsertEstadoCuenta} sesion={sesion}/>}
       {tab==="gastos"&&<Gastos compras={comprasInsumos} setCompras={setComprasInsumos} upsertCompra={upsertCompraInsumo} empleadas={empleadas} rolesPago={rolesPago} gastosFijosConfig={gastosFijosConfig} setGastosFijosConfig={setGastosFijosConfig} upsertGastosFijosConfig={upsertGastosFijosConfig} gastos={gastos} setGastos={setGastos} sesion={sesion} upsertGasto={upsertGasto} salidasCaja={salidasCaja} activosFijos={activosFijos} setActivosFijos={setActivosFijos} upsertActivoFijo={upsertActivoFijo} inventario={inventario} setInventario={setInventario} upsertInventario={upsertInventario} kardexInsumos={kardexInsumos} setKardexInsumos={setKardexInsumos} upsertKardexInsumo={upsertKardexInsumo}/>}
@@ -11586,9 +11651,12 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
 // Muestra SOLO los pagos recibidos en la fecha seleccionada (de cualquier
 // factura, incluso de días anteriores), las salidas de caja de todos,
 // y el valor a depositar = efectivo cobrado − salidas de caja.
-function ResumenDia({ventas,empleadas,salidasCaja}){
+function ResumenDia({ventas,empleadas,salidasCaja,cajas=[],bloquear=false}){
   const hoy=fechaHoyLocal();
-  const [fechaSel,setFechaSel]=useState(hoy);
+  const ayer=(()=>{const d=new Date();d.setDate(d.getDate()-1);return fechaLocal(d.toISOString());})();
+  // 🔒 Para las colaboradoras el resumen se abre recién cuando Dayana revisó todos los cierres del día (al día siguiente)
+  const [fechaSel,setFechaSel]=useState(bloquear?ayer:hoy);
+  const estCierres=estadoCierresDia(cajas,fechaSel);
   const [verDetalle,setVerDetalle]=useState(false);
 
   // ── COBROS: cada abono cuenta el día que se RECIBIÓ, no el día que se facturó
@@ -11599,7 +11667,7 @@ function ResumenDia({ventas,empleadas,salidasCaja}){
       const emp=empleadas.find(e=>String(e.id)===String(v.empleadaId));
       const quien=ab.cobradoPorNombre||emp?.nombre||"Sin asignar";
       cobros.push({
-        monto:ab.monto,metodo:ab.metodo,fecha:ab.fecha,quien,
+        monto:ab.monto,metodo:ab.metodo,fecha:ab.fecha,quien,qid:ab.cobradoPorId??null,
         folio:v.folio,cliente:v.clienteNombre||"",
         factAnterior:fechaLocal(v.fecha)!==fechaSel,
       });
@@ -11626,8 +11694,54 @@ function ResumenDia({ventas,empleadas,salidasCaja}){
   const salidasDia=(salidasCaja||[]).filter(s=>s.fecha===fechaSel&&!s.eliminada);
   const totSalidas=parseFloat(salidasDia.reduce((a,s)=>a+s.monto,0).toFixed(2));
 
-  // ── VALOR A DEPOSITAR = efectivo cobrado − salidas de caja
-  const aDepositar=parseFloat((totEf-totSalidas).toFixed(2));
+  // ── FALTANTES / SOBRANTES de los cierres de caja del día (el dinero que realmente hay en caja)
+  const totFaltantes=parseFloat((estCierres.faltantes||0).toFixed(2));
+  const totSobrantes=parseFloat((estCierres.sobrantes||0).toFixed(2));
+  // ── VALOR A DEPOSITAR = efectivo cobrado − salidas de caja − faltantes (+ sobrantes)
+  const aDepositar=parseFloat((totEf-totSalidas-totFaltantes+totSobrantes).toFixed(2));
+  const bloqueado=bloquear&&(fechaSel>=hoy||!estCierres.todosRevisados);
+  // TOTAL VENTAS DEL DÍA = total cobrado − faltantes de caja + sobrantes de caja
+  const totVentasNeto=parseFloat((totCobrado-totFaltantes+totSobrantes).toFixed(2));
+
+  // ── 📊 MATRIZ "INFORMACIÓN DE VENTAS" por colaboradora (como el resumen de la farmacia):
+  //   FACTURACIÓN (lo cobrado por forma de pago) → SALIDAS → SALDO SISTEMA (lo que debería haber)
+  //   → CIERRE (lo que contó en sus cierres) → DIFERENCIAS (faltante − / sobrante +)
+  const r2=n=>Math.round((n+Number.EPSILON)*100)/100;
+  const nombrePorId={};
+  const regId=(id,nom)=>{if(id!=null&&nom&&!nombrePorId[String(id)])nombrePorId[String(id)]=nom;};
+  estCierres.cierres.forEach(c=>regId(c.empleadaId,c.emp));
+  salidasDia.forEach(s=>regId(s.quienId,s.quien));
+  cobros.forEach(c=>regId(c.qid,c.quien));
+  const idPorNombre={};Object.entries(nombrePorId).forEach(([id,n])=>{idPorNombre[normNombre(n)]=id;});
+  const claveCol=(id,nom)=>id!=null?"i"+id:(idPorNombre[normNombre(nom)]?"i"+idPorNombre[normNombre(nom)]:"n"+normNombre(nom||"Sin asignar"));
+  const colMap={};
+  const col=(id,nom)=>{const k=claveCol(id,nom);if(!colMap[k])colMap[k]={k,nombre:(id!=null&&nombrePorId[String(id)])||nom||"Sin asignar",ef:0,tr:0,ta:0,sal:0,contado:null};return colMap[k];};
+  cobros.forEach(c=>{const o=col(c.qid,c.quien);if(esEf(c.metodo))o.ef+=c.monto||0;else if(esTa(c.metodo))o.ta+=c.monto||0;else if(esTr(c.metodo))o.tr+=c.monto||0;});
+  salidasDia.forEach(s=>{col(s.quienId,s.quien).sal+=s.monto||0;});
+  estCierres.cierres.forEach(c=>{const o=col(c.empleadaId,c.emp);o.contado=(o.contado||0)+(c.efN||0);});
+  const columnas=Object.values(colMap).map(o=>{
+    const saldoEf=r2(o.ef-o.sal);
+    return{...o,ef:r2(o.ef),tr:r2(o.tr),ta:r2(o.ta),sal:r2(o.sal),saldoEf,contado:o.contado==null?null:r2(o.contado),dif:o.contado==null?null:r2(o.contado-saldoEf)};
+  }).sort((a,b)=>a.nombre.localeCompare(b.nombre));
+  const sumCol=f=>r2(columnas.reduce((a,o)=>a+(o[f]||0),0));
+  const totContado=sumCol("contado");
+  const totDif=sumCol("dif");
+  const sinCierre=columnas.filter(o=>o.contado==null&&(o.ef>0||o.sal>0));
+  const hayTarjeta=totTa>0;
+  const totVentasMatriz=r2(totCobrado+totDif); // facturación total + diferencias (faltante resta, sobrante suma)
+  const filasMatriz=[
+    {g:"FACTURACIÓN",fp:"EFE",v:o=>o.ef,bg:"#fff"},
+    {g:"FACTURACIÓN",fp:"TRA",v:o=>o.tr,bg:"#fff"},
+    ...(hayTarjeta?[{g:"FACTURACIÓN",fp:"TAR",v:o=>o.ta,bg:"#fff"}]:[]),
+    {g:"SALIDAS DE CAJA",fp:"EFE",v:o=>-o.sal,bg:"#fff5f5",color:"#c62828"},
+    {g:"SALDO SISTEMA",fp:"EFE",v:o=>o.saldoEf,bg:"#f8fbfd",bold:true},
+    {g:"SALDO SISTEMA",fp:"TRA",v:o=>o.tr,bg:"#f8fbfd"},
+    ...(hayTarjeta?[{g:"SALDO SISTEMA",fp:"TAR",v:o=>o.ta,bg:"#f8fbfd"}]:[]),
+    {g:"CIERRE (CONTADO)",fp:"EFE",v:o=>o.contado,bg:"#fff",bold:true},
+    {g:"DIFERENCIAS",fp:"EFE",v:o=>o.dif,bg:"#fff8e1",bold:true,dif:true},
+  ];
+  const totFila=f=>{const vals=columnas.map(f.v).filter(x=>x!=null);return vals.length?r2(vals.reduce((a,x)=>a+x,0)):null;};
+  const fmtM=n=>n==null?"sin cierre":(n<0?"−":"")+Math.abs(n).toFixed(2);
 
   const th={padding:"8px 10px",background:"#1a3c5e",color:"#fff",fontSize:12,fontWeight:700,textAlign:"center",whiteSpace:"nowrap"};
   const td=(align="right")=>({padding:"8px 10px",fontSize:13,textAlign:align,borderBottom:"1px solid #e8f0f7",whiteSpace:"nowrap"});
@@ -11637,6 +11751,15 @@ function ResumenDia({ventas,empleadas,salidasCaja}){
     const hdrs=["FORMA DE PAGO",...cobradores.map(c=>c.toUpperCase()),"TOTAL"];
     const rows=filas.map(f=>[f.label,...cobradores.map(q=>sumC(f.fn,q)),sumC(f.fn,null)]);
     rows.push(["TOTAL COBRADO",...cobradores.map(q=>sumQ(q)),totCobrado]);
+    const matHtml="<h3 style='color:#1a3c5e;margin:0 0 6px'>Información de ventas</h3><table border='1' cellpadding='5' cellspacing='0' style='border-collapse:collapse;width:100%;font-size:11px;margin-bottom:8px'>"
+      +"<tr><th style='background:#1a3c5e;color:#fff'>MOVIMIENTOS</th><th style='background:#1a3c5e;color:#fff'>FORMA PAGO</th><th style='background:#2563a8;color:#fff'>VENTAS LAVA&amp;LISTO</th>"+columnas.map(o=>"<th style='background:#1a5276;color:#fff'>"+o.nombre.toUpperCase()+"</th>").join("")+"</tr>"
+      +filasMatriz.map(f=>"<tr><td><b>"+f.g+"</b></td><td style='text-align:center'>"+f.fp+"</td><td style='text-align:right;font-weight:bold'>"+fmtM(totFila(f))+"</td>"+columnas.map(o=>"<td style='text-align:right'>"+fmtM(f.v(o))+"</td>").join("")+"</tr>").join("")
+      +"</table><table cellpadding='5' style='width:100%;font-size:12px;margin-bottom:12px'><tr>"
+      +[["Efectivo contado",totContado],["Salidas de caja",-totSalidas],["Diferencias",totDif],["Transferencias + tarjeta",totTr+totTa],["VALOR DEPÓSITO EFECTIVO",totContado],["TOTAL VENTAS DEL DÍA",totVentasMatriz]].map(([l,v])=>"<td style='border:1px solid #ccc'>"+l+": <b>"+(v<0?"−$"+Math.abs(v).toFixed(2):"$"+v.toFixed(2))+"</b></td>").join("")
+      +"</tr></table>";
+    const genRows=[["Efectivo",totEf],["Transferencias",totTr],...(totTa>0?[["Tarjeta",totTa]]:[]),["<b>Total cobrado</b>",totCobrado],["Faltantes de caja",-totFaltantes],["Sobrantes de caja",totSobrantes],["<b>TOTAL VENTAS DEL DÍA</b>",totVentasNeto]];
+    const genHtml="<h3 style='color:#1a3c5e;margin:0 0 6px'>Resumen de ventas general</h3><table border='1' cellpadding='6' cellspacing='0' style='border-collapse:collapse;width:100%;font-size:13px;margin-bottom:12px'>"
+      +genRows.map(([l,v])=>"<tr><td>"+l+"</td><td style='text-align:right;font-weight:bold'>"+(v<0?"−$"+Math.abs(v).toFixed(2):"$"+v.toFixed(2))+"</td></tr>").join("")+"</table>";
     const tableHtml="<table border='1' cellpadding='6' cellspacing='0' style='border-collapse:collapse;width:100%;font-size:12px'>"
       +"<tr>"+hdrs.map(h=>"<th style='background:#1a3c5e;color:#fff;padding:6px'>"+h+"</th>").join("")+"</tr>"
       +rows.map(r=>"<tr>"+r.map((c,i)=>"<td style='text-align:"+(i===0?"left":"right")+";padding:5px'>"+(typeof c==="number"?"$"+c.toFixed(2):c)+"</td>").join("")+"</tr>").join("")
@@ -11666,12 +11789,12 @@ function ResumenDia({ventas,empleadas,salidasCaja}){
     if(!w)return;
     const html="<html><head><title>Resumen de cobros y depósito</title><style>body{font-family:sans-serif;padding:20px}h2{color:#1a3c5e;text-align:center}.dep{border:2px solid #2e7d32;background:#e8f5e9;border-radius:10px;padding:14px;text-align:center;margin-top:14px}</style></head><body>"
       +"<h2>🫧 Lava&amp;Listo — Resumen de cobros "+fechaSel+"</h2>"
-      +tableHtml
-      +(efAnterior>0?"<p style='font-size:11px;color:#555'>Incluye $"+efAnterior.toFixed(2)+" en efectivo por cobro de facturas de días anteriores.</p>":"")
+      +matHtml
       +detHtml
+      +(efAnterior>0?"<p style='font-size:11px;color:#555'>Incluye $"+efAnterior.toFixed(2)+" en efectivo por cobro de facturas de días anteriores.</p>":"")
       +salHtml
-      +"<div class='dep'><div style='font-size:13px;color:#2e7d32'>Efectivo cobrado $"+totEf.toFixed(2)+" − Salidas de caja $"+totSalidas.toFixed(2)+"</div>"
-      +"<div style='font-size:26px;font-weight:800;color:#1b5e20'>VALOR A DEPOSITAR: $"+aDepositar.toFixed(2)+"</div>"
+      +"<div class='dep'><div style='font-size:13px;color:#2e7d32'>Efectivo cobrado $"+totEf.toFixed(2)+" − Salidas de caja $"+totSalidas.toFixed(2)+(totFaltantes>0?" − Faltantes de caja $"+totFaltantes.toFixed(2):"")+(totSobrantes>0?" + Sobrantes $"+totSobrantes.toFixed(2):"")+"</div>"
+      +"<div style='font-size:26px;font-weight:800;color:#1b5e20'>VALOR A DEPOSITAR: $"+totContado.toFixed(2)+"</div>"
       +"<div style='font-size:11px;color:#555'>Debe coincidir con el efectivo físico en caja</div></div>"
       +"<p style='font-size:11px;color:#888;margin-top:10px'>Transferencias y tarjeta ($"+(totTr+totTa).toFixed(2)+") ya están en el banco — no entran al depósito de efectivo.</p>"
       +"<p style='font-size:10px;color:#aaa;text-align:center'>Impreso: "+new Date().toLocaleString("es-MX")+"</p>"
@@ -11686,53 +11809,87 @@ function ResumenDia({ventas,empleadas,salidasCaja}){
 
       <div style={{marginBottom:14,display:"flex",gap:8,alignItems:"flex-end"}}>
         <div style={{flex:1}}><label style={S.lbl}>Fecha</label><input type="date" style={S.inp} value={fechaSel} onChange={e=>setFechaSel(e.target.value)}/></div>
-        <button style={{...S.btnP,width:"auto",padding:"9px 16px",fontSize:13}} onClick={imprimirResumen}>🖨️ Imprimir</button>
+        {!bloqueado&&<button style={{...S.btnP,width:"auto",padding:"9px 16px",fontSize:13}} onClick={imprimirResumen}>🖨️ Imprimir</button>}
       </div>
 
-      {cobros.length===0&&salidasDia.length===0
+      {!bloquear&&estCierres.cierres.length>0&&!estCierres.todosRevisados&&(
+        <div style={{background:"#fff8e1",border:"1.5px solid #f59e0b",borderRadius:10,padding:"8px 12px",marginBottom:12,fontSize:12,color:"#8a5a00"}}>
+          ⏳ {estCierres.pendientes.length} cierre(s) de este día sin revisar por Dayana: {estCierres.pendientes.map(c=>c.emp).join(", ")}. Las colaboradoras no ven este resumen hasta que se revisen.
+        </div>
+      )}
+      {bloqueado
+        ?<div style={{textAlign:"center",padding:"36px 20px",color:"#8a5a00",background:"#fff8e1",borderRadius:14,border:"1.5px solid #f59e0b"}}>
+          <div style={{fontSize:40,marginBottom:8}}>🔒</div>
+          <div style={{fontWeight:800,fontSize:15,marginBottom:6}}>Resumen bloqueado</div>
+          <div style={{fontSize:13}}>
+            {fechaSel>=hoy
+              ?"El resumen de ventas del día se ve recién mañana, cuando Dayana acepte los cierres de caja."
+              :estCierres.cierres.length===0
+                ?"Este día no tiene cierre de caja registrado. Primero debe hacerse y aceptarse el cierre."
+                :<>Faltan por revisar los cierres de: <strong>{estCierres.pendientes.map(c=>c.emp).join(", ")}</strong>. Dayana debe aceptarlos en ✅ Aceptar cierres.</>}
+          </div>
+        </div>
+      :cobros.length===0&&salidasDia.length===0
         ?<div style={{textAlign:"center",padding:"40px 20px",color:"#aaa"}}><div style={{fontSize:40,marginBottom:8}}>💤</div><div>Sin cobros ni salidas registrados en esta fecha</div></div>
         :<>
-      {/* TABLA DE COBROS POR EMPLEADA */}
-      <div style={{overflowX:"auto",marginBottom:10}}>
-        <table style={{width:"100%",borderCollapse:"collapse",minWidth:400,background:"#fff"}}>
-          <thead><tr>
-            <th style={{...th,textAlign:"left"}}>COBROS DEL DÍA</th>
-            {cobradores.map(q=><th key={q} style={{...th,background:"#1a5276"}}>{q.split(" ")[0].toUpperCase()}</th>)}
-            <th style={{...th,background:"#2563a8"}}>TOTAL</th>
-          </tr></thead>
-          <tbody>
-            {filas.map((f,i)=>(
-              <tr key={f.label} style={{background:i%2===0?"#f8fbfd":"#fff"}}>
-                <td style={td("left")}><span style={{background:f.bg,color:f.color,borderRadius:4,padding:"3px 8px",fontSize:11,fontWeight:700}}>{f.label}</span></td>
-                {cobradores.map(q=><td key={q} style={td()}>{fmtC(sumC(f.fn,q))}</td>)}
-                <td style={{...td(),fontWeight:800,color:f.color}}>{fmtC(sumC(f.fn,null))}</td>
-              </tr>
-            ))}
-            <tr style={{background:"#e8f5fd"}}>
-              <td style={{...td("left"),fontWeight:800,color:"#1a3c5e"}}>TOTAL COBRADO</td>
-              {cobradores.map(q=><td key={q} style={{...td(),fontWeight:800,color:"#1a3c5e"}}>${sumQ(q).toFixed(2)}</td>)}
-              <td style={{...td(),fontWeight:800,fontSize:15,color:"#1a3c5e"}}>${totCobrado.toFixed(2)}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      {efAnterior>0&&<div style={{background:"#e8f5fd",borderRadius:8,padding:"8px 12px",marginBottom:12,fontSize:12,color:"#1565c0"}}>ℹ️ Incluye <strong>${efAnterior.toFixed(2)}</strong> en efectivo por cobros de facturas de días anteriores</div>}
-
-      {/* DETALLE DE COBROS */}
-      <button style={{...S.btnT,marginBottom:12}} onClick={()=>setVerDetalle(!verDetalle)}>{verDetalle?"▲ Ocultar detalle":"▼ Ver detalle de cobros ("+cobros.length+")"}</button>
-      {verDetalle&&(
-        <Card title="🧾 Detalle de cobros">
-          {[...cobros].sort((a,b)=>(a.fecha||"").localeCompare(b.fecha||"")).map((c,i)=>(
-            <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f0f4f8",fontSize:13}}>
-              <div>
-                <span style={{color:"#2e7d32",fontWeight:700}}>+${(c.monto||0).toFixed(2)}</span> {c.cliente} <span style={{color:"#888",fontSize:11}}>({c.metodo} · {c.quien})</span>
-                {c.factAnterior&&<span style={{background:"#fff3e0",color:"#e65100",borderRadius:4,padding:"1px 6px",fontSize:10,fontWeight:700,marginLeft:6}}>FACT. ANTERIOR</span>}
-              </div>
-              <span style={{color:"#888",fontSize:11}}>{c.fecha?new Date(c.fecha).toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"}):""}</span>
+      {/* 📊 INFORMACIÓN DE VENTAS (matriz por colaboradora) */}
+      <div style={{background:"#fff",border:"1.5px solid #d6e4f0",borderRadius:14,overflow:"hidden",marginBottom:14}}>
+        <div style={{background:"#1a3c5e",color:"#fff",padding:"10px 14px",fontWeight:800,fontSize:14}}>📊 Información de ventas</div>
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",minWidth:420+columnas.length*90}}>
+            <thead><tr>
+              <th style={{...th,textAlign:"left"}}>MOVIMIENTOS</th>
+              <th style={th}>FORMA PAGO</th>
+              <th style={{...th,background:"#2563a8"}}>VENTAS LAVA&amp;LISTO</th>
+              {columnas.map(o=><th key={o.k} style={{...th,background:"#1a5276",whiteSpace:"normal",minWidth:90}}>{o.nombre.toUpperCase()}</th>)}
+            </tr></thead>
+            <tbody>
+              {filasMatriz.map((f,i)=>{
+                const tot=totFila(f);
+                const colorV=v=>v==null?"#aaa":f.dif?(v<-0.004?"#c62828":v>0.004?"#1565c0":"#2e7d32"):(f.color||"#1a3c5e");
+                const nuevoGrupo=i>0&&filasMatriz[i-1].g!==f.g;
+                return(
+                  <tr key={i} style={{background:f.bg,borderTop:nuevoGrupo?"2px solid #d6e4f0":"none"}}>
+                    <td style={{...td("left"),fontWeight:700,color:"#1a3c5e",fontSize:12}}>{f.g}</td>
+                    <td style={{...td("center"),fontSize:12,color:"#555"}}>{f.fp}</td>
+                    <td style={{...td(),fontWeight:800,color:colorV(tot)}}>{fmtM(tot)}</td>
+                    {columnas.map(o=>{const v=f.v(o);return <td key={o.k} style={{...td(),fontWeight:f.bold?700:400,color:colorV(v),fontStyle:v==null?"italic":"normal",fontSize:v==null?11:13}}>{fmtM(v)}</td>;})}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:8,padding:12,background:"#f8fbfd",borderTop:"1.5px solid #d6e4f0"}}>
+          {[
+            {l:"Efectivo contado",v:totContado,c:"#1a3c5e"},
+            {l:"Salidas de caja",v:-totSalidas,c:"#c62828"},
+            {l:"Diferencias",v:totDif,c:totDif<-0.004?"#c62828":totDif>0.004?"#1565c0":"#2e7d32"},
+            {l:"Transferencias + tarjeta",v:r2(totTr+totTa),c:"#1565c0"},
+            {l:"VALOR DEPÓSITO EFECTIVO",v:totContado,c:"#1b5e20",fuerte:true},
+            {l:"TOTAL VENTAS DEL DÍA",v:totVentasMatriz,c:"#fff",bg:"#1a3c5e",fuerte:true},
+          ].map(x=>(
+            <div key={x.l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,background:x.bg||"#fff",border:"1px solid #d6e4f0",borderRadius:8,padding:"7px 10px"}}>
+              <span style={{fontSize:11,fontWeight:700,color:x.bg?"#cfe3f2":"#555"}}>{x.l}</span>
+              <span style={{fontSize:x.fuerte?16:14,fontWeight:800,color:x.c,border:x.fuerte&&!x.bg?"1.5px solid #4caf50":"none",borderRadius:6,padding:x.fuerte?"2px 8px":0}}>{x.v<0?"−":""}${Math.abs(x.v).toFixed(2)}</span>
             </div>
           ))}
-        </Card>
-      )}
+        </div>
+        {sinCierre.length>0&&<div style={{fontSize:11,color:"#e65100",padding:"0 12px 10px"}}>⚠️ Sin cierre de caja: {sinCierre.map(o=>o.nombre).join(", ")}. Su efectivo no entra al depósito hasta que haga el cierre.</div>}
+      </div>
+
+      {/* DETALLE DE COBROS */}
+      <Card title={"🧾 Detalle de cobros ("+cobros.length+")"}>
+        {cobros.length===0?<div style={S.empty}>Sin cobros en esta fecha</div>:[...cobros].sort((a,b)=>(a.fecha||"").localeCompare(b.fecha||"")).map((c,i)=>(
+          <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f0f4f8",fontSize:13}}>
+            <div>
+              <span style={{color:"#2e7d32",fontWeight:700}}>+${(c.monto||0).toFixed(2)}</span> {c.cliente} <span style={{color:"#888",fontSize:11}}>({c.metodo} · {c.quien})</span>
+              {c.factAnterior&&<span style={{background:"#fff3e0",color:"#e65100",borderRadius:4,padding:"1px 6px",fontSize:10,fontWeight:700,marginLeft:6}}>FACT. ANTERIOR</span>}
+            </div>
+            <span style={{color:"#888",fontSize:11}}>{c.fecha?new Date(c.fecha).toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"}):""}</span>
+          </div>
+        ))}
+      </Card>
 
       {/* SALIDAS DE CAJA DEL DÍA */}
       <Card title={"💸 Salidas de caja — Total: -$"+totSalidas.toFixed(2)}>
@@ -11744,16 +11901,16 @@ function ResumenDia({ventas,empleadas,salidasCaja}){
         ))}
       </Card>
 
-      {/* CUADRE PARA EL DEPÓSITO */}
-      <div style={S.kgrid}>
-        <div style={{...S.kpi,borderLeft:"4px solid #4caf50"}}><div style={{fontSize:22}}>💵</div><div><div style={{fontWeight:800,fontSize:18,color:"#4caf50"}}>${totEf.toFixed(2)}</div><div style={{fontSize:12,color:"#888"}}>Efectivo cobrado</div></div></div>
-        <div style={{...S.kpi,borderLeft:"4px solid #c62828"}}><div style={{fontSize:22}}>💸</div><div><div style={{fontWeight:800,fontSize:18,color:"#c62828"}}>-${totSalidas.toFixed(2)}</div><div style={{fontSize:12,color:"#888"}}>Salidas de caja</div></div></div>
-      </div>
-      <div style={{background:"#e8f5e9",border:"2px solid #4caf50",borderRadius:14,padding:"16px 18px",textAlign:"center",marginBottom:10}}>
-        <div style={{fontSize:13,color:"#2e7d32",fontWeight:600}}>🏦 VALOR A DEPOSITAR</div>
-        <div style={{fontWeight:800,fontSize:30,color:aDepositar<0?"#c62828":"#1b5e20"}}>${aDepositar.toFixed(2)}</div>
-        <div style={{fontSize:11,color:"#555"}}>Efectivo cobrado ${totEf.toFixed(2)} − Salidas ${totSalidas.toFixed(2)} · Debe coincidir con el efectivo en caja</div>
-      </div>
+      {estCierres.cierres.filter(c=>(c.dEf||0)<-0.004).length>0&&(
+        <Card title="⚠️ Faltantes de caja del día">
+          {estCierres.cierres.filter(c=>(c.dEf||0)<-0.004).map(c=>(
+            <div key={c.id} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f0f4f8",fontSize:13}}>
+              <div>{c.emp} <span style={{fontSize:11,color:"#888"}}>{c.desdeApertura?`(turno ${new Date(c.desdeApertura).toLocaleTimeString("es-EC",{hour:"2-digit",minute:"2-digit"})}–${new Date(c.fecha).toLocaleTimeString("es-EC",{hour:"2-digit",minute:"2-digit"})})`:""}</span> <span style={{fontSize:11,fontWeight:700,color:!c.revision?"#e65100":c.revision.faltanteJustificado?"#2e7d32":"#c62828"}}>{!c.revision?"· pendiente de Dayana":c.revision.faltanteJustificado?"· justificado, no se descuenta":"· enviado a descuento"}</span></div>
+              <strong style={{color:"#e65100"}}>-${Math.abs(c.dEf||0).toFixed(2)}</strong>
+            </div>
+          ))}
+        </Card>
+      )}
       <div style={{fontSize:12,color:"#888",marginBottom:10}}>🏦 Transferencias y tarjeta (${(totTr+totTa).toFixed(2)}) ya están en el banco — no entran al depósito de efectivo.</div>
       </>}
     </div>
