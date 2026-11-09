@@ -28,7 +28,7 @@ if(typeof window!=="undefined"){
 }
 import { useCollection } from "./hooks/useFirestore";
 import Campanas from "./Campanas";
-import { RevisionCierres, FaltantesCaja, DiferenciasCierreDia, puedeAceptarCierres, estadoCierresDia } from "./CierresRevision";
+import { RevisionCierres, FaltantesCaja, DiferenciasCierreDia, puedeAceptarCierres, estadoCierresDia, contadoEfectivo, sobranteDe, sobranteJustificado } from "./CierresRevision";
 import { storage } from "./firebase";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 
@@ -11601,7 +11601,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
       {tab==="campanas"&&<Campanas ventas={ventas} clientes={clientes} envios={campanasEnvios} setEnvios={setCampanasEnvios} upsertEnvio={upsertCampanaEnvio} cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} sesion={sesion}/>}
       {tab==="promosAdmin"&&<PromosAdmin promos={promos} setPromos={setPromos} upsertPromo={upsertPromo} servicios={servicios}/>}
       {tab==="cupones"&&<Cupones cupones={cupones} setCupones={setCupones} upsertCupon={upsertCupon} cuponNuevoConfig={cuponNuevoConfig} setCuponNuevoConfig={setCuponNuevoConfig} upsertCuponNuevoConfig={upsertCuponNuevoConfig} clientes={clientes} ventas={ventas} empleadas={empleadas} sesion={sesion}/>}
-      {tab==="resumen"&&<ResumenDia ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja} cajas={cajas}/>}
+      {tab==="resumen"&&<ResumenDia ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja} cajas={cajas} esAdmin={true} upsertCaja={upsertCaja} sesion={sesion}/>}
       {tab==="satisfaccionAdmin"&&<SatisfaccionClientes ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta}/>}
       {tab==="reportes"&&<Reportes ventas={ventas} empleadas={empleadas} salidasCaja={salidasCaja}/>}
       {tab==="depositos"&&<Depositos depositos={depositos} setDepositos={setDepositos} ventas={ventas} salidasCaja={salidasCaja} upsertDeposito={upsertDeposito} cajas={cajas} upsertCaja={upsertCaja} esAdmin={true} sesion={sesion}/>}
@@ -11651,7 +11651,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
 // Muestra SOLO los pagos recibidos en la fecha seleccionada (de cualquier
 // factura, incluso de días anteriores), las salidas de caja de todos,
 // y el valor a depositar = efectivo cobrado − salidas de caja.
-function ResumenDia({ventas,empleadas,salidasCaja,cajas=[],bloquear=false}){
+function ResumenDia({ventas,empleadas,salidasCaja,cajas=[],bloquear=false,esAdmin=false,upsertCaja,sesion}){
   const hoy=fechaHoyLocal();
   const ayer=(()=>{const d=new Date();d.setDate(d.getDate()-1);return fechaLocal(d.toISOString());})();
   // 🔒 Para las colaboradoras el resumen se abre recién cuando Dayana revisó todos los cierres del día (al día siguiente)
@@ -11718,7 +11718,7 @@ function ResumenDia({ventas,empleadas,salidasCaja,cajas=[],bloquear=false}){
   const col=(id,nom)=>{const k=claveCol(id,nom);if(!colMap[k])colMap[k]={k,nombre:(id!=null&&nombrePorId[String(id)])||nom||"Sin asignar",ef:0,tr:0,ta:0,sal:0,contado:null};return colMap[k];};
   cobros.forEach(c=>{const o=col(c.qid,c.quien);if(esEf(c.metodo))o.ef+=c.monto||0;else if(esTa(c.metodo))o.ta+=c.monto||0;else if(esTr(c.metodo))o.tr+=c.monto||0;});
   salidasDia.forEach(s=>{col(s.quienId,s.quien).sal+=s.monto||0;});
-  estCierres.cierres.forEach(c=>{const o=col(c.empleadaId,c.emp);o.contado=(o.contado||0)+(c.efN||0);});
+  estCierres.cierres.forEach(c=>{const o=col(c.empleadaId,c.emp);o.contado=(o.contado||0)+contadoEfectivo(c);}); // sobrante justificado → vale el cierre correcto
   const columnas=Object.values(colMap).map(o=>{
     const saldoEf=r2(o.ef-o.sal);
     return{...o,ef:r2(o.ef),tr:r2(o.tr),ta:r2(o.ta),sal:r2(o.sal),saldoEf,contado:o.contado==null?null:r2(o.contado),dif:o.contado==null?null:r2(o.contado-saldoEf)};
@@ -11741,7 +11741,16 @@ function ResumenDia({ventas,empleadas,salidasCaja,cajas=[],bloquear=false}){
     {g:"DIFERENCIAS",fp:"EFE",v:o=>o.dif,bg:"#fff8e1",bold:true,dif:true},
   ];
   const totFila=f=>{const vals=columnas.map(f.v).filter(x=>x!=null);return vals.length?r2(vals.reduce((a,x)=>a+x,0)):null;};
-  const fmtM=n=>n==null?"sin cierre":(n<0?"−":"")+Math.abs(n).toFixed(2);
+  const fmtM=(n,signo)=>n==null?"sin cierre":(n<-0.004?"−":signo&&n>0.004?"+":"")+Math.abs(n).toFixed(2);
+  // 📈 Justificar sobrante (solo administradora): el sobrante queda en $0 y el cierre vale lo correcto
+  const justificarSobrante=c=>{
+    if(!esAdmin||!upsertCaja)return;
+    const nota=window.prompt(`Justificar sobrante de $${sobranteDe(c).toFixed(2)} de ${c.emp}.\nQuedará en $0.00 y el cierre valdrá $${contadoEfectivo({...c,sobranteRegularizado:true}).toFixed(2)}.\n\nEscribe la justificación:`);
+    if(nota==null)return;
+    if(!nota.trim()){alert("Escribe la justificación");return;}
+    upsertCaja({...c,sobranteRegularizado:{por:sesion?.nombre||"Administración",fecha:new Date().toISOString(),nota:nota.trim(),monto:sobranteDe(c)}});
+  };
+  const conSobrante=estCierres.cierres.filter(c=>sobranteDe(c)>0.004);
 
   const th={padding:"8px 10px",background:"#1a3c5e",color:"#fff",fontSize:12,fontWeight:700,textAlign:"center",whiteSpace:"nowrap"};
   const td=(align="right")=>({padding:"8px 10px",fontSize:13,textAlign:align,borderBottom:"1px solid #e8f0f7",whiteSpace:"nowrap"});
@@ -11753,7 +11762,7 @@ function ResumenDia({ventas,empleadas,salidasCaja,cajas=[],bloquear=false}){
     rows.push(["TOTAL COBRADO",...cobradores.map(q=>sumQ(q)),totCobrado]);
     const matHtml="<h3 style='color:#1a3c5e;margin:0 0 6px'>Información de ventas</h3><table border='1' cellpadding='5' cellspacing='0' style='border-collapse:collapse;width:100%;font-size:11px;margin-bottom:8px'>"
       +"<tr><th style='background:#1a3c5e;color:#fff'>MOVIMIENTOS</th><th style='background:#1a3c5e;color:#fff'>FORMA PAGO</th><th style='background:#2563a8;color:#fff'>VENTAS LAVA&amp;LISTO</th>"+columnas.map(o=>"<th style='background:#1a5276;color:#fff'>"+o.nombre.toUpperCase()+"</th>").join("")+"</tr>"
-      +filasMatriz.map(f=>"<tr><td><b>"+f.g+"</b></td><td style='text-align:center'>"+f.fp+"</td><td style='text-align:right;font-weight:bold'>"+fmtM(totFila(f))+"</td>"+columnas.map(o=>"<td style='text-align:right'>"+fmtM(f.v(o))+"</td>").join("")+"</tr>").join("")
+      +filasMatriz.map(f=>"<tr><td><b>"+f.g+"</b></td><td style='text-align:center'>"+f.fp+"</td><td style='text-align:right;font-weight:bold'>"+fmtM(totFila(f),f.dif)+"</td>"+columnas.map(o=>"<td style='text-align:right'>"+fmtM(f.v(o),f.dif)+"</td>").join("")+"</tr>").join("")
       +"</table><table cellpadding='5' style='width:100%;font-size:12px;margin-bottom:12px'><tr>"
       +[["Efectivo contado",totContado],["Salidas de caja",-totSalidas],["Diferencias",totDif],["Transferencias + tarjeta",totTr+totTa],["VALOR DEPÓSITO EFECTIVO",totContado],["TOTAL VENTAS DEL DÍA",totVentasMatriz]].map(([l,v])=>"<td style='border:1px solid #ccc'>"+l+": <b>"+(v<0?"−$"+Math.abs(v).toFixed(2):"$"+v.toFixed(2))+"</b></td>").join("")
       +"</tr></table>";
@@ -11852,8 +11861,8 @@ function ResumenDia({ventas,empleadas,salidasCaja,cajas=[],bloquear=false}){
                   <tr key={i} style={{background:f.bg,borderTop:nuevoGrupo?"2px solid #d6e4f0":"none"}}>
                     <td style={{...td("left"),fontWeight:700,color:"#1a3c5e",fontSize:12}}>{f.g}</td>
                     <td style={{...td("center"),fontSize:12,color:"#555"}}>{f.fp}</td>
-                    <td style={{...td(),fontWeight:800,color:colorV(tot)}}>{fmtM(tot)}</td>
-                    {columnas.map(o=>{const v=f.v(o);return <td key={o.k} style={{...td(),fontWeight:f.bold?700:400,color:colorV(v),fontStyle:v==null?"italic":"normal",fontSize:v==null?11:13}}>{fmtM(v)}</td>;})}
+                    <td style={{...td(),fontWeight:800,color:colorV(tot)}}>{fmtM(tot,f.dif)}</td>
+                    {columnas.map(o=>{const v=f.v(o);return <td key={o.k} style={{...td(),fontWeight:f.bold?700:400,color:colorV(v),fontStyle:v==null?"italic":"normal",fontSize:v==null?11:13}}>{fmtM(v,f.dif)}</td>;})}
                   </tr>
                 );
               })}
@@ -11871,7 +11880,7 @@ function ResumenDia({ventas,empleadas,salidasCaja,cajas=[],bloquear=false}){
           ].map(x=>(
             <div key={x.l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,background:x.bg||"#fff",border:"1px solid #d6e4f0",borderRadius:8,padding:"7px 10px"}}>
               <span style={{fontSize:11,fontWeight:700,color:x.bg?"#cfe3f2":"#555"}}>{x.l}</span>
-              <span style={{fontSize:x.fuerte?16:14,fontWeight:800,color:x.c,border:x.fuerte&&!x.bg?"1.5px solid #4caf50":"none",borderRadius:6,padding:x.fuerte?"2px 8px":0}}>{x.v<0?"−":""}${Math.abs(x.v).toFixed(2)}</span>
+              <span style={{fontSize:x.fuerte?16:14,fontWeight:800,color:x.c,border:x.fuerte&&!x.bg?"1.5px solid #4caf50":"none",borderRadius:6,padding:x.fuerte?"2px 8px":0}}>{x.v<-0.004?"−":x.l==="Diferencias"&&x.v>0.004?"+":""}${Math.abs(x.v).toFixed(2)}</span>
             </div>
           ))}
         </div>
@@ -11907,6 +11916,24 @@ function ResumenDia({ventas,empleadas,salidasCaja,cajas=[],bloquear=false}){
             <div key={c.id} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f0f4f8",fontSize:13}}>
               <div>{c.emp} <span style={{fontSize:11,color:"#888"}}>{c.desdeApertura?`(turno ${new Date(c.desdeApertura).toLocaleTimeString("es-EC",{hour:"2-digit",minute:"2-digit"})}–${new Date(c.fecha).toLocaleTimeString("es-EC",{hour:"2-digit",minute:"2-digit"})})`:""}</span> <span style={{fontSize:11,fontWeight:700,color:!c.revision?"#e65100":c.revision.faltanteJustificado?"#2e7d32":"#c62828"}}>{!c.revision?"· pendiente de Dayana":c.revision.faltanteJustificado?"· justificado, no se descuenta":"· enviado a descuento"}</span></div>
               <strong style={{color:"#e65100"}}>-${Math.abs(c.dEf||0).toFixed(2)}</strong>
+            </div>
+          ))}
+        </Card>
+      )}
+      {conSobrante.length>0&&(
+        <Card title="📈 Sobrantes de caja del día">
+          {conSobrante.map(c=>(
+            <div key={c.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"6px 0",borderBottom:"1px solid #f0f4f8",fontSize:13,flexWrap:"wrap"}}>
+              <div>
+                {c.emp} <span style={{fontSize:11,color:"#888"}}>{c.desdeApertura?`(turno ${new Date(c.desdeApertura).toLocaleTimeString("es-EC",{hour:"2-digit",minute:"2-digit"})}–${new Date(c.fecha).toLocaleTimeString("es-EC",{hour:"2-digit",minute:"2-digit"})})`:""}</span>
+                {sobranteJustificado(c)
+                  ?<div style={{fontSize:11,color:"#2e7d32",fontWeight:700}}>✅ Justificado por {c.sobranteRegularizado.por}: valor $0.00 · cierre correcto ${contadoEfectivo(c).toFixed(2)}{c.sobranteRegularizado.nota?` · ${c.sobranteRegularizado.nota}`:""}</div>
+                  :<div style={{fontSize:11,color:"#1565c0"}}>{esAdmin?"Pendiente de justificar":"Lo justifica la administradora"}</div>}
+              </div>
+              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                <strong style={{color:sobranteJustificado(c)?"#aaa":"#1565c0",textDecoration:sobranteJustificado(c)?"line-through":"none"}}>+${sobranteDe(c).toFixed(2)}</strong>
+                {esAdmin&&!sobranteJustificado(c)&&upsertCaja&&<button style={{...S.btnS,fontSize:11,padding:"5px 10px",background:"#1565c0",color:"#fff"}} onClick={()=>justificarSobrante(c)}>Justificar → $0</button>}
+              </div>
             </div>
           ))}
         </Card>
