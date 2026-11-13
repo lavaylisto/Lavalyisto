@@ -228,10 +228,19 @@ const imprimirBoletoSorteo=(boleto,sorteo)=>{
   w.document.write(html);
   w.document.close();
 };
+// 📲 Redes sociales de Lava&Listo (se envían en el mensaje del boleto del sorteo)
+const REDES_LAVAYLISTO={
+  instagram:"https://www.instagram.com/lavaylistoecuador",
+  tiktok:"https://www.tiktok.com/@lavaylistoecuador",
+};
 // 🎟️ Mensaje y enlace de WhatsApp para confirmar la participación del cliente en el sorteo
 const msgWaBoletoSorteo=(boleto,sorteo)=>{
   const L="\u2501".repeat(15);
-  return `\u{1F39F}\uFE0F *LAVA & LISTO* \u{1F39F}\uFE0F\n${L}\n\u00A1Ya est\u00E1s participando! \u{1F389}\n\nTu boleto *#${boleto.numeroBoleto}* qued\u00F3 registrado en el sorteo de:\n\u{1F381} *${sorteo?.premio||""}*\n\n${L}\n\u00A1Mucha suerte! \u{1F499}\n\u{1F4CD} Ricaurte, Cuenca`;
+  // 🎄 Si el sorteo es navideño, el mensaje sale con temática de Navidad
+  const navidad=/navid|christmas|xmas/i.test(`${sorteo?.nombre||""} ${sorteo?.premio||""}`);
+  const ico=navidad?"\u{1F384}":"\u{1F39F}\uFE0F";
+  const nombre=sorteo?.nombre?`*${sorteo.nombre}*`:"el sorteo";
+  return `${ico} *LAVA & LISTO* ${ico}\n${L}\n\u00A1Ya est\u00E1s participando${navidad?" en nuestro sorteo navide\u00F1o":""}! \u{1F389}\n\nTu boleto *#${boleto.numeroBoleto}* qued\u00F3 registrado en ${nombre}\n\u{1F381} Premios: *${sorteo?.premio||""}*${sorteo?.fechaFin?`\n\u{1F4C5} Participa hasta el ${new Date(sorteo.fechaFin+"T12:00:00").toLocaleDateString("es-EC",{weekday:"long",day:"numeric",month:"long"}).replace(",","")}`:""}\n\n${L}\n\u26A0\uFE0F *IMPORTANTE:* para ganar el premio debes *seguirnos en todas nuestras redes sociales* \u{1F447}\n\n\u{1F4F8} Instagram:\n${REDES_LAVAYLISTO.instagram}\n\n\u{1F3B5} TikTok:\n${REDES_LAVAYLISTO.tiktok}\n\n${L}\n\u00A1Mucha suerte! ${navidad?"\u{1F385}\u{1F384}":"\u{1F499}"}\n\u{1F4CD} Ricaurte, Cuenca`;
 };
 const waBoletoSorteoUrl=(boleto,sorteo)=>{
   const tel=telWa(boleto.clienteTelefono);
