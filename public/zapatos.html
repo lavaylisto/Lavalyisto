@@ -227,13 +227,15 @@ async function firebaseBackend(cfg) {
   // Caché en memoria, igual que Lavalyisto (la caché en IndexedDB se dañaba)
   const db = F.initializeFirestore(app, { localCache: F.memoryLocalCache() });
   const st = S.getStorage(app);
+  st.maxUploadRetryTime = 20000; st.maxOperationRetryTime = 15000; // no quedarse "subiendo" para siempre
   await U.signInAnonymously(U.getAuth(app));
   const col = F.collection(db, CONFIG.coleccion);
   const meta = { contentType: 'image/jpeg', cacheControl: 'public,max-age=31536000' };
   return {
     newId: () => F.doc(col).id,
     async upload(id, par, slot, full, thumb) {
-      const p = `zapatos/${id}/${par}/${slot}_${rid()}`;
+      // Se guarda en la carpeta "tareas" de Storage, que Lavalyisto ya tiene permitida (no hace falta tocar reglas)
+      const p = `tareas/zapatos_${id}_${par}_${slot}_${rid()}`;
       const [a, b] = await Promise.all([S.uploadBytes(S.ref(st, p + '.jpg'), full, meta), S.uploadBytes(S.ref(st, p + '_t.jpg'), thumb, meta)]);
       const [url, t] = await Promise.all([S.getDownloadURL(a.ref), S.getDownloadURL(b.ref)]);
       return { url, thumb: t };
@@ -300,6 +302,18 @@ const ok = p => p && p.st !== 'up' && p.st !== 'err' && (p.url || p.thumb);
 const src = p => p ? (p.local || p.thumb || p.url) : '';
 
 /* ---------- Subida en segundo plano ---------- */
+// Subidas de a 2 a la vez (en celular con señal débil, muchas juntas se traban)
+let _activas = 0; const _cola = [];
+function enCola(fn) { return new Promise((res, rej) => { _cola.push({ fn, res, rej }); _sig() }) }
+function _sig() { while (_activas < 2 && _cola.length) { const { fn, res, rej } = _cola.shift(); _activas++; fn().then(res, rej).finally(() => { _activas--; _sig() }) } }
+const conLimite = (p, ms) => Promise.race([p, new Promise((_, r) => setTimeout(() => r(Object.assign(new Error('tardó demasiado'), { code: 'timeout' })), ms))]);
+function motivoError(e) {
+  const c = String(e && (e.code || e.message) || e);
+  if (/unauthorized|permission/i.test(c)) return 'falta el permiso en Firebase Storage (reglas). Toca ↻ cuando esté listo.';
+  if (/timeout|retry-limit|network|tardó/i.test(c)) return 'la conexión está lenta. Toca ↻ para reintentar.';
+  if (/quota/i.test(c)) return 'se superó la cuota de Firebase Storage.';
+  return c + '. Toca ↻ para reintentar.';
+}
 function capture(file, holder, key, recId, parId, slot, after) {
   const photo = { st: 'up', por: actor(), t: Date.now() };
   holder[key] = photo;
@@ -313,11 +327,11 @@ function capture(file, holder, key, recId, parId, slot, after) {
         Object.defineProperty(photo, '_file', { value: new File([blobs.full], 'foto.jpg', { type: 'image/jpeg' }), enumerable: false, configurable: true });
         refreshTiles();
       }
-      const r = await api.upload(recId, parId, slot, blobs.full, blobs.thumb);
+      const r = await enCola(() => conLimite(api.upload(recId, parId, slot, blobs.full, blobs.thumb), 45000));
       photo.url = r.url; photo.thumb = r.thumb; photo.st = 'ok';
       if (after) await after();
       if (view === 'new') guardarBorrador();
-    } catch (e) { console.error(e); photo.st = 'err' }
+    } catch (e) { console.error(e); photo.st = 'err'; photo.errMsg = motivoError(e); toast('No se subió la foto: ' + photo.errMsg) }
     refreshTiles();
   };
   Object.defineProperty(photo, '_retry', { value: () => (photo._p = run()), enumerable: false, writable: true });
@@ -744,7 +758,7 @@ document.addEventListener('click', async ev => {
   const el = ev.target.closest('[data-act]'); if (!el) return;
   const a = el.dataset.act, id = el.dataset.id, v = el.dataset.v;
   if (!api && !['tab', 'closeov', 'gal'].includes(a)) { toast('Conectando con el sistema…'); return }
-  if (a === 'retry') { ev.preventDefault(); ev.stopPropagation(); const t = tiles[id]; t.holder[t.key]._retry(); return }
+  if (a === 'retry') { ev.preventDefault(); ev.stopPropagation(); const t = tiles[id]; toast('Reintentando…'); t.holder[t.key]._retry(); return }
   if (a === 'closeov') { el.closest('.ov').remove(); return }
   if (a === 'new') { const n = await pedirCodigo('Nueva recepción'); if (!n) return; draft = { id: api.newId(), orden: '', cliente: '', telefono: '', recibidoPor: n, pares: [newPar()] }; view = 'new'; render(); scrollTo(0, 0); guardarBorrador(); return }
   if (a === 'home') { if (view === 'new' && allPhotos(draft).length && !document.querySelector('.ov')) { const o = viewer(`<div class="card" style="max-width:340px"><h3>¿Salir sin guardar?</h3><p class="meta">Se perderán las fotos tomadas.</p><div class="row"><button class="btn alt" data-act="closeov">Seguir aquí</button><button class="btn" data-act="exitnew">Salir</button></div></div>`); return } view = 'home'; draft = null; render(); return }
