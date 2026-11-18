@@ -175,7 +175,7 @@ const CONFIG = {
   palabrasZapatos: /ZAPAT|\bPAR(ES)?\b|CALZAD|TENIS|BOTA/i, // servicios de calzado: el nombre dice ZAPATOS o PAR/PARES
   // Con Firebase conectado, los códigos se leen de "pins" (los mismos del sistema de producción)
   // y los nombres de "usuarios". Esta lista solo se usa en MODO DEMO.
-  pins: 'pins', usuarios: 'usuarios',
+  pins: 'pins', usuarios: 'empleadas', // nombres: colección "empleadas" de Lavalyisto
   empleadas: [
     { nombre: 'Natalia Vásquez', codigo: '1111' },
     { nombre: 'Mónica Vásquez', codigo: '2222' },
@@ -243,9 +243,10 @@ async function firebaseBackend(cfg) {
       (u?.docs || []).forEach(d => { const x = d.data(); users.set(String(x.id ?? d.id), x); users.set(d.id, x) });
       return p.docs.map(d => ({ _id: d.id, ...d.data() })).filter(x => x.activo !== false && x.pinHash).map(x => {
         const us = users.get(String(x.id ?? x._id)) || {};
+        if (us.activa === false) return null;
         const nombre = us.nombre || us.nombreCompleto || us.name || us.usuario || us.displayName || [us.nombres, us.apellidos].filter(Boolean).join(' ') || ('Colaboradora ' + (x.id ?? x._id));
         return { id: String(x.id ?? x._id), nombre, hash: String(x.pinHash).toLowerCase(), salt: String(x.salt || '') };
-      });
+      }).filter(Boolean);
     },
     ventasActivas: async () => {
       const desde = new Date(Date.now() - CONFIG.diasPedidos * 864e5).toISOString();
@@ -687,7 +688,7 @@ function pedirCodigo(motivo) {
   });
 }
 /* Los PIN se comparan con el hash (pinHash + salt) del sistema de producción; nunca se guardan en claro */
-let colabs = null, esquema = ls.get('lyl-pin-esq', null);
+let colabs = null, esquema = ls.get('lyl-pin-esq', 'sha:salt:pin'); // Lavalyisto: SHA-256(salt + ":" + pin)
 const hex = b => [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
 const unhex = h => /^[0-9a-f]+$/i.test(h) && h.length % 2 === 0 ? new Uint8Array(h.match(/../g).map(x => parseInt(x, 16))) : null;
 const enc = t => new TextEncoder().encode(t);
