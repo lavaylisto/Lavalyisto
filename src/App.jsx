@@ -532,6 +532,7 @@ const USUARIOS_DEFAULT = [
   {id:3,usuario:"maria",clave:"1234",rol:"Empleada",nombre:"Maria Lopez"},
 ];
 const ESTADOS = [
+  {id:"porRecibir",label:"Pagado · falta dejar prendas",color:"#7c3aed",bg:"#f3e8fd",icon:"🕒"},
   {id:"recibido",label:"Recibido",color:"#f59e0b",bg:"#fff8e1",icon:"📥"},
   {id:"proceso",label:"En proceso",color:"#1565c0",bg:"#e3f2fd",icon:"🔄"},
   {id:"listo",label:"Listo para retirar",color:"#2e7d32",bg:"#e8f5e9",icon:"✅"},
@@ -556,7 +557,7 @@ const mesK=d=>{const dt=new Date(d);return dt.getFullYear()+"-"+String(dt.getMon
 const normNombre=s=>(s||"").toString().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g," ").trim().toLowerCase();
 const saldo=v=>(v.total||0)-(v.abonos||[]).reduce((a,ab)=>a+(ab.monto||0),0);
 const pagada=v=>saldo(v)<=0;
-const getEst=v=>ESTADOS.find(e=>e.id===(v.estado||"recibido"))||ESTADOS[0];
+const getEst=v=>ESTADOS.find(e=>e.id===(v.estado||"recibido"))||ESTADOS.find(e=>e.id==="recibido");
 const sigEst=actual=>{const i=ESTADOS.findIndex(e=>e.id===actual);return i<ESTADOS.length-1?ESTADOS[i+1]:null;};
 
 const esLavadoSeco = label => label && label.toUpperCase().includes("SECO");
@@ -1824,7 +1825,9 @@ function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta,clientes,setClien
         </div>
         <div style={{display:"flex",gap:8,marginTop:10,flexWrap:"wrap"}}>
           {sig&&sig.id==="entregado"&&<button style={{flex:1,padding:"10px",background:sig.bg,color:sig.color,border:`1.5px solid ${sig.color}`,borderRadius:10,fontWeight:700,fontSize:13,cursor:"pointer"}} onClick={cambiar}>{sig.icon} {sig.label}</button>}
-          {sig&&sig.id!=="entregado"&&<div style={{flex:1,padding:"10px",background:"#f0f4f8",color:"#888",border:"1.5px dashed #d0dce8",borderRadius:10,fontWeight:600,fontSize:12,textAlign:"center"}}>🏭 Se actualiza desde Producción</div>}
+          {v.excepcionPagoPromo&&<div style={{width:"100%",fontSize:11,color:"#8a5a00",background:"#fff8e1",borderRadius:8,padding:"5px 8px"}}>🔑 Promo con pago pendiente autorizada por la jefa · {v.excepcionPagoPromo.motivo}</div>}
+          {(v.estado==="porRecibir")&&<button style={{flex:1,padding:"10px",background:"#f3e8fd",color:"#7c3aed",border:"1.5px solid #7c3aed",borderRadius:10,fontWeight:700,fontSize:13,cursor:"pointer"}} onClick={()=>{if(!window.confirm(`¿${v.clienteNombre} ya dejó sus prendas? La orden pasa a "Recibido" y entra a Producción.`))return;guardarVentaFn(setVentas,upsertVenta,v.folio,x=>({...x,estado:"recibido",prendasRecibidasEn:new Date().toISOString(),prendasRecibidasPor:sesion?.nombre||null}));}}>📥 Ya dejó las prendas</button>}
+          {sig&&sig.id!=="entregado"&&v.estado!=="porRecibir"&&<div style={{flex:1,padding:"10px",background:"#f0f4f8",color:"#888",border:"1.5px dashed #d0dce8",borderRadius:10,fontWeight:600,fontSize:12,textAlign:"center"}}>🏭 Se actualiza desde Producción</div>}
           {!esPag&&<button style={{flex:1,padding:"10px",background:"#e8f5e9",color:"#2e7d32",border:"1.5px solid #2e7d32",borderRadius:10,fontWeight:700,fontSize:13,cursor:"pointer"}} onClick={()=>setShowAb(true)}>💰 Cobrar</button>}
           <button style={{padding:"10px 14px",background:"#f0f4f8",color:"#1a3c5e",border:"none",borderRadius:10,fontSize:12,cursor:"pointer"}} onClick={()=>setTicket(v)}>🧾</button>
         </div>
@@ -4644,6 +4647,15 @@ const PROMOS_MAX=5;
 const DOW_LBL=["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"];
 
 // La ventana sale al tocar "Registrar venta": último recordatorio antes de cerrar
+// 📅 ¿La promo está vigente hoy? (días de la semana + rango de fechas opcional, ej. Black Friday)
+const promoVigenteHoy=p=>{
+  if(!p||p.activa===false||p.eliminada)return false;
+  const hoy=fechaHoyLocal();const dow=new Date().getDay();
+  if(p.dias&&p.dias.length&&!p.dias.includes(dow))return false;
+  if(p.fechaInicio&&hoy<p.fechaInicio)return false;
+  if(p.fechaFin&&hoy>p.fechaFin)return false;
+  return true;
+};
 const promosDeHoy=(promos,servicios)=>{
   const dow=new Date().getDay();
   const resolver=p=>{
@@ -4656,8 +4668,8 @@ const promosDeHoy=(promos,servicios)=>{
     return{...p,precioTxt:`$${(s.precio||0).toFixed(2)}`,detalle:p.detalle};
   };
   return (promos&&promos.length?promos:DEFAULT_PROMOS)
-    .filter(p=>!p.dias||p.dias.length===0||p.dias.includes(dow))
-    .sort((a,b)=>((a.dias&&a.dias.length)?0:1)-((b.dias&&b.dias.length)?0:1)) // primero las exclusivas de hoy
+    .filter(promoVigenteHoy)
+    .sort((a,b)=>((a.fechaInicio||a.fechaFin)?0:(a.dias&&a.dias.length)?1:2)-((b.fechaInicio||b.fechaFin)?0:(b.dias&&b.dias.length)?1:2)) // primero las de fecha (Black Friday), luego las del día
     .map(resolver).filter(Boolean).slice(0,PROMOS_MAX);
 };
 
@@ -4899,15 +4911,15 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
     }
     setImpulsos(prev=>[...prev,{promoId:p.id,titulo:p.titulo,fecha:new Date().toISOString()}]); // 🎯 impulsación registrada
     if(p.tipo==="descuento"){
-      setItems(prev=>[...prev,{servId:servicios[0]?.id,piezas:1,custom:true,lC:p.labelDescuento,pC:String(-Math.abs(p.monto))}]);
+      setItems(prev=>[...prev,{servId:servicios[0]?.id,piezas:1,custom:true,lC:p.labelDescuento,pC:String(-Math.abs(p.monto)),promoId:p.id}]);
     }else if(p.tipo==="custom"){
-      setItems(prev=>[...prev,{servId:servicios[0]?.id,piezas:1,custom:true,lC:p.label,pC:String(p.precio)}]);
+      setItems(prev=>[...prev,{servId:servicios[0]?.id,piezas:1,custom:true,lC:p.label,pC:String(p.precio),promoId:p.id}]);
     }else{
       const s=servicios.find(x=>x.id===p.servId);
       if(s)setItems(prev=>{
         // Si el primer renglón sigue intacto (servicio por defecto, 1 pieza), se reemplaza por la promo
         const intacto=prev.length===1&&!prev[0].custom&&prev[0].servId===servicios[0]?.id&&(prev[0].piezas||1)===1;
-        return[...(intacto?[]:prev),{servId:s.id,piezas:1,custom:false,lC:"",pC:""}];
+        return[...(intacto?[]:prev),{servId:s.id,piezas:1,custom:false,lC:"",pC:"",promoId:p.id}];
       });
     }
     cerrarPromos();
@@ -4916,10 +4928,28 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
     const p=segundaPromoActiva;if(!p)return;
     const pct=p.pct||50;
     const precioProm=s.precio*(1-pct/100);
-    setItems(prev=>[...prev,{servId:s.id,piezas:1,custom:true,deCupon:!!p.deCupon,lC:`🎉 ${p.titulo} · ${s.label}`,pC:precioProm.toFixed(2)}]);
+    setItems(prev=>[...prev,{servId:s.id,piezas:1,custom:true,deCupon:!!p.deCupon,lC:`🎉 ${p.titulo} · ${s.label}`,pC:precioProm.toFixed(2),promoId:p.id}]);
     setImpulsos(prev=>[...prev,{promoId:p.id,titulo:p.titulo,fecha:new Date().toISOString()}]); // 🎯 impulsación registrada
     setSegundaPromoActiva(null);
   };
+  // 🖤 Promos de la venta que exigen pago completo
+  const promosPagoCompleto=(()=>{const ids=[...new Set(items.map(it=>it.promoId).filter(Boolean))];return ids.map(id=>(promos&&promos.length?promos:DEFAULT_PROMOS).find(p=>p.id===id)).filter(p=>p&&p.soloPagoCompleto);})();
+  const [sinPrendas,setSinPrendas]=useState(false); // 🕒 pagó pero todavía no deja las prendas
+  // 🔑 Excepción: la jefa autoriza con código que esta venta de promo quede con abono o pago al retirar (pocos casos)
+  const [excepcion,setExcepcion]=useState(null); // {motivo,promoIds,autorizadaEn}
+  const [verExc,setVerExc]=useState(false);
+  const [excCod,setExcCod]=useState("");const [excMot,setExcMot]=useState("");const [excErr,setExcErr]=useState("");
+  const autorizarExcepcion=()=>{
+    const conCodigo=promosPagoCompleto.filter(p=>p.codigoExcepcion);
+    if(conCodigo.length===0){setExcErr("Esta promo no tiene código de autorización configurado. La jefa debe ponerlo en 🎁 Promos.");return;}
+    if(!conCodigo.every(p=>String(p.codigoExcepcion).trim()===excCod.trim())){setExcErr("Código incorrecto");return;}
+    if(excMot.trim().length<5){setExcErr("Escribe el motivo (ej. dejó los zapatos, paga el viernes)");return;}
+    setExcepcion({motivo:excMot.trim(),promoIds:promosPagoCompleto.map(p=>p.id),autorizadaEn:new Date().toISOString(),registradaPor:sesion?.nombre||null});
+    setVerExc(false);setExcCod("");setExcErr("");
+  };
+  useEffect(()=>{if(promosPagoCompleto.length>0&&tPago!=="completo"&&!excepcion)setTPago("completo");},[promosPagoCompleto.length,tPago,excepcion]);
+  useEffect(()=>{if(promosPagoCompleto.length===0&&excepcion)setExcepcion(null);},[promosPagoCompleto.length,excepcion]);
+  useEffect(()=>{if(tPago!=="completo"&&sinPrendas)setSinPrendas(false);},[tPago,sinPrendas]);
   const reg=(saltarPromos=false)=>{
     // 🎁 Antes de cerrar la venta: recordar las promos del día (1 vez por venta)
     if(!saltarPromos&&!promoOfrecida&&promosDeHoy(promos,servicios).length>0){
@@ -4934,6 +4964,8 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
     const cumpleOk=(mC==="buscar"&&clientes.find(c=>c.id===cId&&puedeUsarDescCumple(c)))||(mC==="nuevo"&&!!cicloCumpleVigente(nC.nacimiento));
     const descC=cumpleOk&&descCumple?+(bruto*DESC_CUMPLE).toFixed(2):0;
     const total=+(bruto-descC).toFixed(2);
+    // 🖤 Promos marcadas "solo pago completo" (ej. Black Friday): sin abonos ni pago al retirar
+    if(promosPagoCompleto.length>0&&tPago!=="completo"&&!excepcion){setErr(`La promo "${promosPagoCompleto[0].titulo}" solo se factura con PAGO COMPLETO. No se aceptan abonos ni pago al retirar.`);setTPago("completo");return;}
     if(tPago==="abono"){const m=parseFloat(abono);if(!m||m<=0||m>=total){setErr("El abono debe ser mayor a 0 y menor al total");return;}}
     if(cupApl){ // 🎟️ revalidación final del cupón
       const cup=cupones.find(c=>c.id===cupApl.id);
@@ -4969,7 +5001,9 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
         if(it.esProducto){const p=productosActivos.find(x=>x.id===it.productoId);return{...it,label:p?.nombre||"Producto",precio:p?.precio||0};}
         const s=servicios.find(s=>s.id===it.servId);return{...it,label:s?.label,precio:s?.precio};
       }),...(descC>0?[{custom:true,piezas:1,label:"🎂 DESCUENTO CUMPLEAÑOS (-10%)",precio:-descC}]:[])],
-      pago:metodo,total,abonos:abs,pagada:tPago==="completo",notas,checkMsgRetiro:false,checkMsgEntrega:false,facturadoSRI:false,estado:todosProductos?"entregado":"recibido",
+      pago:metodo,total,abonos:abs,pagada:tPago==="completo",notas,checkMsgRetiro:false,checkMsgEntrega:false,facturadoSRI:false,estado:todosProductos?"entregado":(sinPrendas?"porRecibir":"recibido"),
+      ...(sinPrendas&&!todosProductos?{pagoAnticipado:true}:{}),
+      ...(excepcion&&tPago!=="completo"?{excepcionPagoPromo:excepcion}:{}),
       cuponId:cupApl?.id||null,
       prendaManchaAviso:!!tienePrendaMancha,prendaManchaObs:tienePrendaMancha?obsPrendaMancha.trim():null,
       boletoResenaSolicitado:!!boletoResena,protocoloCumplido:!!protocoloCumplido};
@@ -5036,7 +5070,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
     setCQ("");setCId(null);setNC({nombre:"",tel:"",cedula:"",email:"",rfc:"",direccion:"",nacimiento:""});setRecordatorioVisto(false);setRecordatorio(null);setDescCumple(false);setImpulsos([]);setCupApl(null);setCupInput("");setCupErr("");
     setTienePrendaMancha(null);setObsPrendaMancha("");setBoletoResena(false);setProtocoloCumplido(true);
     setItems([{servId:servicios[0]?.id,piezas:1,custom:false,esProducto:false,productoId:null,lC:"",pC:""}]);
-    setNotas("");setErr("");setAbono("");setTPago("completo");
+    setNotas("");setErr("");setAbono("");setTPago("completo");setSinPrendas(false);setExcepcion(null);setExcMot("");
   };
   const confirmarWaRecibido=info=>{
     const v2={...waVenta,msgRecibido:info};
@@ -5158,10 +5192,28 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
       )}
       <Card title="💳 Pago">
         <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
-          {[{id:"completo",l:"✅ Pago completo"},{id:"abono",l:"💵 Abono"},{id:"retiro",l:"⏳ Paga al retirar"}].map(op=>(
+          {[{id:"completo",l:"✅ Pago completo"},{id:"abono",l:"💵 Abono"},{id:"retiro",l:"⏳ Paga al retirar"}].filter(op=>promosPagoCompleto.length===0||excepcion||op.id==="completo").map(op=>(
             <button key={op.id} style={{...S.pill,...(tPago===op.id?S.pillA:{})}} onClick={()=>setTPago(op.id)}>{op.l}</button>
           ))}
         </div>
+        {promosPagoCompleto.length>0&&!excepcion&&<div style={{background:"#111",color:"#fff",borderRadius:10,padding:"8px 12px",fontSize:12,marginBottom:10}}>
+          🖤 <strong>{promosPagoCompleto.map(p=>p.titulo).join(", ")}</strong>: solo con <strong>pago completo</strong>. No se aceptan abonos ni pago al retirar.
+          {!verExc&&<button style={{display:"block",marginTop:6,background:"transparent",color:"#ffd54f",border:"1px solid #ffd54f",borderRadius:8,padding:"4px 10px",fontSize:11,cursor:"pointer"}} onClick={()=>{setVerExc(true);setExcErr("");}}>🔑 Excepción con autorización de la jefa</button>}
+          {verExc&&<div style={{marginTop:8,background:"#222",borderRadius:8,padding:8}}>
+            <input style={{...S.inp,marginBottom:6}} type="password" inputMode="numeric" placeholder="Código de autorización" value={excCod} onChange={e=>{setExcCod(e.target.value);setExcErr("");}}/>
+            <input style={{...S.inp,marginBottom:6}} placeholder="Motivo (ej. dejó los zapatos, paga el viernes)" value={excMot} onChange={e=>{setExcMot(e.target.value);setExcErr("");}}/>
+            {excErr&&<div style={{color:"#ff8a80",fontSize:11,marginBottom:6}}>{excErr}</div>}
+            <div style={{display:"flex",gap:6}}>
+              <button style={{...S.btnP,flex:2,padding:"8px"}} onClick={autorizarExcepcion}>Autorizar</button>
+              <button style={{...S.btnC,flex:1,padding:"8px"}} onClick={()=>{setVerExc(false);setExcCod("");setExcErr("");}}>Cancelar</button>
+            </div>
+          </div>}
+        </div>}
+        {excepcion&&<div style={{background:"#fff8e1",border:"1.5px solid #f59e0b",color:"#8a5a00",borderRadius:10,padding:"8px 12px",fontSize:12,marginBottom:10}}>🔑 <strong>Excepción autorizada por la jefa</strong>: se permite abono o pago al retirar. Motivo: {excepcion.motivo} <button style={{marginLeft:6,background:"none",border:"none",color:"#c62828",cursor:"pointer",fontSize:11}} onClick={()=>{setExcepcion(null);setTPago("completo");}}>Quitar</button></div>}
+        {tPago==="completo"&&<label style={{display:"flex",alignItems:"flex-start",gap:8,background:sinPrendas?"#f3e8fd":"#f8fbfd",border:`1.5px solid ${sinPrendas?"#7c3aed":"#e8f0f7"}`,borderRadius:10,padding:"8px 12px",marginBottom:10,cursor:"pointer",fontSize:13}}>
+          <input type="checkbox" checked={sinPrendas} onChange={e=>setSinPrendas(e.target.checked)} style={{width:18,height:18,marginTop:1}}/>
+          <span><strong>🕒 Pagó, pero todavía no deja las prendas</strong><span style={{display:"block",fontSize:11,color:"#666"}}>La orden queda como "Pagado · falta dejar prendas" y NO entra a Producción hasta que las traiga.</span></span>
+        </label>}
         {tPago!=="retiro"&&(
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
             <div><label style={S.lbl}>Metodo</label><select style={S.inp} value={metodo} onChange={e=>setMetodo(e.target.value)}>{PAGOS.map(p=><option key={p}>{p}</option>)}</select></div>
@@ -10436,7 +10488,7 @@ function CuponSugerido({venta,clientes,ventas,cupones,setCupones,upsertCupon,ses
 // 🎁 PROMOS: administración completa (crear, editar, activar/desactivar,
 // eliminar) — reemplaza la lista fija; todo se guarda en la nube.
 // ═══════════════════════════════════════════════════════════════════
-const PROMO_VACIA={tipo:"custom",emoji:"🎁",titulo:"",detalle:"",precio:"",antes:"",monto:"",minCompra:"",claves:"",dias:[],filtro:"",pct:"50"};
+const PROMO_VACIA={tipo:"custom",emoji:"🎁",titulo:"",detalle:"",precio:"",antes:"",monto:"",minCompra:"",claves:"",dias:[],filtro:"",pct:"50",fechaInicio:"",fechaFin:"",soloPagoCompleto:false,codigoExcepcion:""};
 function PromosAdmin({promos,setPromos,upsertPromo,servicios}){
   const [form,setForm]=useState(PROMO_VACIA);
   const [editId,setEditId]=useState(null);
@@ -10451,6 +10503,8 @@ function PromosAdmin({promos,setPromos,upsertPromo,servicios}){
       id:editId||("promo_"+Date.now()),
       tipo:form.tipo,emoji:form.emoji||"🎁",titulo:form.titulo.trim(),detalle:form.detalle.trim(),
       dias:form.dias&&form.dias.length?form.dias:null,activa:true,claves,
+      fechaInicio:form.fechaInicio||null,fechaFin:form.fechaFin||null,soloPagoCompleto:!!form.soloPagoCompleto,
+      codigoExcepcion:form.soloPagoCompleto&&form.codigoExcepcion.trim()?form.codigoExcepcion.trim():null,
       precio:form.tipo==="custom"?parseFloat(form.precio)||0:null,
       antes:form.tipo==="custom"&&form.antes?parseFloat(form.antes):null,
       label:form.tipo==="custom"?`🎁 PROMO: ${form.titulo.toUpperCase()}`:null,
@@ -10476,7 +10530,8 @@ function PromosAdmin({promos,setPromos,upsertPromo,servicios}){
       precio:p.precio!=null?String(p.precio):"",antes:p.antes!=null?String(p.antes):"",
       monto:p.monto!=null?String(p.monto):"",minCompra:p.minCompra!=null?String(p.minCompra):"",
       claves:(p.claves||[]).join(", "),dias:p.dias||[],
-      filtro:p.filtro||"",pct:p.pct!=null?String(p.pct):"50"
+      filtro:p.filtro||"",pct:p.pct!=null?String(p.pct):"50",
+      fechaInicio:p.fechaInicio||"",fechaFin:p.fechaFin||"",soloPagoCompleto:!!p.soloPagoCompleto,codigoExcepcion:p.codigoExcepcion||""
     });
   };
   const cancelar=()=>{setEditId(null);setForm(PROMO_VACIA);};
@@ -10530,6 +10585,21 @@ function PromosAdmin({promos,setPromos,upsertPromo,servicios}){
         ))}
       </div>
       <div style={{fontSize:11,color:"#888",marginBottom:8}}>{form.dias.length===0?"Sin días marcados = aplica todos los días":`Solo aplica: ${form.dias.map(d=>DOW_LBL[d]).join(", ")}`}</div>
+      <label style={S.lbl}>📅 Fechas (opcional — para promos de temporada como Black Friday)</label>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:4}}>
+        <div><label style={{...S.lbl,fontSize:11}}>Desde</label><input type="date" style={S.inp} value={form.fechaInicio} onChange={e=>setForm({...form,fechaInicio:e.target.value})}/></div>
+        <div><label style={{...S.lbl,fontSize:11}}>Hasta</label><input type="date" style={S.inp} value={form.fechaFin} onChange={e=>setForm({...form,fechaFin:e.target.value})}/></div>
+      </div>
+      <div style={{fontSize:11,color:"#888",marginBottom:8}}>Fuera de esas fechas la promo no aparece en la venta. Vacío = sin límite de fechas.</div>
+      <label style={{display:"flex",alignItems:"flex-start",gap:8,background:form.soloPagoCompleto?"#111":"#f8fbfd",color:form.soloPagoCompleto?"#fff":"#1a3c5e",border:"1.5px solid #e8f0f7",borderRadius:10,padding:"8px 12px",marginBottom:10,cursor:"pointer",fontSize:13}}>
+        <input type="checkbox" checked={!!form.soloPagoCompleto} onChange={e=>setForm({...form,soloPagoCompleto:e.target.checked})} style={{width:18,height:18,marginTop:1}}/>
+        <span><strong>🖤 Solo se factura con pago completo</strong><span style={{display:"block",fontSize:11,opacity:.75}}>No permite abonos ni "paga al retirar" cuando la venta incluye esta promo.</span></span>
+      </label>
+      {form.soloPagoCompleto&&<div style={{marginBottom:10}}>
+        <label style={S.lbl}>🔑 Código de autorización para excepciones (solo lo sabe la jefa)</label>
+        <input style={S.inp} placeholder="ej. 4821" value={form.codigoExcepcion} onChange={e=>setForm({...form,codigoExcepcion:e.target.value})}/>
+        <div style={{fontSize:11,color:"#888",marginTop:3}}>Con este código, en casos puntuales, la colaboradora puede registrar esta promo con abono o pago al retirar. Queda marcado en la orden con el motivo.</div>
+      </div>}
       <label style={S.lbl}>Palabras clave para detectar consumo (opcional, separadas por coma)</label>
       <input style={{...S.inp,marginBottom:4}} placeholder="ej. zapato, tenis, calzado" value={form.claves} onChange={e=>setForm({...form,claves:e.target.value})}/>
       <div style={{fontSize:11,color:"#888",marginBottom:10}}>Se usan para el sorteo de cupones: si el cliente nunca ha comprado algo con estas palabras, se le sugiere esta promo.</div>
@@ -10548,6 +10618,8 @@ function PromosAdmin({promos,setPromos,upsertPromo,servicios}){
               <div style={{fontSize:11,color:"#4db6e4",marginTop:3}}>
                 {p.tipo==="descuento"?`Descuento -$${(p.monto||0).toFixed(2)}${p.minCompra?` · mín. $${p.minCompra.toFixed(2)}`:""}`:p.tipo==="segundo50"?`2da unidad "${p.filtro}" a -${p.pct||50}%`:`$${(p.precio||0).toFixed(2)}${p.antes?` (antes $${p.antes.toFixed(2)})`:""}`}
                 {" · "}{(!p.dias||p.dias.length===0)?"Todos los días":p.dias.map(d=>DOW_LBL[d]).join(", ")}
+                {(p.fechaInicio||p.fechaFin)&&<span style={{color:"#e65100"}}>{" · 📅 "}{p.fechaInicio?fmtD(p.fechaInicio):"…"} – {p.fechaFin?fmtD(p.fechaFin):"…"}</span>}
+                {p.soloPagoCompleto&&<span style={{color:"#111",fontWeight:700}}>{" · 🖤 solo pago completo"}{p.codigoExcepcion?" · 🔑 con código":""}</span>}
               </div>
               {p.claves&&p.claves.length>0&&<div style={{fontSize:10,color:"#aaa",marginTop:2}}>🎯 {p.claves.join(", ")}</div>}
             </div>
