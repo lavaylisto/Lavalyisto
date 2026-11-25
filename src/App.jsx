@@ -2251,7 +2251,7 @@ function Produccion({ventas:ventasTodas,setVentas,upsertVenta,empleadas,pins,eve
   // 🛍️ Los PRODUCTOS (aromatizantes, detergentes, etc.) no pasan por lavado: en Producción solo se ven los servicios.
   // Si la orden es solo de productos, se deja igual y abajo se excluye completa con esSoloProductos.
   // 🧴 Igual el lavado en seco (Martinizing): no pasa por nuestras máquinas, se sigue en la pestaña Martinizing.
-  const sinProceso=it=>it.esProducto||esLavadoSeco(it.label);
+  const sinProceso=it=>it.esProducto||esLavadoSeco(it.label)||it.promoAuto||(it.custom&&(Number(it.precio)||0)<0);
   const ventas=ventasTodas.map(v=>{const its=v.items||[];if(!its.some(sinProceso))return v;const proc=its.filter(it=>!sinProceso(it));return proc.length?{...v,items:proc}:{...v,_sinProceso:true};});
   const [pickerFor,setPickerFor]=useState(null); // {folio, tipoMaquina}
   const [clasifFor,setClasifFor]=useState(null); // {folio} — orden esperando revisión de prendas
@@ -4468,7 +4468,7 @@ function PantallaEmpleada({cajas=[],ventas,setVentas,clientes,setClientes,emplea
       )}
       {ticket&&<TicketModal venta={ticket} empleadas={empleadas} onClose={()=>{setCuponSugE(ticket);setTicket(null);}}/>}
       {/* CuponSugerido desactivado: reemplazado por el sistema automático de cupón de cliente nuevo */}
-      {showSalidaEmp&&<SalidaCaja sesion={sesion} salidasCaja={salidasCaja||[]} setSalidasCaja={setSalidasCaja} onClose={()=>setShowSalidaEmp(false)} upsertSalida={upsertSalida}/>}
+      {showSalidaEmp&&<SalidaCaja sesion={sesion} ventas={ventas} salidasCaja={salidasCaja||[]} setSalidasCaja={setSalidasCaja} onClose={()=>setShowSalidaEmp(false)} upsertSalida={upsertSalida}/>}
       {showNotifs&&<NotificacionesPanel ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} addAbono={addAbono} clientes={clientes} maquinas={maquinas} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} pins={pins} empleadas={empleadas} sesion={sesion} onClose={()=>setShowNotifs(false)}/>}
       {boletosParaImprimir&&<BoletosSorteoModal data={boletosParaImprimir} sorteos={sorteos||[]} onClose={()=>setBoletosParaImprimir(null)}/>}
     </div>
@@ -4656,6 +4656,32 @@ const promoVigenteHoy=p=>{
   if(p.fechaFin&&hoy>p.fechaFin)return false;
   return true;
 };
+// 🎯 Promo "Descuento en servicios": % de descuento, $ menos por unidad, NxM o 2da unidad a %,
+// sobre los servicios/productos de la venta cuyo nombre contiene alguna palabra clave (ej. COBIJA / EDREDON / SABANA / AROMATIZ).
+// Se descuenta siempre la(s) unidad(es) más barata(s) en NxM y 2da unidad.
+const normTxtP=t=>String(t||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toUpperCase();
+const calcPromoPorItem=(p,items,servicios,productos)=>{
+  const claves=String(p.filtro||"").split(",").map(x=>normTxtP(x).trim()).filter(Boolean);
+  const coincide=lbl=>claves.length>0&&claves.some(k=>normTxtP(lbl).includes(k));
+  const unidades=[];
+  (items||[]).forEach(it=>{
+    if(it.custom||it.promoAuto||it.deCupon)return;
+    let lbl,precio;
+    if(it.esProducto){const pr=(productos||[]).find(x=>x.id===it.productoId);if(!pr)return;lbl=`${pr.nombre} ${pr.categoria||""}`;precio=Number(pr.precio)||0;}
+    else{const sv=(servicios||[]).find(x=>x.id===it.servId);if(!sv)return;lbl=sv.label;precio=Number(sv.precio)||0;}
+    if(!coincide(lbl)||precio<=0)return;
+    const n=Math.max(1,parseInt(it.piezas)||1);
+    for(let k=0;k<n;k++)unidades.push(precio);
+  });
+  unidades.sort((a,b)=>a-b);
+  const cnt=unidades.length;let d=0;
+  if(p.modo==="pct")d=unidades.reduce((a,x)=>a+x,0)*(Number(p.pct)||0)/100;
+  else if(p.modo==="monto")d=unidades.reduce((a,x)=>a+Math.min(x,Number(p.monto)||0),0);
+  else if(p.modo==="nxm"){const n=Number(p.n)||3,m=Number(p.m)||2;const gratis=n>m?Math.floor(cnt/n)*(n-m):0;d=unidades.slice(0,gratis).reduce((a,x)=>a+x,0);}
+  else if(p.modo==="segundoPct"){const k=Math.floor(cnt/2);d=unidades.slice(0,k).reduce((a,x)=>a+x,0)*(Number(p.pct)||50)/100;}
+  return{desc:Math.round(d*100)/100,unidades:cnt};
+};
+const txtPromoPorItem=p=>p.modo==="pct"?`-${p.pct}%`:p.modo==="monto"?`-$${(Number(p.monto)||0).toFixed(2)} c/u`:p.modo==="nxm"?`${p.n}x${p.m}`:`2da -${p.pct||50}%`;
 const promosDeHoy=(promos,servicios)=>{
   const dow=new Date().getDay();
   const resolver=p=>{
@@ -4663,6 +4689,7 @@ const promosDeHoy=(promos,servicios)=>{
     if(p.tipo==="descuento")return{...p,precioTxt:`-$${(p.monto||0).toFixed(2)}`};
     if(p.tipo==="custom")return{...p,precioTxt:`$${(p.precio||0).toFixed(2)}`};
     if(p.tipo==="segundo50")return{...p,precioTxt:`-${p.pct||50}% (2da unidad)`};
+    if(p.tipo==="porItem")return{...p,precioTxt:txtPromoPorItem(p)};
     const s=servicios.find(x=>x.id===p.servId&&!x.eliminada);
     if(!s)return null; // si el servicio ya no existe, la promo no se muestra
     return{...p,precioTxt:`$${(s.precio||0).toFixed(2)}`,detalle:p.detalle};
@@ -4894,6 +4921,15 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
   const cerrarPromos=()=>setShowPromos(false);
   const posActual=()=>items.reduce((a,it)=>{const pr=it.custom?(parseFloat(it.pC)||0):(servicios.find(s=>s.id===it.servId)?.precio||0);const sub=pr*(it.piezas||1);return a+(sub>0?sub:0);},0);
   const agregarPromo=p=>{
+    if(p.tipo==="porItem"){
+      if(items.some(it=>it.promoAuto&&it.promoId===p.id)){alert("Esta promo ya está aplicada en la venta. Se recalcula sola si cambias las cantidades. ✅");return;}
+      const {desc}=calcPromoPorItem(p,items,servicios,productosActivos);
+      if(desc<=0){alert(`Para aplicar "${p.titulo}" agrega primero a la venta ${p.modo==="nxm"?`al menos ${p.n} unidades de`:p.modo==="segundoPct"?"al menos 2 unidades de":""} los servicios/productos que contienen: ${p.filtro}. 🛒`);return;}
+      setImpulsos(prev=>[...prev,{promoId:p.id,titulo:p.titulo,fecha:new Date().toISOString()}]);
+      setItems(prev=>[...prev,{servId:servicios[0]?.id,piezas:1,custom:true,promoAuto:true,lC:`🎁 PROMO: ${p.titulo.toUpperCase()} (${txtPromoPorItem(p)})`,pC:(-desc).toFixed(2),promoId:p.id}]);
+      cerrarPromos();
+      return;
+    }
     if(p.tipo==="segundo50"){
       const filtro=(p.filtro||"").toUpperCase().trim();
       const hayBase=items.some(it=>!it.custom&&!it.deCupon&&(()=>{const s=servicios.find(x=>x.id===it.servId);return s&&(!filtro||s.label.toUpperCase().includes(filtro));})());
@@ -4936,6 +4972,20 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
     setImpulsos(prev=>[...prev,{promoId:p.id,titulo:p.titulo,fecha:new Date().toISOString()}]); // 🎯 impulsación registrada
     setSegundaPromoActiva(null);
   };
+  // 🎯 Recalcula solas las promos "Descuento en servicios" cuando cambian los servicios o cantidades de la venta
+  useEffect(()=>{
+    if(!items.some(it=>it.promoAuto))return;
+    const lista=promos&&promos.length?promos:DEFAULT_PROMOS;
+    let cambio=false;
+    const next=items.map(it=>{
+      if(!it.promoAuto)return it;
+      const p=lista.find(x=>x.id===it.promoId);if(!p)return it;
+      const v=(-calcPromoPorItem(p,items,servicios,productosActivos).desc).toFixed(2).replace("-0.00","0.00");
+      if(v!==String(it.pC)){cambio=true;return{...it,pC:v};}
+      return it;
+    });
+    if(cambio)setItems(next);
+  },[items]);
   // 🖤 Promos de la venta que exigen pago completo
   const promosPagoCompleto=(()=>{const ids=[...new Set(items.map(it=>it.promoId).filter(Boolean))];return ids.map(id=>(promos&&promos.length?promos:DEFAULT_PROMOS).find(p=>p.id===id)).filter(p=>p&&p.soloPagoCompleto);})();
   const [sinPrendas,setSinPrendas]=useState(false); // 🕒 pagó pero todavía no deja las prendas
@@ -5162,12 +5212,17 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
         {items.map((it,i)=>(
           <div key={i} style={{marginBottom:10,background:"#f8fbfd",borderRadius:8,padding:10,border:"1px solid #e8f0f7"}}>
             <div style={{display:"flex",gap:6,marginBottom:6,alignItems:"center",flexWrap:"wrap"}}>
-              <button style={{...S.pill,fontSize:11,padding:"4px 10px",...(!it.custom&&!it.esProducto?S.pillA:{})}} onClick={()=>setTipoItem(i,"servicio")}>Del menu</button>
-              <button style={{...S.pill,fontSize:11,padding:"4px 10px",...(it.esProducto?S.pillA:{})}} onClick={()=>setTipoItem(i,"producto")}>🛍️ Producto</button>
-              <button style={{...S.pill,fontSize:11,padding:"4px 10px",...(it.custom?S.pillA:{})}} onClick={()=>setTipoItem(i,"custom")}>Personalizado</button>
+              {!it.promoAuto&&<button style={{...S.pill,fontSize:11,padding:"4px 10px",...(!it.custom&&!it.esProducto?S.pillA:{})}} onClick={()=>setTipoItem(i,"servicio")}>Del menu</button>}
+              {!it.promoAuto&&<button style={{...S.pill,fontSize:11,padding:"4px 10px",...(it.esProducto?S.pillA:{})}} onClick={()=>setTipoItem(i,"producto")}>🛍️ Producto</button>}
+              {!it.promoAuto&&<button style={{...S.pill,fontSize:11,padding:"4px 10px",...(it.custom?S.pillA:{})}} onClick={()=>setTipoItem(i,"custom")}>Personalizado</button>}
               {items.length>1&&<button style={{...S.btnR,marginLeft:"auto"}} onClick={()=>remIt(i)}>✕</button>}
             </div>
-            {it.custom?(
+            {it.promoAuto?(
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,background:"#111",color:"#fff",borderRadius:8,padding:"8px 10px"}}>
+                <span style={{fontSize:12,fontWeight:700}}>{it.lC}<span style={{display:"block",fontSize:10,fontWeight:400,opacity:.75}}>{parseFloat(it.pC)<0?"Se calcula sola según los servicios de la venta":"Agrega los servicios de la promo para que se aplique"}</span></span>
+                <strong style={{fontSize:14,color:"#00E5B8"}}>{parseFloat(it.pC)<0?`-$${Math.abs(parseFloat(it.pC)).toFixed(2)}`:"$0.00"}</strong>
+              </div>
+            ):it.custom?(
               <div style={{display:"grid",gridTemplateColumns:"1fr auto auto",gap:6,alignItems:"center"}}>
                 <input style={S.inp} placeholder="Nombre del servicio" value={it.lC} onChange={e=>updIt(i,"lC",e.target.value)}/>
                 <input type="number" style={{...S.inp,width:80}} placeholder="$Precio" value={it.pC} onChange={e=>updIt(i,"pC",e.target.value)}/>
@@ -9732,18 +9787,34 @@ function GestionUsuarios(){
 }
 
 // ─── SALIDA DE CAJA ────────────────────────────────────────────────
-function SalidaCaja({sesion,salidasCaja,setSalidasCaja,onClose,upsertSalida}){
+const r2c=n=>Math.round(((Number(n)||0)+Number.EPSILON)*100)/100;
+function SalidaCaja({sesion,salidasCaja,setSalidasCaja,onClose,upsertSalida,ventas=[]}){
   const [monto,setMonto]=useState("");
   const [motivo,setMotivo]=useState("");
   const [esMtz,setEsMtz]=useState(false); // 🧴 pago a Martinizing: sale de caja pero NO es gasto
   const hoy=fechaHoyLocal();
   const salidasHoy=(salidasCaja||[]).filter(s=>s.fecha===hoy&&!s.eliminada);
   const totHoy=salidasHoy.reduce((a,s)=>a+s.monto,0);
+  // 💵 Efectivo DISPONIBLE de cobros (sin el fondo): no se permite sacar más de lo cobrado en efectivo menos lo ya sacado.
+  // Colaboradora: solo su turno (desde su apertura de caja). Administración: todo el efectivo cobrado hoy.
+  const esAdminS=sesion?.rol==="Administrador";
+  const apTurno=(()=>{if(esAdminS)return null;try{return JSON.parse(localStorage.getItem("ll_apertura_"+hoy+"_"+sesion.id)||"null");}catch{return null;}})();
+  const desdeT=apTurno?.fecha?Date.parse(apTurno.fecha):null;
+  const tsSal=s=>{if(typeof s.id==="number")return s.id;const m=String(s.id||"").match(/\d{13}/);return m?parseInt(m[0]):null;};
+  const cobrosEf=r2c((ventas||[]).filter(v=>!v.anulada).flatMap(v=>(v.abonos||[]).filter(ab=>{
+    if(ab.metodo!=="Efectivo"||!ab.fecha||fechaLocal(ab.fecha)!==hoy)return false;
+    if(esAdminS)return true;
+    const quien=ab.cobradoPorId!=null?String(ab.cobradoPorId):String(v.empleadaId);
+    return quien===String(sesion.id)&&(desdeT==null||Date.parse(ab.fecha)>=desdeT);
+  })).reduce((a,ab)=>a+(ab.monto||0),0));
+  const salidasTurno=r2c(salidasHoy.filter(s=>esAdminS||(String(s.quienId)===String(sesion.id)&&(desdeT==null||tsSal(s)==null||tsSal(s)>=desdeT))).reduce((a,s)=>a+(s.monto||0),0));
+  const disponible=r2c(Math.max(0,cobrosEf-salidasTurno));
 
   const registrar=()=>{
     const m=parseFloat(monto);
     if(!m||m<=0){alert("Ingresa un monto válido");return;}
     if(!motivo.trim()){alert("Ingresa el motivo");return;}
+    if(m>disponible+0.004){alert(`❌ No hay suficiente efectivo de cobros en caja.\n\nDisponible: $${disponible.toFixed(2)}\n(Efectivo cobrado ${esAdminS?"hoy":"en tu turno"} $${cobrosEf.toFixed(2)} − salidas $${salidasTurno.toFixed(2)})\n\nNo se puede registrar una salida de $${m.toFixed(2)}.`);return;}
     const salida={
       id:Date.now(),fecha:hoy,
       hora:new Date().toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"}),
@@ -9771,6 +9842,10 @@ function SalidaCaja({sesion,salidasCaja,setSalidasCaja,onClose,upsertSalida}){
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
           <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e"}}>💸 Salida de Caja</div>
           <button style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:"#888"}} onClick={onClose}>✕</button>
+        </div>
+        <div style={{background:disponible>0?"#e8f5e9":"#fff3e0",borderRadius:8,padding:"8px 12px",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style={{fontSize:12,color:"#2e7d32"}}>💵 Efectivo disponible de cobros{esAdminS?" (hoy)":" (tu turno)"}<span style={{display:"block",fontSize:10,color:"#888"}}>Cobrado ${cobrosEf.toFixed(2)} − salidas ${salidasTurno.toFixed(2)} · sin contar el fondo</span></span>
+          <strong style={{fontSize:16,color:disponible>0?"#2e7d32":"#e65100"}}>${disponible.toFixed(2)}</strong>
         </div>
         <div style={{background:"#ffebee",borderRadius:8,padding:"8px 12px",marginBottom:12,display:"flex",justifyContent:"space-between"}}>
           <span style={{fontSize:13,color:"#c62828",fontWeight:600}}>Total salidas hoy</span>
@@ -10516,7 +10591,7 @@ function CuponSugerido({venta,clientes,ventas,cupones,setCupones,upsertCupon,ses
 // 🎁 PROMOS: administración completa (crear, editar, activar/desactivar,
 // eliminar) — reemplaza la lista fija; todo se guarda en la nube.
 // ═══════════════════════════════════════════════════════════════════
-const PROMO_VACIA={tipo:"custom",emoji:"🎁",titulo:"",detalle:"",precio:"",antes:"",monto:"",minCompra:"",claves:"",dias:[],filtro:"",pct:"50",fechaInicio:"",fechaFin:"",soloPagoCompleto:false,codigoExcepcion:""};
+const PROMO_VACIA={modo:"pct",n:"3",m:"2",tipo:"custom",emoji:"🎁",titulo:"",detalle:"",precio:"",antes:"",monto:"",minCompra:"",claves:"",dias:[],filtro:"",pct:"50",fechaInicio:"",fechaFin:"",soloPagoCompleto:false,codigoExcepcion:""};
 function PromosAdmin({promos,setPromos,upsertPromo,servicios}){
   const [form,setForm]=useState(PROMO_VACIA);
   const [editId,setEditId]=useState(null);
@@ -10526,6 +10601,12 @@ function PromosAdmin({promos,setPromos,upsertPromo,servicios}){
     if(form.tipo==="custom"&&!form.precio){alert("Escribe el precio de la promo");return;}
     if(form.tipo==="descuento"&&!form.monto){alert("Escribe el monto del descuento");return;}
     if(form.tipo==="segundo50"&&!form.filtro.trim()){alert("Escribe la palabra clave del servicio (ej. EDREDON)");return;}
+    if(form.tipo==="porItem"){
+      if(!form.filtro.trim()){alert("Escribe la(s) palabra(s) clave del servicio (ej. COBIJA)");return;}
+      if((form.modo==="pct"||form.modo==="segundoPct")&&!(parseFloat(form.pct)>0)){alert("Escribe el % de descuento");return;}
+      if(form.modo==="monto"&&!(parseFloat(form.monto)>0)){alert("Escribe cuántos $ menos por unidad");return;}
+      if(form.modo==="nxm"&&!(parseInt(form.n)>parseInt(form.m)&&parseInt(form.m)>0)){alert("En NxM, el primer número debe ser mayor (ej. 3x2)");return;}
+    }
     const claves=form.claves.split(",").map(s=>s.trim()).filter(Boolean);
     const base={
       id:editId||("promo_"+Date.now()),
@@ -10539,8 +10620,9 @@ function PromosAdmin({promos,setPromos,upsertPromo,servicios}){
       monto:form.tipo==="descuento"?parseFloat(form.monto)||0:null,
       minCompra:form.tipo==="descuento"&&form.minCompra?parseFloat(form.minCompra):null,
       labelDescuento:form.tipo==="descuento"?`🎁 PROMO: -$${(parseFloat(form.monto)||0).toFixed(2)} · ${form.titulo.toUpperCase()}`:null,
-      filtro:form.tipo==="segundo50"?form.filtro.trim():null,
-      pct:form.tipo==="segundo50"?(parseFloat(form.pct)||50):null,
+      filtro:(form.tipo==="segundo50"||form.tipo==="porItem")?form.filtro.trim():null,
+      pct:form.tipo==="segundo50"?(parseFloat(form.pct)||50):form.tipo==="porItem"&&(form.modo==="pct"||form.modo==="segundoPct")?(parseFloat(form.pct)||0):null,
+      ...(form.tipo==="porItem"?{modo:form.modo,monto:form.modo==="monto"?parseFloat(form.monto)||0:null,n:form.modo==="nxm"?parseInt(form.n):null,m:form.modo==="nxm"?parseInt(form.m):null}:{}),
       _updatedAt:new Date().toISOString()
     };
     setPromos(prev=>{
@@ -10558,7 +10640,7 @@ function PromosAdmin({promos,setPromos,upsertPromo,servicios}){
       precio:p.precio!=null?String(p.precio):"",antes:p.antes!=null?String(p.antes):"",
       monto:p.monto!=null?String(p.monto):"",minCompra:p.minCompra!=null?String(p.minCompra):"",
       claves:(p.claves||[]).join(", "),dias:p.dias||[],
-      filtro:p.filtro||"",pct:p.pct!=null?String(p.pct):"50",
+      filtro:p.filtro||"",pct:p.pct!=null?String(p.pct):"50",modo:p.modo||"pct",n:p.n!=null?String(p.n):"3",m:p.m!=null?String(p.m):"2",
       fechaInicio:p.fechaInicio||"",fechaFin:p.fechaFin||"",soloPagoCompleto:!!p.soloPagoCompleto,codigoExcepcion:p.codigoExcepcion||""
     });
   };
@@ -10581,6 +10663,7 @@ function PromosAdmin({promos,setPromos,upsertPromo,servicios}){
         <button style={{...S.pill,flex:1,...(form.tipo==="custom"?S.pillA:{})}} onClick={()=>setForm({...form,tipo:"custom"})}>💲 Precio especial</button>
         <button style={{...S.pill,flex:1,...(form.tipo==="descuento"?S.pillA:{})}} onClick={()=>setForm({...form,tipo:"descuento"})}>➖ Descuento en $</button>
         <button style={{...S.pill,flex:1,...(form.tipo==="segundo50"?S.pillA:{})}} onClick={()=>setForm({...form,tipo:"segundo50"})}>🔁 2da unidad a %</button>
+        <button style={{...S.pill,flex:1,...(form.tipo==="porItem"?S.pillA:{})}} onClick={()=>setForm({...form,tipo:"porItem"})}>🎯 Descuento en servicios</button>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"60px 1fr",gap:8,marginBottom:8}}>
         <input style={{...S.inp,textAlign:"center",fontSize:20}} placeholder="🎁" value={form.emoji} onChange={e=>setForm({...form,emoji:e.target.value})}/>
@@ -10591,6 +10674,22 @@ function PromosAdmin({promos,setPromos,upsertPromo,servicios}){
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
           <div><label style={S.lbl}>Precio de la promo</label><input type="number" style={S.inp} placeholder="5.99" value={form.precio} onChange={e=>setForm({...form,precio:e.target.value})}/></div>
           <div><label style={S.lbl}>Precio antes (tachado, opcional)</label><input type="number" style={S.inp} placeholder="7.00" value={form.antes} onChange={e=>setForm({...form,antes:e.target.value})}/></div>
+        </div>
+      ):form.tipo==="porItem"?(
+        <div style={{marginBottom:8}}>
+          <label style={S.lbl}>Tipo de descuento</label>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
+            {[{id:"pct",l:"% de descuento"},{id:"monto",l:"$ menos c/u"},{id:"nxm",l:"N x M (3x2)"},{id:"segundoPct",l:"2da unidad a %"}].map(o=>(
+              <button key={o.id} style={{...S.pill,fontSize:12,...(form.modo===o.id?S.pillA:{})}} onClick={()=>setForm({...form,modo:o.id})}>{o.l}</button>
+            ))}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:6}}>
+            <div><label style={S.lbl}>Palabra(s) clave del servicio/producto</label><input style={S.inp} placeholder="ej. COBIJA" value={form.filtro} onChange={e=>setForm({...form,filtro:e.target.value})}/></div>
+            {(form.modo==="pct"||form.modo==="segundoPct")&&<div><label style={S.lbl}>% de descuento</label><input type="number" style={S.inp} placeholder={form.modo==="pct"?"25":"50"} value={form.pct} onChange={e=>setForm({...form,pct:e.target.value})}/></div>}
+            {form.modo==="monto"&&<div><label style={S.lbl}>$ menos por cada unidad</label><input type="number" style={S.inp} placeholder="2.00" value={form.monto} onChange={e=>setForm({...form,monto:e.target.value})}/></div>}
+            {form.modo==="nxm"&&<div><label style={S.lbl}>Lleva / Paga</label><div style={{display:"flex",gap:6,alignItems:"center"}}><input type="number" style={S.inp} value={form.n} onChange={e=>setForm({...form,n:e.target.value})}/><span>x</span><input type="number" style={S.inp} value={form.m} onChange={e=>setForm({...form,m:e.target.value})}/></div></div>}
+          </div>
+          <div style={{fontSize:11,color:"#888"}}>Aplica a todos los servicios o productos de la venta cuyo nombre contenga esa palabra (puedes poner varias separadas por coma, ej. "SABANA, SÁBANA"). El descuento se calcula solo y se actualiza si cambian las cantidades. En 3x2 y 2da unidad se descuenta la unidad más barata.</div>
         </div>
       ):form.tipo==="descuento"?(
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
@@ -11789,7 +11888,7 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
     </div>
     {ticketV&&<TicketModal venta={ticketV} empleadas={empleadas} onClose={()=>{setCuponSug(ticketV);setTicketV(null);}}/>}
     {/* CuponSugerido desactivado: reemplazado por el sistema automático de cupón de cliente nuevo */}
-    {showSalida&&<SalidaCaja sesion={sesion} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} onClose={()=>setShowSalida(false)} upsertSalida={upsertSalida}/>}
+    {showSalida&&<SalidaCaja sesion={sesion} ventas={ventas} salidasCaja={salidasCaja} setSalidasCaja={setSalidasCaja} onClose={()=>setShowSalida(false)} upsertSalida={upsertSalida}/>}
     {showNotifsAdmin&&<NotificacionesPanel ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} addAbono={addAbono} clientes={clientes} maquinas={maquinas} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} pins={pins} empleadas={empleadas} sesion={sesion} esAdmin={true} onClose={()=>setShowNotifsAdmin(false)}/>}
     {boletosParaImprimir&&<BoletosSorteoModal data={boletosParaImprimir} sorteos={sorteos} onClose={()=>setBoletosParaImprimir(null)}/>}
   </div>);
