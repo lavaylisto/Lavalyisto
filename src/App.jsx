@@ -9805,8 +9805,9 @@ function SalidaCaja({sesion,salidasCaja,setSalidasCaja,onClose,upsertSalida}){
 }
 
 
-function CierreCaja({cajas=[],ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesion,salidasCaja,setVentas,upsertVenta,upsertCaja,eventosProduccion,cargas,maquinas}){
-  const hoy=fechaHoyLocal();
+function CierreCaja({cajas=[],ventas,empleadas,onLogout,onCierreListo,onResetCierre,sesion,salidasCaja,setVentas,upsertVenta,upsertCaja,eventosProduccion,cargas,maquinas,aperturaForzada=null}){
+  // 🔒 aperturaForzada: caja que quedó abierta sin cierre (de hoy o de otro día) — se cierra ESA, con los cobros de su turno y su día
+  const hoy=aperturaForzada?.dia||fechaHoyLocal();
   const uid=sesion?.id||"admin";
   // AK: apertura de esta sesion especifica (sessionStorage = se borra al cerrar sesion)
   const AK="ll_apertura_"+hoy+"_"+uid;
@@ -9815,8 +9816,8 @@ function CierreCaja({cajas=[],ventas,empleadas,onLogout,onCierreListo,onResetCie
   // Si no hay _sesId (no deberia pasar), usar timestamp actual como fallback
   const sesId=sesion?._sesId||Date.now().toString();
   const CK="ll_cierre_"+hoy+"_"+uid+"_"+sesId;
-  const [modo,setModo]=useState(()=>{try{return localStorage.getItem(AK)?"cierre":"apertura";}catch{return"apertura";}});
-  const [ap,setAp]=useState(()=>{try{const a=localStorage.getItem(AK);return a?JSON.parse(a):null;}catch{return null;}});
+  const [modo,setModo]=useState(()=>{if(aperturaForzada)return"cierre";try{return localStorage.getItem(AK)?"cierre":"apertura";}catch{return"apertura";}});
+  const [ap,setAp]=useState(()=>{if(aperturaForzada)return aperturaForzada;try{const a=localStorage.getItem(AK);return a?JSON.parse(a):null;}catch{return null;}});
   // cg: cierre de ESTA sesion (no del dia completo)
   // cg SIEMPRE empieza null - nunca leer del localStorage al montar
   // Esto garantiza que cada sesion empieza con cierre limpio
@@ -9863,6 +9864,8 @@ function CierreCaja({cajas=[],ventas,empleadas,onLogout,onCierreListo,onResetCie
   };
   // ⏱️ Inicio del turno = hora de la apertura de caja actual
   const desdeAp=ap?.fecha?Date.parse(ap.fecha):null;
+  // ⏱️ Fin del turno = la siguiente apertura de esta misma persona (si volvió a abrir caja sin cerrar esta)
+  const hastaAp=(()=>{if(!ap?.fecha)return null;const sig=(cajas||[]).filter(c=>c.tipo==="apertura"&&!c.anulado&&String(c.empleadaId)===String(uid)&&(c.fecha||"")>ap.fecha).sort((a,b)=>(a.fecha||"").localeCompare(b.fecha||""))[0];return sig?Date.parse(sig.fecha):null;})();
   const tsSalida=s=>{if(typeof s.id==="number")return s.id;const m=String(s.id||"").match(/\d{13}/);return m?parseInt(m[0]):null;};
   const todosAbonos=ventas.filter(v=>!v.anulada).flatMap(v=>(v.abonos||[]).filter(ab=>{
     const tieneId=ab.cobradoPorId!=null;
@@ -9873,7 +9876,7 @@ function CierreCaja({cajas=[],ventas,empleadas,onLogout,onCierreListo,onResetCie
     const fechaLocalAbono=ab.fecha?(()=>{const dt=new Date(ab.fecha);const off=dt.getTimezoneOffset();const l=new Date(dt.getTime()-off*60000);return l.toISOString().split("T")[0];})():"";
     const esHoy=fechaLocalAbono===hoy;
     // 🔁 Solo los cobros de ESTE turno: desde la hora de esta apertura (si abre caja otra vez, empieza de cero)
-    const enTurno=desdeAp==null||(ab.fecha&&Date.parse(ab.fecha)>=desdeAp);
+    const enTurno=(desdeAp==null||(ab.fecha&&Date.parse(ab.fecha)>=desdeAp))&&(hastaAp==null||(ab.fecha&&Date.parse(ab.fecha)<hastaAp));
     return mismoUsuario&&esHoy&&enTurno;
   }));
   // Cobros del usuario
@@ -9881,7 +9884,7 @@ function CierreCaja({cajas=[],ventas,empleadas,onLogout,onCierreListo,onResetCie
   const espTr=todosAbonos.filter(a=>esTr(a.metodo)).reduce((a,ab)=>a+ab.monto,0);
   const espTa=todosAbonos.filter(a=>a.metodo==="Tarjeta").reduce((a,ab)=>a+ab.monto,0);
   // Salidas de caja de este usuario hoy — se descuentan del efectivo esperado (sin las eliminadas)
-  const misSalidas=(salidasCaja||[]).filter(s=>String(s.quienId)===String(uid)&&s.fecha===hoy&&!s.eliminada&&(desdeAp==null||tsSalida(s)==null||tsSalida(s)>=desdeAp));
+  const misSalidas=(salidasCaja||[]).filter(s=>String(s.quienId)===String(uid)&&s.fecha===hoy&&!s.eliminada&&(desdeAp==null||tsSalida(s)==null||tsSalida(s)>=desdeAp)&&(hastaAp==null||tsSalida(s)==null||tsSalida(s)<hastaAp));
   const totMisSalidas=parseFloat(misSalidas.reduce((a,s)=>a+s.monto,0).toFixed(2));
   const espEf=parseFloat((espEfBruto-totMisSalidas).toFixed(2)); // efectivo esperado neto
   const espTot=parseFloat((espEf+espTr+espTa).toFixed(2));
@@ -9968,10 +9971,10 @@ function CierreCaja({cajas=[],ventas,empleadas,onLogout,onCierreListo,onResetCie
     w.document.close();
   };
   const confirmar=()=>{
-    const hoyC=fechaHoyLocal();
+    const hoyC=aperturaForzada?(ap?.dia||hoy):fechaHoyLocal();
     if(cierreHoyNube||cg){alert("Este cierre ya fue confirmado y no se puede repetir. Para otro turno, abre caja nuevamente.");return;}
-    const d={id:"ci_"+hoyC+"_"+(sesion?.id||"x")+"_"+Date.now(),tipo:"cierre",dia:hoyC,empleadaId:sesion?.id,fecha:new Date().toISOString(),emp:sesion?.nombre||"",bills,coins,totEf,fd,efN,tPic:0,tJep:0,totTr:espTr,totTa:espTa,dEf,dTr:0,dTa:0,dTot:dEf,soloEfectivo:true,aperturaId:ap?.id||null,desdeApertura:ap?.fecha||null,sesId,difTipo:dEf>0?"sobrante":dEf<0?"faltante":"cuadra",estadoRevision:"pendiente",espEf,espEfBruto,espTr,espTa,espTot,totMisSalidas,misSalidas,nv:todosAbonos.length,tv:todosAbonos.reduce((a,ab)=>a+ab.monto,0)};
-    try{localStorage.setItem(CK,JSON.stringify(d));}catch{}
+    const d={id:"ci_"+hoyC+"_"+(sesion?.id||"x")+"_"+Date.now(),tipo:"cierre",dia:hoyC,empleadaId:sesion?.id,fecha:new Date().toISOString(),emp:sesion?.nombre||"",bills,coins,totEf,fd,efN,tPic:0,tJep:0,totTr:espTr,totTa:espTa,dEf,dTr:0,dTa:0,dTot:dEf,soloEfectivo:true,aperturaId:ap?.id||null,desdeApertura:ap?.fecha||null,sesId,...(aperturaForzada?{cierrePendiente:true,tardio:hoyC!==fechaHoyLocal()}:{}),difTipo:dEf>0?"sobrante":dEf<0?"faltante":"cuadra",estadoRevision:"pendiente",espEf,espEfBruto,espTr,espTa,espTot,totMisSalidas,misSalidas,nv:todosAbonos.length,tv:todosAbonos.reduce((a,ab)=>a+ab.monto,0)};
+    try{localStorage.setItem(CK,JSON.stringify(d));if(ap?.id)localStorage.setItem("ll_ap_cerrada_"+ap.id,"1");}catch{}
     if(upsertCaja)upsertCaja(d); // ☁️ cierre guardado en la nube
     setCg(d);
     if(onCierreListo)onCierreListo();
@@ -11630,6 +11633,45 @@ const [showNotifsAdmin,setShowNotifsAdmin]=useState(false);
   if(!esAdmin&&vista==="produccion")return <ProduccionScreen sesion={sesion} onVolver={()=>setVista(null)} onIrFacturacion={()=>setVista("facturacion")} onIrTareas={()=>setVista("tareas")} onLogout={onLogout} ventas={ventas} setVentas={setVentas} upsertVenta={upsertVenta} empleadas={empleadas} pins={pins} eventosProduccion={eventosProduccion} setEventosProduccion={setEventosProduccion} upsertEvento={upsertEvento} maquinas={maquinas} setMaquinas={setMaquinas} upsertMaquina={upsertMaquina} cargas={cargas} setCargas={setCargas} upsertCarga={upsertCarga} clientes={clientes}/>;
   if(!esAdmin&&vista==="tareas")return <TareasScreen sesion={sesion} onVolver={()=>setVista(null)} onIrFacturacion={()=>setVista("facturacion")} onIrProduccion={()=>setVista("produccion")} onLogout={onLogout} tareasDiarias={tareasDiarias} setTareasDiarias={setTareasDiarias} upsertTareaDiaria={upsertTareaDiaria} pins={pins} empleadas={empleadas} notas={notas} setNotas={setNotas} upsertNota={upsertNota}/>;
 
+  // 🔒 CIERRE OBLIGATORIO: si la última caja que abrió esta persona (hoy o en los últimos 7 días) quedó SIN CIERRE,
+  // antes de abrir una caja nueva debe hacer ese cierre (con los cobros de ese turno).
+  const aperturaPendiente=(()=>{
+    if(esAdmin)return null;
+    const uidS=String(sesion.id);
+    const mias=(cajas||[]).filter(c=>c.tipo==="apertura"&&!c.anulado&&String(c.empleadaId)===uidS&&c.fecha).sort((a,b)=>(a.fecha||"").localeCompare(b.fecha||""));
+    if(!mias.length)return null;
+    const cerrada=ap=>(cajas||[]).some(c=>c.tipo==="cierre"&&!c.anulado&&c.aperturaId===ap.id)||(()=>{try{return !!localStorage.getItem("ll_ap_cerrada_"+ap.id);}catch{return false;}})();
+    let actual=null;try{actual=JSON.parse(localStorage.getItem(AK)||"null");}catch{}
+    const enUso=ap=>cajaOk&&!esperandoApertura&&actual?.id===ap.id; // la caja que tiene abierta ahora
+    // ¿Cobró algo en ese turno? (desde esa apertura hasta la siguiente apertura suya, o fin de ese día)
+    const tuvoCobros=(ap,i)=>{
+      const desde=Date.parse(ap.fecha);const sig=mias[i+1];const hasta=sig?Date.parse(sig.fecha):Infinity;
+      return (ventas||[]).some(v=>!v.anulada&&(v.abonos||[]).some(ab=>{
+        const quien=ab.cobradoPorId!=null?String(ab.cobradoPorId):String(v.empleadaId);
+        const t=ab.fecha?Date.parse(ab.fecha):NaN;
+        return quien===uidS&&t>=desde&&t<hasta&&fechaLocal(ab.fecha)===ap.dia;
+      }));
+    };
+    const recientes=mias.map((ap,i)=>({ap,i})).filter(({ap})=>Date.now()-Date.parse(ap.fecha)<=7*864e5&&!cerrada(ap));
+    // 1) la caja MÁS ANTIGUA sin cierre que tuvo cobros; 2) si no, la última caja abierta sin cierre (si no es la que está usando)
+    const conCobros=recientes.find(({ap,i})=>!enUso(ap)&&tuvoCobros(ap,i));
+    if(conCobros)return conCobros.ap;
+    const ult=mias[mias.length-1];
+    if(recientes.some(r=>r.ap.id===ult.id)&&!enUso(ult))return ult;
+    return null;
+  })();
+  if(!esAdmin&&aperturaPendiente&&(!cajaOk||esperandoApertura))return(
+    <div style={{minHeight:"100vh",background:"#f0f4f8",fontFamily:"'DM Sans',sans-serif",padding:16}}>
+      <div style={{maxWidth:640,margin:"0 auto"}}>
+        <div style={{background:"#c62828",color:"#fff",borderRadius:14,padding:"14px 16px",marginBottom:14}}>
+          <div style={{fontWeight:800,fontSize:16}}>🔒 Tienes una caja sin cerrar</div>
+          <div style={{fontSize:13,marginTop:4}}>Abriste caja el <strong>{new Date(aperturaPendiente.fecha).toLocaleString("es-EC",{weekday:"long",day:"numeric",month:"long",hour:"2-digit",minute:"2-digit"})}</strong> y no hiciste el cierre. Debes cerrarla antes de abrir una caja nueva. Cuenta el efectivo de ESE turno.</div>
+        </div>
+        <CierreCaja aperturaForzada={aperturaPendiente} cajas={cajas} ventas={ventas} empleadas={empleadas} onLogout={onLogout} onCierreListo={handleCierreListo} onResetCierre={()=>setCierreOk(false)} sesion={sesion} salidasCaja={salidasCaja} setVentas={setVentas} upsertVenta={upsertVenta} upsertCaja={upsertCaja} eventosProduccion={eventosProduccion} cargas={cargas} maquinas={maquinas}/>
+        <button style={{width:"100%",marginTop:12,padding:"10px",background:"transparent",color:"#888",border:"1px solid #d0dce8",borderRadius:10,fontSize:13,cursor:"pointer"}} onClick={onLogout}>Cerrar sesión</button>
+      </div>
+    </div>
+  );
   // Si cerró caja y quiere seguir trabajando, DEBE abrir caja nuevamente
   // 🔒 El admin NUNCA pasa por esto: esa cuenta no se usa para facturar/cobrar, así que no tiene sentido pedirle apertura/cierre de caja.
   if(!esAdmin&&(!cajaOk||esperandoApertura))return <AperturaObligatoria
@@ -11857,6 +11899,20 @@ function ResumenDia({ventas,empleadas,salidasCaja,cajas=[],bloquear=false,esAdmi
     upsertCaja({...c,sobranteRegularizado:{por:sesion?.nombre||"Administración",fecha:new Date().toISOString(),nota:nota.trim(),monto:sobranteDe(c)}});
   };
   const conSobrante=estCierres.cierres.filter(c=>sobranteDe(c)>0.004);
+  // 🧾 Cierre tardío: para una colaboradora que cobró y NO hizo cierre ese día, la administradora registra el efectivo contado
+  const registrarCierreTardio=o=>{
+    if(!esAdmin||!upsertCaja)return;
+    const empId=o.k.startsWith("i")?o.k.slice(1):null;
+    const esperado=r2(o.saldoEf-(o.contado||0));
+    const txt=window.prompt(`Cierre tardío de ${o.nombre} — ${fechaSel}\n\nEfectivo que debería haber (sistema): $${esperado.toFixed(2)}\n\n¿Cuánto efectivo se contó/entregó? (sin el fondo de caja)`,esperado.toFixed(2));
+    if(txt==null)return;
+    const contado=parseFloat(String(txt).replace(",","."));
+    if(isNaN(contado)||contado<0){alert("Valor no válido");return;}
+    const nota=window.prompt("Nota (opcional): ¿por qué no se hizo el cierre ese día?","No se hizo el cierre de caja")||"";
+    const dEf=r2(contado-esperado);
+    const ahora=new Date().toISOString();
+    upsertCaja({id:"ci_"+fechaSel+"_"+(empId||"x")+"_tardio_"+Date.now(),tipo:"cierre",dia:fechaSel,empleadaId:empId!=null&&!isNaN(Number(empId))?Number(empId):empId,emp:o.nombre,fecha:new Date(fechaSel+"T23:59:00").toISOString(),registradoEn:ahora,registradoPor:sesion?.nombre||"Administración",tardio:true,notaTardio:nota,efN:contado,totEf:contado,fd:0,espEf:esperado,espEfBruto:r2(o.ef-(o.contadoBruto||0)),espTr:o.tr,espTa:o.ta,totTr:o.tr,totTa:o.ta,dEf,dTot:dEf,dTr:0,dTa:0,soloEfectivo:true,difTipo:dEf>0?"sobrante":dEf<0?"faltante":"cuadra",estadoRevision:"pendiente",totMisSalidas:o.sal,nv:0,tv:r2(o.ef+o.tr+o.ta)});
+  };
 
   const th={padding:"8px 10px",background:"#1a3c5e",color:"#fff",fontSize:12,fontWeight:700,textAlign:"center",whiteSpace:"nowrap"};
   const td=(align="right")=>({padding:"8px 10px",fontSize:13,textAlign:align,borderBottom:"1px solid #e8f0f7",whiteSpace:"nowrap"});
@@ -11990,7 +12046,12 @@ function ResumenDia({ventas,empleadas,salidasCaja,cajas=[],bloquear=false,esAdmi
             </div>
           ))}
         </div>
-        {sinCierre.length>0&&<div style={{fontSize:11,color:"#e65100",padding:"0 12px 10px"}}>⚠️ Sin cierre de caja: {sinCierre.map(o=>o.nombre).join(", ")}. Su efectivo no entra al depósito hasta que haga el cierre.</div>}
+        {sinCierre.length>0&&<div style={{fontSize:11,color:"#e65100",padding:"0 12px 10px"}}>
+          ⚠️ Sin cierre de caja: {sinCierre.map(o=>o.nombre).join(", ")}. Su efectivo no entra al depósito hasta que haya un cierre.
+          {esAdmin&&upsertCaja&&<div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:6}}>{sinCierre.map(o=>(
+            <button key={o.k} style={{...S.btnS,fontSize:11,padding:"5px 10px",background:"#e65100",color:"#fff"}} onClick={()=>registrarCierreTardio(o)}>🧾 Registrar cierre de {o.nombre.split(" ")[0]}</button>
+          ))}</div>}
+        </div>}
       </div>
 
       {/* DETALLE DE COBROS */}
