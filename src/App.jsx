@@ -616,14 +616,42 @@ const esItemProducto=it=>!!(it&&(it.esProducto||/AROMATIZ|\bPERFUME\b/i.test(Str
 const revisadoV=v=>!!(v?.clasificacion&&!v.clasificacion._soloExtras);
 // 🧾 Extras (restregado / artículos) que aún esperan respuesta del cliente o no se han avisado
 const extrasPendientes=v=>(v?.clasificacion?.serviciosAdicionales||[]).filter(s=>!s.estado||s.estado==="pendiente_confirmar").length+(v?.clasificacion?.restregadoEstado==="pendiente_confirmar"?1:0);
+// 👟 Observaciones al recibir zapatos
+const OBS_ZAPATOS=["No tiene cordones","No tiene plantillas"];
+const esZapatoItemLbl=lbl=>/ZAPATO|PAR(?:ES)?\b|TENIS|CALZADO|BOTAS?\b|SANDALIA|ZAPATILLA|MOCAS[IÍ]N|SNEAKER|TAC[OÓ]N/i.test(lbl||"");
+const textoObsZapatos=o=>{if(!o)return"";const l=[...(o.lista||[])];if(o.otros&&o.otros.trim())l.push(o.otros.trim());return l.join(" · ");};
+const fmtDiaLargo=d=>{try{return new Date(String(d).slice(0,10)+"T12:00:00").toLocaleDateString("es-EC",{weekday:"long",day:"numeric",month:"long"});}catch{return d;}};
+// Recuadro con casillas de observaciones de zapatos (reutilizable)
+function ObsZapatosInput({valor,onChange}){
+  const v=valor||{lista:[],otros:""};
+  const toggle=o=>onChange({...v,lista:v.lista.includes(o)?v.lista.filter(x=>x!==o):[...v.lista,o]});
+  return(<div>
+    <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
+      {OBS_ZAPATOS.map(o=>(
+        <label key={o} style={{display:"flex",alignItems:"center",gap:6,background:v.lista.includes(o)?"#fff3e0":"#f8fbfd",border:`1.5px solid ${v.lista.includes(o)?"#e65100":"#e0e8f0"}`,borderRadius:8,padding:"6px 10px",cursor:"pointer",fontSize:13}}>
+          <input type="checkbox" checked={v.lista.includes(o)} onChange={()=>toggle(o)} style={{width:16,height:16}}/>{o}
+        </label>
+      ))}
+    </div>
+    <input style={S.inp} placeholder="Otros (ej. suela despegada, mancha de tinta, roto en la punta…)" value={v.otros||""} onChange={e=>onChange({...v,otros:e.target.value})}/>
+  </div>);
+}
 const msgWa = (v, tipo) => {
   const L = "\u2501".repeat(15);
   const E = EMO;
   const items = (v.items||[]).map(it=>`  ${E.item} ${it.label}${it.piezas>1?` x${it.piezas}`:""}`).join("\n");
   const pend = saldo(v);
+  const obsZ=textoObsZapatos(v.obsZapatos);
+  const obsZLinea=obsZ?`\n👟 *Observaciones de tus zapatos:* ${obsZ}\n${L}`:"";
+  if(tipo==="recibidoPrendas"){
+    return `${E.burbuja} *LAVA & LISTO* ${E.burbuja}\n_Lavanderia & Limpieza Especializada_\n${L}\n¡Hola *${v.clienteNombre}*! ${E.saludo}\n\n*Hoy recibimos su servicio de lavandería* ${E.check}\n\n${E.folio} *Folio:* ${v.folio}\n${L}\n*DETALLE DEL SERVICIO:*\n${items}\n${L}${obsZLinea}\n${pend>0?`${E.reloj} *Saldo pendiente:* $${pend.toFixed(2)}`:`${E.check} *Pagado en su totalidad*`}\n${E.fecha} *Su fecha de entrega será:* ${fmtDiaLargo(v.entrega)}\n${L}\n¡Gracias por confiar en nosotros! ${E.corazon}\n${E.pin} Ricaurte, Cuenca`;
+  }
+  if(tipo==="recibido"&&v.estado==="porRecibir"){
+    return `${E.burbuja} *LAVA & LISTO* ${E.burbuja}\n_Lavanderia & Limpieza Especializada_\n${L}\n¡Hola *${v.clienteNombre}*! ${E.saludo}\nTu *PAGO* fue recibido ${E.check}\n\n${E.folio} *Folio:* ${v.folio}\n${L}\n*SERVICIO PAGADO:*\n${items}\n${L}\n${E.dinero} *Total:* $${(v.total||0).toFixed(2)}\n${pend>0?`${E.reloj} *Saldo pendiente:* $${pend.toFixed(2)}`:`${E.check} *Pagado en su totalidad*`}\n${L}\n🕒 *Hoy no dejaste tus prendas.* Cuando las traigas te confirmaremos tu *fecha de entrega*.\n${L}\n¡Gracias por confiar en nosotros! ${E.corazon}\n${E.pin} Ricaurte, Cuenca`;
+  }
   if(tipo==="recibido"){
     const manchaLinea=v.prendaManchaAviso?`\n${E.item} *Prenda que puede destiñir/manchar declarada:* ${v.prendaManchaObs}\n${L}`:"";
-    return `${E.burbuja} *LAVA & LISTO* ${E.burbuja}\n_Lavanderia & Limpieza Especializada_\n${L}\n¡Hola *${v.clienteNombre}*! ${E.saludo}\nTu orden fue *RECIBIDA* ${E.check}\n\n${E.folio} *Folio:* ${v.folio}\n${L}\n*DETALLE DEL SERVICIO:*\n${items}\n${L}${manchaLinea}\n${E.dinero} *Total:* $${(v.total||0).toFixed(2)}\n${pend>0?`${E.reloj} *Saldo pendiente:* $${pend.toFixed(2)}`:`${E.check} *Pagado en su totalidad*`}\n${E.fecha} *Entrega estimada:* ${fmtD(v.entrega)}\n${L}\n¡Gracias por confiar en nosotros! ${E.corazon}\n${E.pin} Ricaurte, Cuenca\n\n_No nos hacemos responsables por daños, manchas o decoloración en su ropa si la información sobre prendas que destiñen o manchan no fue proporcionada correctamente al momento de dejar la orden._`;
+    return `${E.burbuja} *LAVA & LISTO* ${E.burbuja}\n_Lavanderia & Limpieza Especializada_\n${L}\n¡Hola *${v.clienteNombre}*! ${E.saludo}\nTu orden fue *RECIBIDA* ${E.check}\n\n${E.folio} *Folio:* ${v.folio}\n${L}\n*DETALLE DEL SERVICIO:*\n${items}\n${L}${manchaLinea}${obsZLinea}\n${E.dinero} *Total:* $${(v.total||0).toFixed(2)}\n${pend>0?`${E.reloj} *Saldo pendiente:* $${pend.toFixed(2)}`:`${E.check} *Pagado en su totalidad*`}\n${E.fecha} *Entrega estimada:* ${fmtD(v.entrega)}\n${L}\n¡Gracias por confiar en nosotros! ${E.corazon}\n${E.pin} Ricaurte, Cuenca\n\n_No nos hacemos responsables por daños, manchas o decoloración en su ropa si la información sobre prendas que destiñen o manchan no fue proporcionada correctamente al momento de dejar la orden._`;
   }
   if(tipo==="entregado"){
     return `💙 *${v.clienteNombre}, NOS IMPORTA TU OPINIÓN*\n\n¿Cómo estuvo tu experiencia con nosotros? 🫧\n\n1️⃣ Muy malo\n2️⃣ Malo\n3️⃣ Regular\n4️⃣ Bueno\n5️⃣ Excelente\n\nTu opinión nos ayuda muchísimo a seguir mejorando. 🫶🏻`;
@@ -709,10 +737,10 @@ function WhatsAppObligatorio({venta,tipo,onConfirm,onCancel}){
       <div style={S.tbox}>
         <div style={{textAlign:"center",fontSize:36,marginBottom:6}}>{"\u{1F4F2}"}</div>
         <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e",textAlign:"center",marginBottom:4}}>
-          {tipo==="recibido"?"Confirmar orden por WhatsApp":tipo==="entregado"?"Pedir calificación al cliente":"Avisar: listo para retirar"}
+          {tipo==="recibido"?"Confirmar orden por WhatsApp":tipo==="recibidoPrendas"?"Avisar: recibimos sus prendas":tipo==="entregado"?"Pedir calificación al cliente":"Avisar: listo para retirar"}
         </div>
         <div style={{fontSize:12,color:"#888",textAlign:"center",marginBottom:12}}>
-          {tipo==="recibido"?"Paso obligatorio: avisa al cliente que su orden fue recibida.":tipo==="entregado"?"Pídele al cliente que califique el servicio, para seguir mejorando.":"Paso obligatorio: avisa al cliente antes de marcar la orden como lista."}
+          {tipo==="recibido"?"Paso obligatorio: avisa al cliente que su orden fue recibida.":tipo==="recibidoPrendas"?"Paso obligatorio: avisa al cliente que recibimos sus prendas y su fecha de entrega.":tipo==="entregado"?"Pídele al cliente que califique el servicio, para seguir mejorando.":"Paso obligatorio: avisa al cliente antes de marcar la orden como lista."}
         </div>
         <div style={S.trow}><span>Cliente</span><strong>{venta.clienteNombre}</strong></div>
         <div style={S.trow}><span>Folio</span><span>{venta.folio}</span></div>
@@ -1742,6 +1770,8 @@ function NotaOrdenModal({v,setVentas,upsertVenta,sesion,onClose}){
 function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta,clientes,setClientes,upsertCliente,sesion}){
   const [showAb,setShowAb]=useState(false);
   const [waListo,setWaListo]=useState(false);
+  const [recepcion,setRecepcion]=useState(null); // 📥 {entrega,obs} al recibir las prendas de una orden pagada por adelantado
+  const [waRecepcion,setWaRecepcion]=useState(null);
   const [showEditCliente,setShowEditCliente]=useState(false);
   const [showNota,setShowNota]=useState(false);
   const [showExtra,setShowExtra]=useState(false);
@@ -1826,7 +1856,7 @@ function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta,clientes,setClien
         <div style={{display:"flex",gap:8,marginTop:10,flexWrap:"wrap"}}>
           {sig&&sig.id==="entregado"&&<button style={{flex:1,padding:"10px",background:sig.bg,color:sig.color,border:`1.5px solid ${sig.color}`,borderRadius:10,fontWeight:700,fontSize:13,cursor:"pointer"}} onClick={cambiar}>{sig.icon} {sig.label}</button>}
           {v.excepcionPagoPromo&&<div style={{width:"100%",fontSize:11,color:"#8a5a00",background:"#fff8e1",borderRadius:8,padding:"5px 8px"}}>🔑 Promo con pago pendiente autorizada por la jefa · {v.excepcionPagoPromo.motivo}</div>}
-          {(v.estado==="porRecibir")&&<button style={{flex:1,padding:"10px",background:"#f3e8fd",color:"#7c3aed",border:"1.5px solid #7c3aed",borderRadius:10,fontWeight:700,fontSize:13,cursor:"pointer"}} onClick={()=>{if(!window.confirm(`¿${v.clienteNombre} ya dejó sus prendas? La orden pasa a "Recibido" y entra a Producción.`))return;guardarVentaFn(setVentas,upsertVenta,v.folio,x=>({...x,estado:"recibido",prendasRecibidasEn:new Date().toISOString(),prendasRecibidasPor:sesion?.nombre||null}));}}>📥 Ya dejó las prendas</button>}
+          {(v.estado==="porRecibir")&&<button style={{flex:1,padding:"10px",background:"#f3e8fd",color:"#7c3aed",border:"1.5px solid #7c3aed",borderRadius:10,fontWeight:700,fontSize:13,cursor:"pointer"}} onClick={()=>{const d=new Date();d.setDate(d.getDate()+2);setRecepcion({entrega:fechaLocal(d.toISOString()),obs:v.obsZapatos||{lista:[],otros:""}});}}>📥 Ya dejó las prendas</button>}
           {sig&&sig.id!=="entregado"&&v.estado!=="porRecibir"&&<div style={{flex:1,padding:"10px",background:"#f0f4f8",color:"#888",border:"1.5px dashed #d0dce8",borderRadius:10,fontWeight:600,fontSize:12,textAlign:"center"}}>🏭 Se actualiza desde Producción</div>}
           {!esPag&&<button style={{flex:1,padding:"10px",background:"#e8f5e9",color:"#2e7d32",border:"1.5px solid #2e7d32",borderRadius:10,fontWeight:700,fontSize:13,cursor:"pointer"}} onClick={()=>setShowAb(true)}>💰 Cobrar</button>}
           <button style={{padding:"10px 14px",background:"#f0f4f8",color:"#1a3c5e",border:"none",borderRadius:10,fontSize:12,cursor:"pointer"}} onClick={()=>setTicket(v)}>🧾</button>
@@ -1839,6 +1869,33 @@ function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta,clientes,setClien
       {showNota&&<NotaOrdenModal v={v} setVentas={setVentas} upsertVenta={upsertVenta} sesion={sesion} onClose={()=>setShowNota(false)}/>}
       {showExtra&&<AgregarExtraModal v={v} setVentas={setVentas} upsertVenta={upsertVenta} sesion={sesion} onClose={()=>setShowExtra(false)}/>}
       {showAb&&<AbonoModal venta={v} onSave={ab=>{addAbono(v.folio,ab);setShowAb(false);}} onClose={()=>setShowAb(false)}/>}
+      {recepcion&&(
+        <div style={S.ov}>
+          <div style={{...S.tbox,maxWidth:420}}>
+            <div style={{textAlign:"center",fontSize:34}}>📥</div>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#1a3c5e",textAlign:"center",marginBottom:4}}>Recibir prendas de {v.clienteNombre}</div>
+            <div style={{fontSize:12,color:"#888",textAlign:"center",marginBottom:12}}>La orden pasa a "Recibido", entra a Producción y se le avisa al cliente su fecha de entrega.</div>
+            <label style={S.lbl}>📅 Fecha de entrega</label>
+            <input type="date" style={{...S.inp,marginBottom:4}} min={fechaHoyLocal()} value={recepcion.entrega} onChange={e=>setRecepcion({...recepcion,entrega:e.target.value})}/>
+            <div style={{fontSize:11,color:"#2e7d32",marginBottom:10,textTransform:"capitalize"}}>{recepcion.entrega?fmtDiaLargo(recepcion.entrega):""}</div>
+            {(v.items||[]).some(it=>esZapatoItemLbl(it.label))&&(<>
+              <label style={S.lbl}>👟 Observaciones de los zapatos</label>
+              <ObsZapatosInput valor={recepcion.obs} onChange={o=>setRecepcion({...recepcion,obs:o})}/>
+            </>)}
+            <div style={{display:"flex",gap:8,marginTop:14}}>
+              <button style={{...S.btnC,flex:1}} onClick={()=>setRecepcion(null)}>Cancelar</button>
+              <button style={{...S.btnP,flex:2}} onClick={()=>{
+                if(!recepcion.entrega){alert("Elige la fecha de entrega");return;}
+                const obs=textoObsZapatos(recepcion.obs)?{lista:recepcion.obs.lista||[],otros:(recepcion.obs.otros||"").trim()}:null;
+                const act={...v,estado:"recibido",entrega:recepcion.entrega,obsZapatos:obs,prendasRecibidasEn:new Date().toISOString(),prendasRecibidasPor:sesion?.nombre||null};
+                guardarVentaFn(setVentas,upsertVenta,v.folio,x=>({...x,estado:"recibido",entrega:recepcion.entrega,obsZapatos:obs,prendasRecibidasEn:act.prendasRecibidasEn,prendasRecibidasPor:act.prendasRecibidasPor}));
+                setRecepcion(null);setWaRecepcion(act);
+              }}>✅ Recibir y avisar</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {waRecepcion&&<WhatsAppObligatorio venta={waRecepcion} tipo="recibidoPrendas" onConfirm={info=>{guardarVentaFn(setVentas,upsertVenta,v.folio,x=>({...x,msgRecepcionPrendas:info}));setWaRecepcion(null);}} onCancel={()=>setWaRecepcion(null)}/>}
       {waListo&&<WhatsAppObligatorio venta={v} tipo="listo" onConfirm={info=>{aplicarEstado("listo",{checkMsgRetiro:info.enviado,msgListo:info});setWaListo(false);}} onCancel={()=>setWaListo(false)}/>}
       {showEditCliente&&<EditarClienteModal v={v} clientes={clientes} onGuardar={guardarEdicionCliente} onCancelar={()=>setShowEditCliente(false)}/>}
     </div>
@@ -4840,6 +4897,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
   const [cupInput,setCupInput]=useState("");const [cupApl,setCupApl]=useState(null);const [cupErr,setCupErr]=useState(""); // 🎟️ cupón
   const [cuponRecienEmitido,setCuponRecienEmitido]=useState(null); // 🎟️ cupón que se acaba de generar automático, para mostrar botón de WhatsApp
   const [descCumple,setDescCumple]=useState(false); // 🎂 10% cumpleaños
+  const [obsZapatos,setObsZapatos]=useState({lista:[],otros:""}); // 👟 observaciones al recibir zapatos
   const [tienePrendaMancha,setTienePrendaMancha]=useState(null); // null=sin responder, true/false — 🧽 obligatorio antes de registrar
   const [protocoloCumplido,setProtocoloCumplido]=useState(true); // 📋 para Evaluación de Desempeño — checklist de atención al cliente (saludo, confirmar datos, explicar tiempos, despedida)
   const [boletoResena,setBoletoResena]=useState(false); // 🌟 opcional — boleto extra si sigue redes y deja reseña en Google
@@ -5060,6 +5118,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
       ...(excepcion&&tPago!=="completo"?{excepcionPagoPromo:excepcion}:{}),
       cuponId:cupApl?.id||null,
       prendaManchaAviso:!!tienePrendaMancha,prendaManchaObs:tienePrendaMancha?obsPrendaMancha.trim():null,
+      ...(!sinPrendas&&textoObsZapatos(obsZapatos)?{obsZapatos:{lista:obsZapatos.lista,otros:(obsZapatos.otros||"").trim()}}:{}),
       boletoResenaSolicitado:!!boletoResena,protocoloCumplido:!!protocoloCumplido};
     setVentas([v,...ventas]);if(upsertVenta)upsertVenta(v);
     // 🎟️ CUPÓN AUTOMÁTICO — si es la primera venta de este cliente (y no es personal interno, y el
@@ -5122,7 +5181,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
     }
     setWaVenta(v); // WhatsApp obligatorio antes de mostrar el ticket
     setCQ("");setCId(null);setNC({nombre:"",tel:"",cedula:"",email:"",rfc:"",direccion:"",nacimiento:""});setRecordatorioVisto(false);setRecordatorio(null);setDescCumple(false);setImpulsos([]);setCupApl(null);setCupInput("");setCupErr("");
-    setTienePrendaMancha(null);setObsPrendaMancha("");setBoletoResena(false);setProtocoloCumplido(true);
+    setTienePrendaMancha(null);setObsPrendaMancha("");setObsZapatos({lista:[],otros:""});setBoletoResena(false);setProtocoloCumplido(true);
     setItems([{servId:servicios[0]?.id,piezas:1,custom:false,esProducto:false,productoId:null,lC:"",pC:""}]);
     setNotas("");setErr("");setAbono("");setTPago("completo");setSinPrendas(false);setExcepcion(null);setExcMot("");
   };
@@ -5235,6 +5294,28 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
             ):(
               <ServicioBuscador servId={it.servId} piezas={it.piezas} servicios={servicios} onServChange={v=>updIt(i,"servId",v)} onPiezasChange={v=>updIt(i,"piezas",parseInt(v)||1)}/>
             )}
+            {/* 🖤 Si el servicio/producto elegido tiene promo vigente hoy: precio normal → precio promo */}
+            {!it.custom&&!it.promoAuto&&(()=>{
+              const sv=it.esProducto?null:servicios.find(x=>x.id===it.servId);
+              const pr=it.esProducto?productosActivos.find(x=>x.id===it.productoId):null;
+              const lbl=sv?sv.label:pr?`${pr.nombre} ${pr.categoria||""}`:"";const precio=Number(sv?sv.precio:pr?pr.precio:0)||0;
+              if(!lbl||precio<=0)return null;
+              const aplicables=promosDeHoy(promos,servicios).filter(p=>p.tipo==="porItem"&&String(p.filtro||"").split(",").map(k=>normTxtP(k).trim()).filter(Boolean).some(k=>normTxtP(lbl).includes(k)));
+              if(!aplicables.length)return null;
+              return aplicables.map(p=>{
+                const aplicada=items.some(x=>x.promoAuto&&x.promoId===p.id);
+                const nuevo=p.modo==="pct"?precio*(1-(Number(p.pct)||0)/100):p.modo==="monto"?Math.max(0,precio-(Number(p.monto)||0)):null;
+                return(
+                  <div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap",marginTop:6,background:"#111",color:"#fff",borderRadius:8,padding:"6px 10px",fontSize:12}}>
+                    <span>{p.emoji||"🖤"} <strong>{nuevo!=null?"Precio Black Friday":p.titulo}</strong>{nuevo!=null
+                      ?<> · normal <span style={{textDecoration:"line-through",opacity:.7}}>${precio.toFixed(2)}</span> → <strong style={{color:"#00E5B8",fontSize:14}}>${nuevo.toFixed(2)}</strong></>
+                      :<> · {txtPromoPorItem(p)}</>}</span>
+                    {aplicada?<span style={{color:"#00E5B8",fontWeight:700}}>✓ aplicada</span>
+                      :<button style={{background:"#00E5B8",color:"#111",border:"none",borderRadius:6,padding:"4px 10px",fontWeight:700,fontSize:11,cursor:"pointer"}} onClick={()=>agregarPromo(p)}>Aplicar</button>}
+                  </div>
+                );
+              });
+            })()}
           </div>
         ))}
         <button style={{background:"#e8f5fd",color:"#1a7dbf",border:"none",borderRadius:8,padding:"7px 14px",fontSize:13,fontWeight:600,cursor:"pointer"}} onClick={addIt}>+ Agregar servicio</button>
@@ -5246,6 +5327,12 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
           }
         </div>
       </Card>
+      {!sinPrendas&&items.some(it=>{const lbl=it.custom?it.lC:it.esProducto?"":(servicios.find(x=>x.id===it.servId)?.label||"");return esZapatoItemLbl(lbl);})&&(
+        <Card title="👟 Observaciones de los zapatos">
+          <div style={{fontSize:12,color:"#888",marginBottom:8}}>Revisa los zapatos con el cliente y marca lo que aplique. Sale en el mensaje de WhatsApp y en la orden.</div>
+          <ObsZapatosInput valor={obsZapatos} onChange={setObsZapatos}/>
+        </Card>
+      )}
       <Card title="🧽 Prendas que pueden manchar">
         <div style={{fontSize:13,color:"#1a3c5e",marginBottom:10}}>¿El cliente trae alguna prenda que pueda <strong>destiñir o manchar</strong> el resto de la carga? (ej. ropa nueva de color fuerte, prendas oscuras sin lavar antes, etc.)</div>
         <div style={{display:"flex",gap:8,marginBottom:10}}>
@@ -5488,6 +5575,8 @@ function NotaCreditoModal({venta,productos,onConfirmar,onCancelar}){
 function VentaCardItem({v,empleadas,setTicket,addAbono,setVentas,esAdmin,upsertVenta,sesion,productos,setProductos,upsertProducto,setKardexProductos,upsertKardexProducto,setQuejas,upsertQueja}){
   const [showAb,setShowAb]=useState(false);
   const [waListo,setWaListo]=useState(false);
+  const [recepcion,setRecepcion]=useState(null); // 📥 {entrega,obs} al recibir las prendas de una orden pagada por adelantado
+  const [waRecepcion,setWaRecepcion]=useState(null);
   const [motivoListoManual,setMotivoListoManual]=useState(null); // 🔒 motivo del salto manual a "Listo" sin pasar por Producción
   const [showNotaCredito,setShowNotaCredito]=useState(false);
   const tieneProductos=(v.items||[]).some(it=>it.esProducto&&it.productoId);
