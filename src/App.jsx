@@ -4913,7 +4913,11 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
     if(p.tipo==="descuento"){
       setItems(prev=>[...prev,{servId:servicios[0]?.id,piezas:1,custom:true,lC:p.labelDescuento,pC:String(-Math.abs(p.monto)),promoId:p.id}]);
     }else if(p.tipo==="custom"){
-      setItems(prev=>[...prev,{servId:servicios[0]?.id,piezas:1,custom:true,lC:p.label,pC:String(p.precio),promoId:p.id}]);
+      setItems(prev=>{
+        // Si el primer renglón sigue vacío (servicio por defecto, 1 pieza), la promo lo reemplaza
+        const intacto=prev.length===1&&!prev[0].custom&&!prev[0].esProducto&&prev[0].servId===servicios[0]?.id&&(prev[0].piezas||1)===1;
+        return[...(intacto?[]:prev),{servId:servicios[0]?.id,piezas:1,custom:true,lC:p.label,pC:String(p.precio),promoId:p.id}];
+      });
     }else{
       const s=servicios.find(x=>x.id===p.servId);
       if(s)setItems(prev=>{
@@ -5134,6 +5138,27 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
         )}
       </Card>
       <Card title="🧺 Servicios">
+        {/* 🎁 Promos vigentes hoy: se agregan con un toque (ej. Preventa / Black Friday) */}
+        {promosDeHoy(promos,servicios).length>0&&(
+          <div style={{marginBottom:12}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#1a3c5e",marginBottom:6}}>🎁 Promos de hoy — toca para agregar</div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              {promosDeHoy(promos,servicios).map(p=>{
+                const yaEsta=items.some(it=>it.promoId===p.id);
+                const oscura=!!(p.fechaInicio||p.fechaFin||p.soloPagoCompleto);
+                return(
+                  <button key={p.id} onClick={()=>agregarPromo(p)} style={{display:"flex",alignItems:"center",gap:8,background:oscura?"#111":"#e8fff9",color:oscura?"#fff":"#1a3c5e",border:`1.5px solid ${yaEsta?"#00E5B8":oscura?"#111":"#00E5B8"}`,borderRadius:10,padding:"8px 12px",cursor:"pointer",textAlign:"left",maxWidth:"100%"}}>
+                    <span style={{fontSize:18}}>{p.emoji||"🎁"}</span>
+                    <span style={{minWidth:0}}>
+                      <span style={{display:"block",fontWeight:700,fontSize:12}}>{p.titulo}{yaEsta?" ✓":""}</span>
+                      <span style={{display:"block",fontSize:11,opacity:.8}}>{p.precioTxt}{p.antes?` · antes $${Number(p.antes).toFixed(2)}`:""}{p.soloPagoCompleto?" · solo pago completo":""}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
         {items.map((it,i)=>(
           <div key={i} style={{marginBottom:10,background:"#f8fbfd",borderRadius:8,padding:10,border:"1px solid #e8f0f7"}}>
             <div style={{display:"flex",gap:6,marginBottom:6,alignItems:"center",flexWrap:"wrap"}}>
