@@ -616,24 +616,63 @@ const esItemProducto=it=>!!(it&&(it.esProducto||/AROMATIZ|\bPERFUME\b/i.test(Str
 const revisadoV=v=>!!(v?.clasificacion&&!v.clasificacion._soloExtras);
 // 🧾 Extras (restregado / artículos) que aún esperan respuesta del cliente o no se han avisado
 const extrasPendientes=v=>(v?.clasificacion?.serviciosAdicionales||[]).filter(s=>!s.estado||s.estado==="pendiente_confirmar").length+(v?.clasificacion?.restregadoEstado==="pendiente_confirmar"?1:0);
-// 👟 Observaciones al recibir zapatos
-const OBS_ZAPATOS=["No tiene cordones","No tiene plantillas"];
+// 👟 Observaciones al recibir zapatos — por PAR: marca/descripción + qué le falta (cordones, plantillas) + otras observaciones
 const esZapatoItemLbl=lbl=>/ZAPATO|PAR(?:ES)?\b|TENIS|CALZADO|BOTAS?\b|SANDALIA|ZAPATILLA|MOCAS[IÍ]N|SNEAKER|TAC[OÓ]N/i.test(lbl||"");
-const textoObsZapatos=o=>{if(!o)return"";const l=[...(o.lista||[])];if(o.otros&&o.otros.trim())l.push(o.otros.trim());return l.join(" · ");};
+const OBS_Z_VACIA={pares:[]};
+const PAR_Z_VACIO={marca:"",sinCordones:false,sinPlantillas:false,otros:""};
+// Texto para el mensaje (una línea por par). Acepta también el formato anterior {lista,otros}.
+const lineasObsZapatos=o=>{
+  if(!o)return[];
+  if(Array.isArray(o.pares))return o.pares.map((p,i)=>{
+    const f=[];if(p.sinCordones)f.push("sin cordones");if(p.sinPlantillas)f.push("sin plantillas");if(p.otros&&p.otros.trim())f.push(p.otros.trim());
+    return `Par ${i+1}${p.marca&&p.marca.trim()?` (${p.marca.trim()})`:""}: ${f.join(", ")||"sin observaciones"}`;
+  });
+  const l=[...(o.lista||[])];if(o.otros&&o.otros.trim())l.push(o.otros.trim());return l.length?[l.join(" · ")]:[];
+};
+const textoObsZapatos=o=>lineasObsZapatos(o).join("\n");
+// Devuelve un texto de error si falta información, o "" si está completo
+const errorObsZapatos=o=>{
+  const ps=(o&&o.pares)||[];
+  for(let i=0;i<ps.length;i++){
+    const p=ps[i];
+    if(!p.marca||!p.marca.trim())return `Escribe la marca / descripción del par ${i+1} con observaciones`;
+    if(!p.sinCordones&&!p.sinPlantillas&&!(p.otros&&p.otros.trim()))return `Marca qué le falta al par ${i+1} (cordones, plantillas u otra observación)`;
+  }
+  return "";
+};
+const limpiarObsZapatos=o=>{const ps=((o&&o.pares)||[]).map(p=>({marca:(p.marca||"").trim(),sinCordones:!!p.sinCordones,sinPlantillas:!!p.sinPlantillas,otros:(p.otros||"").trim()}));return ps.length?{pares:ps}:null;};
 const fmtDiaLargo=d=>{try{return new Date(String(d).slice(0,10)+"T12:00:00").toLocaleDateString("es-EC",{weekday:"long",day:"numeric",month:"long"});}catch{return d;}};
-// Recuadro con casillas de observaciones de zapatos (reutilizable)
-function ObsZapatosInput({valor,onChange}){
-  const v=valor||{lista:[],otros:""};
-  const toggle=o=>onChange({...v,lista:v.lista.includes(o)?v.lista.filter(x=>x!==o):[...v.lista,o]});
+function ObsZapatosInput({valor,onChange,maxPares=20}){
+  const v=valor&&Array.isArray(valor.pares)?valor:OBS_Z_VACIA;
+  const n=v.pares.length;
+  const setN=k=>{k=Math.max(0,Math.min(maxPares,k));const ps=[...v.pares];while(ps.length<k)ps.push({...PAR_Z_VACIO});ps.length=k;onChange({pares:ps});};
+  const upd=(i,f,val)=>onChange({pares:v.pares.map((p,j)=>j===i?{...p,[f]:val}:p)});
+  const chk=(on,lbl,fn)=>(
+    <label style={{display:"flex",alignItems:"center",gap:6,background:on?"#fff3e0":"#fff",border:`1.5px solid ${on?"#e65100":"#e0e8f0"}`,borderRadius:8,padding:"5px 10px",cursor:"pointer",fontSize:13}}>
+      <input type="checkbox" checked={on} onChange={fn} style={{width:16,height:16}}/>{lbl}
+    </label>
+  );
   return(<div>
-    <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
-      {OBS_ZAPATOS.map(o=>(
-        <label key={o} style={{display:"flex",alignItems:"center",gap:6,background:v.lista.includes(o)?"#fff3e0":"#f8fbfd",border:`1.5px solid ${v.lista.includes(o)?"#e65100":"#e0e8f0"}`,borderRadius:8,padding:"6px 10px",cursor:"pointer",fontSize:13}}>
-          <input type="checkbox" checked={v.lista.includes(o)} onChange={()=>toggle(o)} style={{width:16,height:16}}/>{o}
-        </label>
-      ))}
+    <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8,flexWrap:"wrap"}}>
+      <span style={{fontSize:13,color:"#1a3c5e",fontWeight:600}}>¿Cuántos pares tienen fallas u observaciones?</span>
+      <div style={{display:"flex",alignItems:"center",gap:6}}>
+        <button style={{...S.btnS,padding:"4px 12px",fontSize:16}} onClick={()=>setN(n-1)}>−</button>
+        <strong style={{minWidth:24,textAlign:"center",fontSize:16}}>{n}</strong>
+        <button style={{...S.btnS,padding:"4px 12px",fontSize:16}} onClick={()=>setN(n+1)}>+</button>
+      </div>
+      {n===0&&<span style={{fontSize:11,color:"#2e7d32"}}>Ninguno — todos completos</span>}
     </div>
-    <input style={S.inp} placeholder="Otros (ej. suela despegada, mancha de tinta, roto en la punta…)" value={v.otros||""} onChange={e=>onChange({...v,otros:e.target.value})}/>
+    {v.pares.map((p,i)=>(
+      <div key={i} style={{background:"#f8fbfd",border:"1px solid #e0e8f0",borderRadius:10,padding:10,marginBottom:8}}>
+        <div style={{fontSize:12,fontWeight:700,color:"#1a3c5e",marginBottom:6}}>👟 Par {i+1}</div>
+        <input style={{...S.inp,marginBottom:6}} placeholder="Marca / descripción (obligatorio) — ej. Nike blancos, Adidas negros" value={p.marca} onChange={e=>upd(i,"marca",e.target.value)}/>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:6}}>
+          {chk(p.sinCordones,"No tiene cordones",()=>upd(i,"sinCordones",!p.sinCordones))}
+          {chk(p.sinPlantillas,"No tiene plantillas",()=>upd(i,"sinPlantillas",!p.sinPlantillas))}
+        </div>
+        <input style={S.inp} placeholder="Otras observaciones (ej. suela despegada, mancha de tinta)" value={p.otros} onChange={e=>upd(i,"otros",e.target.value)}/>
+      </div>
+    ))}
   </div>);
 }
 const msgWa = (v, tipo) => {
@@ -641,8 +680,8 @@ const msgWa = (v, tipo) => {
   const E = EMO;
   const items = (v.items||[]).map(it=>`  ${E.item} ${it.label}${it.piezas>1?` x${it.piezas}`:""}`).join("\n");
   const pend = saldo(v);
-  const obsZ=textoObsZapatos(v.obsZapatos);
-  const obsZLinea=obsZ?`\n👟 *Observaciones de tus zapatos:* ${obsZ}\n${L}`:"";
+  const obsZl=lineasObsZapatos(v.obsZapatos);
+  const obsZLinea=obsZl.length?`\n👟 *Observaciones de tus zapatos:*\n${obsZl.map(x=>`  ${E.item} ${x}`).join("\n")}\n${L}`:"";
   if(tipo==="recibidoPrendas"){
     return `${E.burbuja} *LAVA & LISTO* ${E.burbuja}\n_Lavanderia & Limpieza Especializada_\n${L}\n¡Hola *${v.clienteNombre}*! ${E.saludo}\n\n*Hoy recibimos su servicio de lavandería* ${E.check}\n\n${E.folio} *Folio:* ${v.folio}\n${L}\n*DETALLE DEL SERVICIO:*\n${items}\n${L}${obsZLinea}\n${pend>0?`${E.reloj} *Saldo pendiente:* $${pend.toFixed(2)}`:`${E.check} *Pagado en su totalidad*`}\n${E.fecha} *Su fecha de entrega será:* ${fmtDiaLargo(v.entrega)}\n${L}\n¡Gracias por confiar en nosotros! ${E.corazon}\n${E.pin} Ricaurte, Cuenca`;
   }
@@ -1856,7 +1895,7 @@ function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta,clientes,setClien
         <div style={{display:"flex",gap:8,marginTop:10,flexWrap:"wrap"}}>
           {sig&&sig.id==="entregado"&&<button style={{flex:1,padding:"10px",background:sig.bg,color:sig.color,border:`1.5px solid ${sig.color}`,borderRadius:10,fontWeight:700,fontSize:13,cursor:"pointer"}} onClick={cambiar}>{sig.icon} {sig.label}</button>}
           {v.excepcionPagoPromo&&<div style={{width:"100%",fontSize:11,color:"#8a5a00",background:"#fff8e1",borderRadius:8,padding:"5px 8px"}}>🔑 Promo con pago pendiente autorizada por la jefa · {v.excepcionPagoPromo.motivo}</div>}
-          {(v.estado==="porRecibir")&&<button style={{flex:1,padding:"10px",background:"#f3e8fd",color:"#7c3aed",border:"1.5px solid #7c3aed",borderRadius:10,fontWeight:700,fontSize:13,cursor:"pointer"}} onClick={()=>{const d=new Date();d.setDate(d.getDate()+2);setRecepcion({entrega:fechaLocal(d.toISOString()),obs:v.obsZapatos||{lista:[],otros:""}});}}>📥 Ya dejó las prendas</button>}
+          {(v.estado==="porRecibir")&&<button style={{flex:1,padding:"10px",background:"#f3e8fd",color:"#7c3aed",border:"1.5px solid #7c3aed",borderRadius:10,fontWeight:700,fontSize:13,cursor:"pointer"}} onClick={()=>{const d=new Date();d.setDate(d.getDate()+2);setRecepcion({entrega:fechaLocal(d.toISOString()),obs:v.obsZapatos&&Array.isArray(v.obsZapatos.pares)?v.obsZapatos:OBS_Z_VACIA});}}>📥 Ya dejó las prendas</button>}
           {sig&&sig.id!=="entregado"&&v.estado!=="porRecibir"&&<div style={{flex:1,padding:"10px",background:"#f0f4f8",color:"#888",border:"1.5px dashed #d0dce8",borderRadius:10,fontWeight:600,fontSize:12,textAlign:"center"}}>🏭 Se actualiza desde Producción</div>}
           {!esPag&&<button style={{flex:1,padding:"10px",background:"#e8f5e9",color:"#2e7d32",border:"1.5px solid #2e7d32",borderRadius:10,fontWeight:700,fontSize:13,cursor:"pointer"}} onClick={()=>setShowAb(true)}>💰 Cobrar</button>}
           <button style={{padding:"10px 14px",background:"#f0f4f8",color:"#1a3c5e",border:"none",borderRadius:10,fontSize:12,cursor:"pointer"}} onClick={()=>setTicket(v)}>🧾</button>
@@ -1886,7 +1925,8 @@ function OrdenCard({v,setVentas,addAbono,setTicket,upsertVenta,clientes,setClien
               <button style={{...S.btnC,flex:1}} onClick={()=>setRecepcion(null)}>Cancelar</button>
               <button style={{...S.btnP,flex:2}} onClick={()=>{
                 if(!recepcion.entrega){alert("Elige la fecha de entrega");return;}
-                const obs=textoObsZapatos(recepcion.obs)?{lista:recepcion.obs.lista||[],otros:(recepcion.obs.otros||"").trim()}:null;
+                const eZ=errorObsZapatos(recepcion.obs);if(eZ){alert("👟 "+eZ);return;}
+                const obs=limpiarObsZapatos(recepcion.obs);
                 const act={...v,estado:"recibido",entrega:recepcion.entrega,obsZapatos:obs,prendasRecibidasEn:new Date().toISOString(),prendasRecibidasPor:sesion?.nombre||null};
                 guardarVentaFn(setVentas,upsertVenta,v.folio,x=>({...x,estado:"recibido",entrega:recepcion.entrega,obsZapatos:obs,prendasRecibidasEn:act.prendasRecibidasEn,prendasRecibidasPor:act.prendasRecibidasPor}));
                 setRecepcion(null);setWaRecepcion(act);
@@ -4897,7 +4937,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
   const [cupInput,setCupInput]=useState("");const [cupApl,setCupApl]=useState(null);const [cupErr,setCupErr]=useState(""); // 🎟️ cupón
   const [cuponRecienEmitido,setCuponRecienEmitido]=useState(null); // 🎟️ cupón que se acaba de generar automático, para mostrar botón de WhatsApp
   const [descCumple,setDescCumple]=useState(false); // 🎂 10% cumpleaños
-  const [obsZapatos,setObsZapatos]=useState({lista:[],otros:""}); // 👟 observaciones al recibir zapatos
+  const [obsZapatos,setObsZapatos]=useState(OBS_Z_VACIA); // 👟 observaciones al recibir zapatos (por par)
   const [tienePrendaMancha,setTienePrendaMancha]=useState(null); // null=sin responder, true/false — 🧽 obligatorio antes de registrar
   const [protocoloCumplido,setProtocoloCumplido]=useState(true); // 📋 para Evaluación de Desempeño — checklist de atención al cliente (saludo, confirmar datos, explicar tiempos, despedida)
   const [boletoResena,setBoletoResena]=useState(false); // 🌟 opcional — boleto extra si sigue redes y deja reseña en Google
@@ -5070,6 +5110,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
     if(!cId&&mC==="buscar"){setErr("Selecciona o crea un cliente");return;}
     if(mC==="nuevo"&&!nC.nombre.trim()){setErr("Escribe el nombre del cliente");return;}
     // 🧽 Obligatorio antes de continuar: ¿hay alguna prenda que pueda manchar/destiñir el resto de la carga?
+    if(!sinPrendas){const eZ=errorObsZapatos(obsZapatos);if(eZ){setErr("👟 "+eZ);return;}}
     if(tienePrendaMancha===null){setErr("Falta indicar si hay alguna prenda que pueda manchar o destiñir el resto de la carga (Sí/No)");return;}
     if(tienePrendaMancha&&!obsPrendaMancha.trim()){setErr("Describe cuál es la prenda que puede manchar antes de continuar");return;}
     const bruto=calcT();
@@ -5118,7 +5159,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
       ...(excepcion&&tPago!=="completo"?{excepcionPagoPromo:excepcion}:{}),
       cuponId:cupApl?.id||null,
       prendaManchaAviso:!!tienePrendaMancha,prendaManchaObs:tienePrendaMancha?obsPrendaMancha.trim():null,
-      ...(!sinPrendas&&textoObsZapatos(obsZapatos)?{obsZapatos:{lista:obsZapatos.lista,otros:(obsZapatos.otros||"").trim()}}:{}),
+      ...(!sinPrendas&&limpiarObsZapatos(obsZapatos)?{obsZapatos:limpiarObsZapatos(obsZapatos)}:{}),
       boletoResenaSolicitado:!!boletoResena,protocoloCumplido:!!protocoloCumplido};
     setVentas([v,...ventas]);if(upsertVenta)upsertVenta(v);
     // 🎟️ CUPÓN AUTOMÁTICO — si es la primera venta de este cliente (y no es personal interno, y el
@@ -5181,7 +5222,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
     }
     setWaVenta(v); // WhatsApp obligatorio antes de mostrar el ticket
     setCQ("");setCId(null);setNC({nombre:"",tel:"",cedula:"",email:"",rfc:"",direccion:"",nacimiento:""});setRecordatorioVisto(false);setRecordatorio(null);setDescCumple(false);setImpulsos([]);setCupApl(null);setCupInput("");setCupErr("");
-    setTienePrendaMancha(null);setObsPrendaMancha("");setObsZapatos({lista:[],otros:""});setBoletoResena(false);setProtocoloCumplido(true);
+    setTienePrendaMancha(null);setObsPrendaMancha("");setObsZapatos(OBS_Z_VACIA);setBoletoResena(false);setProtocoloCumplido(true);
     setItems([{servId:servicios[0]?.id,piezas:1,custom:false,esProducto:false,productoId:null,lC:"",pC:""}]);
     setNotas("");setErr("");setAbono("");setTPago("completo");setSinPrendas(false);setExcepcion(null);setExcMot("");
   };
@@ -5329,7 +5370,7 @@ function NuevaVenta({ventas,setVentas,clientes,setClientes,empleadas,setTicket,s
       </Card>
       {!sinPrendas&&items.some(it=>{const lbl=it.custom?it.lC:it.esProducto?"":(servicios.find(x=>x.id===it.servId)?.label||"");return esZapatoItemLbl(lbl);})&&(
         <Card title="👟 Observaciones de los zapatos">
-          <div style={{fontSize:12,color:"#888",marginBottom:8}}>Revisa los zapatos con el cliente y marca lo que aplique. Sale en el mensaje de WhatsApp y en la orden.</div>
+          <div style={{fontSize:12,color:"#888",marginBottom:8}}>Revisa los zapatos con el cliente. Indica cuántos pares tienen fallas y, por cada uno, la marca y qué le falta. Sale en el mensaje de WhatsApp y en la orden.</div>
           <ObsZapatosInput valor={obsZapatos} onChange={setObsZapatos}/>
         </Card>
       )}
